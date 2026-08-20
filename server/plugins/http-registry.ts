@@ -32,8 +32,15 @@ interface RouteEntry {
   handler: PluginRouteHandler;
 }
 
-/** pluginId -> "METHOD /path" -> entry. Insertion order preserved (Map), so
- *  dispatch tries routes in registration order for a given plugin. */
+/**
+ * pluginId -> "METHOD /path" -> entry. Insertion order preserved (Map), so
+ * dispatch tries routes in registration order for a given plugin.
+ *
+ * FIRST MATCH WINS, and there is no specificity ranking — unlike express's own
+ * router, a param pattern registered before a literal one permanently shadows
+ * it. Register `/coverage/latest` BEFORE `/coverage/:task`, or the literal
+ * route is unreachable. Deterministic, but a cheap footgun to hit.
+ */
 const table = new Map<string, Map<string, RouteEntry>>();
 
 function normalizePath(path: string): string {
@@ -62,7 +69,19 @@ function matchPath(pattern: string, actual: string): Record<string, string> | nu
     const p = patternSegs[i];
     const a = actualSegs[i];
     if (p.startsWith(':')) {
-      params[p.slice(1)] = decodeURIComponent(a);
+      // decodeURIComponent throws URIError on a malformed percent-sequence
+      // (`%ZZ`). This runs inside the router's synchronous middleware, BEFORE
+      // the Promise wrapper around the handler call, so an unguarded throw
+      // escapes to express's error middleware and any client could turn a
+      // would-be 404 into a 500 — plus an error-level log line — for free.
+      // A segment that cannot be decoded is simply not a match.
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(a);
+      } catch {
+        return null;
+      }
+      params[p.slice(1)] = decoded;
     } else if (p !== a) {
       return null;
     }

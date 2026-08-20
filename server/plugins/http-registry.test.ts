@@ -165,6 +165,35 @@ describe('http-registry', () => {
     expect(pluginRouteCounts()).toEqual({});
   });
 
+  // Review finding on SHR-253: decodeURIComponent throws URIError on a
+  // malformed percent-sequence, synchronously inside the router middleware and
+  // outside the Promise wrapper around the handler. Unguarded, any client could
+  // turn a 404 into a 500 plus an error-level log line for free.
+  it('404s a malformed percent-sequence in a param instead of 500ing', async () => {
+    registerPluginRoute('plugin-a', 'GET', '/coverage/:task', (_req, res) => {
+      res.status(200).json({ ok: true });
+    });
+
+    const res = await request(makeApp()).get('/api/p/plugin-a/coverage/%ZZ');
+
+    expect(res.status).toBe(404);
+  });
+
+  // First match wins with no specificity ranking, unlike express's own router.
+  // Pinned so the ordering rule cannot change silently under plugin authors.
+  it('dispatches in registration order, so a param route shadows a later literal', async () => {
+    registerPluginRoute('plugin-a', 'GET', '/coverage/:task', (_req, res) => {
+      res.status(200).json({ matched: 'param' });
+    });
+    registerPluginRoute('plugin-a', 'GET', '/coverage/latest', (_req, res) => {
+      res.status(200).json({ matched: 'literal' });
+    });
+
+    const res = await request(makeApp()).get('/api/p/plugin-a/coverage/latest');
+
+    expect(res.body).toEqual({ matched: 'param' });
+  });
+
   it('resetPluginRoutes clears the whole table', () => {
     registerPluginRoute('plugin-a', 'GET', '/one', () => {});
     registerPluginRoute('plugin-b', 'GET', '/two', () => {});
