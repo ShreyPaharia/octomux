@@ -128,6 +128,12 @@ once before the loader runs.
 
 ## Non-goals (cut by review — do not reintroduce without a written trigger)
 
+> **SUPERSEDED, 2026-08-20:** "Unload / hot reload — Express 5 cannot unmount" no longer
+> holds. `plans/2026-08-20-plugin-runtime-p0.md` (SHR-253) replaced the `apiRouter` handout
+> with a route lookup table, so nothing needs unmounting, and SHR-254 shipped unmount +
+> reload on top. A plugin still declaring `apiRouter` remains unloadable. The rest of the
+> non-goals below stand.
+
 | Cut                                                  | Reason                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ctx.isolation`                                      | Zero of three on the seam test: no definition, no second provider, no consumer boundary. Worktree+tmux is called concretely from `task-engine/launch.ts`, `terminals.ts`, `lifecycle/resume-task.ts`. It is also the only containment octomux has.                                             |

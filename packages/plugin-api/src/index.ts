@@ -234,6 +234,12 @@ export interface LoadReport {
    *  `LoadReport` literals (older persisted reports, fixtures) stay valid —
    *  `loadPlugins()` itself always sets it. */
   loadedAt?: string;
+  /** Route count per plugin id, for `octomux doctor` (SHR-253). Written by
+   *  `server/index.ts` after the loader runs, from `pluginRouteCounts()`.
+   *  Optional for the same reason as `loadedAt`: a report persisted by an
+   *  older build won't have it, and doctor omits the count rather than
+   *  reporting zero. */
+  routeCounts?: Record<string, number>;
 }
 
 export const PLUGIN_API_VERSION = 0;
