@@ -88,6 +88,13 @@ export interface PluginRequest {
   readonly params: Record<string, string>;
   readonly query: Record<string, unknown>;
   readonly body: unknown;
+  /**
+   * Lowercased header names, as express normalizes them. Without this a plugin
+   * route cannot be authenticated at all — which is not a theoretical gap: the
+   * first real migration off `apiRouter` (pr-extract's bearer-gated `/emit`)
+   * was blocked on exactly this.
+   */
+  readonly headers: Record<string, string | string[] | undefined>;
 }
 export interface PluginResponse {
   status(code: number): PluginResponse;

@@ -13,10 +13,21 @@ import type { LoadReport } from '@octomux/plugin-api';
  * zero plugins". Declared locally so this file type-checks against the shape
  * doctor needs today; once the upstream type lands this becomes a no-op
  * (still-correct) intersection and can be dropped.
+ *
+ * `routeCounts` (SHR-253, keyed by plugin id) is the same story: `LoadReport`
+ * is pinned and off-limits (plugin-api types only), and the write side —
+ * snapshotting `pluginRouteCounts()` from `server/plugins/http-registry.ts`
+ * into the persisted report — has to happen in `server/index.ts` right after
+ * `loadPlugins()` resolves, which is outside this task's owned files (that
+ * boot-sequencing wiring is SHR-254/lifecycle territory). Declared here so
+ * rendering is ready the moment a report actually carries the field; until
+ * then every report reads as `routeCounts: undefined` and the per-plugin
+ * line below simply omits the route count.
  */
 type LoadReportWithMeta = LoadReport & {
   manifestError?: string;
   loadedAt?: string;
+  routeCounts?: Record<string, number>;
 };
 
 // A `failed[].error` string comes straight from a plugin's own thrown Error —
@@ -127,8 +138,11 @@ export function registerDoctor(program: Command): void {
         console.log(chalk.dim('  none'));
       } else {
         for (const p of report.loaded) {
+          const routeCount = report.routeCounts?.[p.id];
+          const routesSuffix =
+            routeCount === undefined ? '' : ` — ${routeCount} route${routeCount === 1 ? '' : 's'}`;
           console.log(
-            `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms`,
+            `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms${routesSuffix}`,
           );
         }
       }

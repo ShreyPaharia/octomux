@@ -15,32 +15,129 @@
  * Task A fills in the bodies; nothing here may change shape.
  */
 import { Router } from 'express';
-import type { HttpMethod, PluginRouteHandler } from '@octomux/plugin-api';
+import type { Request, Response, NextFunction } from 'express';
+import type {
+  HttpMethod,
+  PluginRequest,
+  PluginResponse,
+  PluginRouteHandler,
+} from '@octomux/plugin-api';
+import { childLogger } from '../logger.js';
 
-const notImplemented = (what: string): never => {
-  throw new Error(`${what}: not implemented — SHR-253 (task A) owns this module`);
-};
+const logger = childLogger('plugins/http-registry');
+
+interface RouteEntry {
+  method: HttpMethod;
+  path: string; // normalized: always starts with '/'
+  handler: PluginRouteHandler;
+}
+
+/** pluginId -> "METHOD /path" -> entry. Insertion order preserved (Map), so
+ *  dispatch tries routes in registration order for a given plugin. */
+const table = new Map<string, Map<string, RouteEntry>>();
+
+function normalizePath(path: string): string {
+  if (path === '') return '/';
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+function routeKey(method: HttpMethod, path: string): string {
+  return `${method.toUpperCase()} ${path}`;
+}
+
+/**
+ * Matches a registered pattern (`/coverage/:task`) against an actual request
+ * path (`/coverage/123`), segment by segment. No wildcards, no optional
+ * segments, no regex — plugin route paths are simple `:param` shapes, and a
+ * hand-rolled segment matcher is the whole job (`path-to-regexp` isn't a
+ * declared dependency of this package; express only carries it transitively).
+ * Returns the extracted params on a match, `null` on a miss.
+ */
+function matchPath(pattern: string, actual: string): Record<string, string> | null {
+  const patternSegs = pattern.split('/').filter(Boolean);
+  const actualSegs = actual.split('/').filter(Boolean);
+  if (patternSegs.length !== actualSegs.length) return null;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < patternSegs.length; i++) {
+    const p = patternSegs[i];
+    const a = actualSegs[i];
+    if (p.startsWith(':')) {
+      params[p.slice(1)] = decodeURIComponent(a);
+    } else if (p !== a) {
+      return null;
+    }
+  }
+  return params;
+}
 
 /** Registers one route for a plugin. Throws on a duplicate `METHOD path` for
  *  the same plugin — silent last-write-wins hides a real authoring bug. */
 export function registerPluginRoute(
-  _pluginId: string,
-  _method: HttpMethod,
-  _path: string,
-  _handler: PluginRouteHandler,
+  pluginId: string,
+  method: HttpMethod,
+  path: string,
+  handler: PluginRouteHandler,
 ): void {
-  notImplemented('registerPluginRoute');
+  const normalizedMethod = method.toUpperCase() as HttpMethod;
+  const normalizedPath = normalizePath(path);
+  const key = routeKey(normalizedMethod, normalizedPath);
+
+  let pluginRoutes = table.get(pluginId);
+  if (!pluginRoutes) {
+    pluginRoutes = new Map();
+    table.set(pluginId, pluginRoutes);
+  }
+  if (pluginRoutes.has(key)) {
+    throw new Error(`plugin "${pluginId}": route "${key}" is already registered`);
+  }
+  pluginRoutes.set(key, { method: normalizedMethod, path: normalizedPath, handler });
+  logger.info(
+    { plugin_id: pluginId, method: normalizedMethod, path: normalizedPath },
+    'plugin route registered',
+  );
 }
 
 /** Drops every route a plugin registered. Safe to call for a plugin that
  *  registered none — unmount calls it unconditionally. */
-export function unregisterPluginRoutes(_pluginId: string): void {
-  notImplemented('unregisterPluginRoutes');
+export function unregisterPluginRoutes(pluginId: string): void {
+  const pluginRoutes = table.get(pluginId);
+  if (!pluginRoutes) return;
+  table.delete(pluginId);
+  logger.info(
+    { plugin_id: pluginId, route_count: pluginRoutes.size },
+    'plugin routes unregistered',
+  );
 }
 
 /** Route count per plugin id, for `octomux doctor`. */
 export function pluginRouteCounts(): Record<string, number> {
-  return notImplemented('pluginRouteCounts');
+  const counts: Record<string, number> = {};
+  for (const [pluginId, pluginRoutes] of table) {
+    counts[pluginId] = pluginRoutes.size;
+  }
+  return counts;
+}
+
+function toPluginRequest(req: Request, params: Record<string, string>): PluginRequest {
+  return {
+    params,
+    query: req.query as Record<string, unknown>,
+    body: req.body,
+    headers: req.headers as Record<string, string | string[] | undefined>,
+  };
+}
+
+function toPluginResponse(res: Response): PluginResponse {
+  const pluginRes: PluginResponse = {
+    status(code: number) {
+      res.status(code);
+      return pluginRes;
+    },
+    json(body: unknown) {
+      res.json(body);
+    },
+  };
+  return pluginRes;
 }
 
 /**
@@ -48,19 +145,44 @@ export function pluginRouteCounts(): Record<string, number> {
  * unmounted. A path with no matching row 404s here rather than falling through
  * to the rest of the app — `/api/p/*` belongs to plugins entirely.
  *
- * STEP-0 ships the empty-table behaviour (every path 404s) rather than a
- * throwing stub: this sits on the boot path via `setupRoutes()`, and ~40
- * supertest suites call `createApp()` directly. A stub that throws here takes
- * every one of them down. Task A replaces the body with the real table lookup.
+ * Dispatch is a table lookup, not per-route Express registration: a `router.use`
+ * layer contributes nothing to `server/registry/route-inventory.ts`'s walk (see
+ * that file's own doc comment), which is exactly what we want — /api/p is a
+ * table, not a declared surface, and the table can change shape without
+ * touching Express's route stack (which express 5 can't un-mount from anyway).
  */
 export function createPluginParentRouter(): Router {
   const router: Router = Router();
-  // Path-less terminal middleware, deliberately NOT `router.all(<pattern>, ...)`:
-  // `server/registry/route-inventory.ts` walks the express layer stack and
-  // assumes every layer's path is a string, so a RegExp route here crashes the
-  // drift test. A `use` layer contributes no route entry at all, which is also
-  // what we want — /api/p is a table, not a declared surface.
-  router.use((_req, res) => {
+  router.use((req: Request, res: Response, next: NextFunction) => {
+    const segments = req.path.split('/').filter(Boolean);
+    const pluginId = segments[0];
+    const pluginRoutes = pluginId ? table.get(pluginId) : undefined;
+    if (!pluginRoutes) {
+      res.status(404).json({ error: 'no such plugin route' });
+      return;
+    }
+
+    const subPath = `/${segments.slice(1).join('/')}`;
+    const method = req.method.toUpperCase() as HttpMethod;
+    for (const entry of pluginRoutes.values()) {
+      if (entry.method !== method) continue;
+      const params = matchPath(entry.path, subPath);
+      if (!params) continue;
+
+      const pluginReq = toPluginRequest(req, params);
+      const pluginRes = toPluginResponse(res);
+      Promise.resolve()
+        .then(() => entry.handler(pluginReq, pluginRes))
+        .catch((err: unknown) => {
+          logger.warn(
+            { plugin_id: pluginId, method, path: subPath, err },
+            'plugin route handler threw',
+          );
+          next(err);
+        });
+      return;
+    }
+
     res.status(404).json({ error: 'no such plugin route' });
   });
   return router;
@@ -68,5 +190,5 @@ export function createPluginParentRouter(): Router {
 
 /** Test-only: clears the whole table. */
 export function resetPluginRoutes(): void {
-  notImplemented('resetPluginRoutes');
+  table.clear();
 }
