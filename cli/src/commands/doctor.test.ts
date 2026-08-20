@@ -80,6 +80,46 @@ describe('octomux doctor', () => {
     expect(output).toContain('apply');
   });
 
+  it('prints the route count per plugin when the report carries one', async () => {
+    // Cast: `routeCounts` lands on LoadReport via a sibling change not yet
+    // merged — see the type note in doctor.ts.
+    writeReport({
+      loaded: [
+        {
+          id: 'coverage-bot',
+          name: 'coverage-bot-plugin',
+          version: '1.0.0',
+          resolvedPath: '/x',
+          order: 0,
+          applyMs: 1.1,
+        },
+        {
+          id: 'no-routes',
+          name: 'no-routes-plugin',
+          version: '1.0.0',
+          resolvedPath: '/y',
+          order: 1,
+          applyMs: 0.5,
+        },
+      ],
+      failed: [],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+      routeCounts: { 'coverage-bot': 3 },
+    } as LoadReport);
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('coverage-bot (coverage-bot-plugin@1.0.0)');
+    expect(output).toContain('3 routes');
+    // A plugin with no entry in routeCounts gets no route-count suffix at all.
+    expect(output).toContain('no-routes (no-routes-plugin@1.0.0) — 0.5ms\n');
+  });
+
   it('reports JSON mode with the raw persisted report', async () => {
     const report: LoadReport = {
       loaded: [],

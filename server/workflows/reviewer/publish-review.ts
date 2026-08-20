@@ -8,6 +8,7 @@ import { recordPublishedReview } from '../../repositories/published-reviews.js';
 import { postPullRequestReview } from '../../github-client.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
+import { putCoreFact } from '../../plugins/facts.js';
 import { getTask, inTransaction } from '../../repositories/index.js';
 import type { PublishedReviewVerdict } from '../../types.js';
 import type { InlineCommentRow } from '../../repositories/inline-comments.js';
@@ -138,6 +139,19 @@ export async function publishReview(
     type: 'review:published',
     payload: { taskId, github_review_url: publishedReview.github_review_url },
   });
+
+  // The one real `core:` fact producer today (SHR-255's "Done when": a
+  // plugin subscribes to a core fact and fires on it). Same payload shape as
+  // the broadcast above. A facts-log failure must not undo a review that's
+  // already posted to GitHub and persisted — log and move on, never throw.
+  try {
+    await putCoreFact(taskId, 'core:review.published', {
+      taskId,
+      github_review_url: publishedReview.github_review_url,
+    });
+  } catch (err) {
+    logger.warn({ task_id: taskId, err }, 'failed to publish core:review.published fact');
+  }
 
   logger.info(
     {

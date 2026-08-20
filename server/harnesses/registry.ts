@@ -44,6 +44,16 @@ export function resetHarnesses(): void {
   frozen = false;
 }
 
+/** Removes one plugin-registered harness. Refuses (logs a warn, no-op) on any
+ *  `CORE_HARNESS_IDS` member — core harnesses are un-unregisterable. */
+export function unregisterHarness(id: string): boolean {
+  if ((CORE_HARNESS_IDS as readonly string[]).includes(id)) {
+    logger.warn({ harness_id: id }, 'refusing to unregister core harness');
+    return false;
+  }
+  return harnesses.delete(id);
+}
+
 export function getHarness(id: string | null | undefined): Harness {
   const key = id ?? DEFAULT_HARNESS_ID;
   const h = harnesses.get(key);

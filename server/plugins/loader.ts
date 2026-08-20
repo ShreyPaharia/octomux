@@ -18,16 +18,55 @@
  * "boot-order contract"). This loader only calls `apply(ctx)`.
  */
 import { createRequire } from 'module';
+import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
+import { broadcast } from '../events.js';
 import { readManifest } from './manifest.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
-import { createPluginContext, revokePluginContext } from './context.js';
-import type { LoadReport, LoadedPlugin, PluginContext } from '@octomux/plugin-api';
+import { createPluginContext } from './context.js';
+import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
+import type { UnmountReport } from './lifecycle.js';
+import type { LoadReport, LoadedPlugin, PluginContext, PluginRow } from '@octomux/plugin-api';
 
 const logger = childLogger('plugins/loader');
 
 const DEFAULT_APPLY_TIMEOUT_MS = 10_000;
+
+/** Runtime handle for one currently-mounted plugin — everything `unloadPlugin`/
+ *  `reloadPlugin` need to tear it down or re-mount it. `mod` is the already-
+ *  evaluated module object (kept alive by this reference) — `reloadPlugin`
+ *  uses it to roll a failed reload back to the previously-working version
+ *  without re-importing anything. */
+export interface MountedPlugin {
+  ctx: PluginContext;
+  row: PluginRow;
+  resolvedPath: string;
+  mod: Record<string, unknown>;
+}
+
+/** pluginId -> live mount state, for every plugin currently applied and not
+ *  yet unmounted. Populated by `loadPlugins()` at boot and by `reloadPlugin()`
+ *  below; consumed by `unloadPlugin()`/`reloadPlugin()` and the (future) dev
+ *  file watcher to find what to tear down before remounting. */
+const mounted = new Map<string, MountedPlugin>();
+
+/** Runtime state for a currently-mounted plugin, or `undefined` if it was
+ *  never loaded, failed to load, or has already been unloaded. */
+export function getMountedPlugin(id: string): MountedPlugin | undefined {
+  return mounted.get(id);
+}
+
+/** Every currently-mounted plugin id. */
+export function listMountedPluginIds(): string[] {
+  return Array.from(mounted.keys());
+}
+
+/** Test-only: clears mount tracking without touching the live registries —
+ *  pair with each registry's own `reset*()` for a full reset between tests. */
+export function resetMountedPlugins(): void {
+  mounted.clear();
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -98,6 +137,176 @@ function pluginApply(mod: Record<string, unknown>): ((ctx: PluginContext) => unk
   const fromDefault = (mod.default as Record<string, unknown> | undefined)?.apply;
   if (typeof fromDefault === 'function') return fromDefault as (ctx: PluginContext) => unknown;
   return null;
+}
+
+type LoadOneResult =
+  | {
+      ok: true;
+      loaded: Omit<LoadedPlugin, 'order'>;
+      ctx: PluginContext;
+      resolvedPath: string;
+      mod: Record<string, unknown>;
+    }
+  | { ok: false; failed: LoadReport['failed'][number] };
+
+type ResolveImportResult =
+  | { ok: true; mod: Record<string, unknown>; resolvedPath: string }
+  | { ok: false; failed: LoadReport['failed'][number] };
+
+/**
+ * Resolves and imports ONE manifest row's module — split out from applying it
+ * so `reloadPlugin()`'s rollback path can re-apply an already-resolved OLD
+ * module without re-resolving/re-importing it. Never throws; failure becomes
+ * the `{ ok: false }` branch, matching `loadPlugins()`'s per-row isolation
+ * policy.
+ *
+ * `importPath` is a seam: `reloadPlugin()` passes a cache-busted specifier so
+ * a dev edit to a local-path plugin's source is actually re-evaluated — the
+ * ESM module cache is keyed on the exact resolved specifier, and importing
+ * the same path a second time silently hands back the stale, already-
+ * evaluated module.
+ */
+async function resolveAndImportRow(
+  row: PluginRow,
+  resolve: (name: string) => Promise<string>,
+  resolveFrom: string,
+  applyTimeoutMs: number,
+  importPath: (resolvedPath: string) => Promise<Record<string, unknown>>,
+): Promise<ResolveImportResult> {
+  let resolvedPath: string;
+  try {
+    resolvedPath = await resolve(row.name);
+  } catch (err) {
+    logger.warn({ id: row.id, name: row.name, err }, 'plugin resolve failed');
+    return {
+      ok: false,
+      failed: { id: row.id, name: row.name, error: errorMessage(err), phase: 'resolve' },
+    };
+  }
+
+  // Reject bare-name resolutions that escaped the plugin prefix.
+  // `createRequire` walks up the directory tree, so a package not actually
+  // installed under `resolveFrom` (`pluginModulesDir()`) can still resolve
+  // from `~/node_modules` or `/node_modules` — an unmanaged location — and
+  // silently report `loaded`. Absolute-path rows (the documented dev loop)
+  // are intentionally outside the prefix, so only bare-name resolutions are
+  // checked.
+  if (!path.isAbsolute(row.name)) {
+    const rel = path.relative(resolveFrom, resolvedPath);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      const message = `resolved path "${resolvedPath}" escapes the plugin prefix "${resolveFrom}"`;
+      logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
+      return {
+        ok: false,
+        failed: { id: row.id, name: row.name, error: message, phase: 'resolve' },
+      };
+    }
+  }
+
+  let mod: Record<string, unknown>;
+  try {
+    // Timeout-wrapped like apply() below. Does NOT save you from a plugin
+    // that blocks the event loop synchronously at import time, or calls
+    // process.exit() — those still win regardless of any timeout here;
+    // surviving that needs running the plugin in a worker, deliberately
+    // out of scope for this loader.
+    mod = await withTimeout(importPath(resolvedPath), applyTimeoutMs, `plugin "${row.id}" import`);
+  } catch (err) {
+    logger.warn({ id: row.id, name: row.name, resolvedPath, err }, 'plugin import failed');
+    return {
+      ok: false,
+      failed: { id: row.id, name: row.name, error: errorMessage(err), phase: 'import' },
+    };
+  }
+
+  return { ok: true, mod, resolvedPath };
+}
+
+/**
+ * Applies an already-resolved/imported module for a row — the second half of
+ * what used to be `loadOneRow()`, split out so `reloadPlugin()`'s rollback
+ * path can re-apply the OLD module (still in memory) against a fresh context
+ * without touching disk again.
+ *
+ * On failure, unmounts whatever the plugin managed to register before it
+ * threw/timed out (SHR-254 review finding: a partial `apply()` used to only
+ * revoke the context, leaking every registration made before the throw and
+ * wedging the next reload against "already registered"/"already defined").
+ * `unmountPlugin` is safe to call here even though this plugin was never
+ * added to `mounted` — every registry's `unregisterPlugin*` is a no-op-safe
+ * delete, and `unmountPlugin` itself documents being safe when nothing was
+ * released.
+ */
+async function applyResolvedModule(
+  row: PluginRow,
+  mod: Record<string, unknown>,
+  resolvedPath: string,
+  applyTimeoutMs: number,
+): Promise<LoadOneResult> {
+  const apply = pluginApply(mod);
+  if (!apply) {
+    const message = `plugin module has no apply() export`;
+    logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
+    return { ok: false, failed: { id: row.id, name: row.name, error: message, phase: 'import' } };
+  }
+
+  // `start` is measured right here, not before resolve()/import() above —
+  // `applyMs` on `LoadedPlugin` should mean what it says.
+  const start = performance.now();
+  const ctx = createPluginContext(row.id);
+  try {
+    await withTimeout(Promise.resolve(apply(ctx)), applyTimeoutMs, `plugin "${row.id}" apply()`);
+  } catch (err) {
+    // A timed-out apply() races on, uncancelled, in the background. Tear
+    // down whatever it already registered AND revoke the context (via
+    // unmountPlugin's own disposePluginContext step) so neither a late
+    // registration after the deadline, nor a leftover registration from
+    // before the throw, can survive a plugin reported `failed`.
+    await unmountPlugin(row.id, ctx);
+    logger.warn({ id: row.id, name: row.name, err }, 'plugin apply() failed');
+    return {
+      ok: false,
+      failed: { id: row.id, name: row.name, error: errorMessage(err), phase: 'apply' },
+    };
+  }
+
+  // SHR-256: a successful mount changes what `GET /api/plugin-ui/contributions`
+  // returns (this plugin may have contributed panels), so tell clients to
+  // refetch. Covers every path that ends here: initial boot load, an
+  // explicit reload, and reloadPlugin's rollback re-apply of the old module.
+  broadcast({ type: 'plugin:ui-updated', payload: { pluginId: row.id } });
+
+  return {
+    ok: true,
+    loaded: {
+      id: row.id,
+      name: row.name,
+      version: row.version ?? 'unknown',
+      resolvedPath,
+      applyMs: performance.now() - start,
+    },
+    ctx,
+    resolvedPath,
+    mod,
+  };
+}
+
+/**
+ * Resolves, imports, and applies ONE manifest row — the exact body
+ * `loadPlugins()`'s boot loop runs per row, factored out so `reloadPlugin()`
+ * can run the identical sequence for a single row without a whole-manifest
+ * pass. Never throws; failure becomes the `{ ok: false }` branch.
+ */
+async function loadOneRow(
+  row: PluginRow,
+  resolve: (name: string) => Promise<string>,
+  resolveFrom: string,
+  applyTimeoutMs: number,
+  importPath: (resolvedPath: string) => Promise<Record<string, unknown>> = (p) => import(p),
+): Promise<LoadOneResult> {
+  const resolved = await resolveAndImportRow(row, resolve, resolveFrom, applyTimeoutMs, importPath);
+  if (!resolved.ok) return resolved;
+  return applyResolvedModule(row, resolved.mod, resolved.resolvedPath, applyTimeoutMs);
 }
 
 /**
@@ -184,79 +393,19 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
       continue;
     }
 
-    let resolvedPath: string;
-    try {
-      resolvedPath = await resolve(row.name);
-    } catch (err) {
-      logger.warn({ id: row.id, name: row.name, err }, 'plugin resolve failed');
-      failed.push({ id: row.id, name: row.name, error: errorMessage(err), phase: 'resolve' });
+    const result = await loadOneRow(row, resolve, opts.resolveFrom, applyTimeoutMs);
+    if (!result.ok) {
+      failed.push(result.failed);
       continue;
     }
 
-    // Reject bare-name resolutions that escaped the plugin prefix.
-    // `createRequire` walks up the directory tree, so a package not actually
-    // installed under `resolveFrom` (`pluginModulesDir()`) can still resolve
-    // from `~/node_modules` or `/node_modules` — an unmanaged location — and
-    // silently report `loaded`. Absolute-path rows (the documented dev loop)
-    // are intentionally outside the prefix, so only bare-name resolutions are
-    // checked.
-    if (!path.isAbsolute(row.name)) {
-      const rel = path.relative(opts.resolveFrom, resolvedPath);
-      if (rel.startsWith('..') || path.isAbsolute(rel)) {
-        const message = `resolved path "${resolvedPath}" escapes the plugin prefix "${opts.resolveFrom}"`;
-        logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
-        failed.push({ id: row.id, name: row.name, error: message, phase: 'resolve' });
-        continue;
-      }
-    }
-
-    let mod: Record<string, unknown>;
-    try {
-      // Timeout-wrapped like apply() below. Does NOT save you from a plugin
-      // that blocks the event loop synchronously at import time, or calls
-      // process.exit() — those still win regardless of any timeout here;
-      // surviving that needs running the plugin in a worker, deliberately
-      // out of scope for this loader.
-      mod = await withTimeout(import(resolvedPath), applyTimeoutMs, `plugin "${row.id}" import`);
-    } catch (err) {
-      logger.warn({ id: row.id, name: row.name, resolvedPath, err }, 'plugin import failed');
-      failed.push({ id: row.id, name: row.name, error: errorMessage(err), phase: 'import' });
-      continue;
-    }
-
-    const apply = pluginApply(mod);
-    if (!apply) {
-      const message = `plugin module has no apply() export`;
-      logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
-      failed.push({ id: row.id, name: row.name, error: message, phase: 'import' });
-      continue;
-    }
-
-    // `start` is measured right here, not before resolve()/import() above —
-    // `applyMs` on `LoadedPlugin` should mean what it says.
-    const start = performance.now();
-    const ctx = createPluginContext(row.id);
-    try {
-      await withTimeout(Promise.resolve(apply(ctx)), applyTimeoutMs, `plugin "${row.id}" apply()`);
-    } catch (err) {
-      // A timed-out apply() races on, uncancelled, in the background. Revoke
-      // the context now so a late registration after the deadline can never
-      // reach the live registries — a plugin reported `failed` must not be
-      // able to silently install a harness/provider/workflow later.
-      revokePluginContext(ctx);
-      logger.warn({ id: row.id, name: row.name, err }, 'plugin apply() failed');
-      failed.push({ id: row.id, name: row.name, error: errorMessage(err), phase: 'apply' });
-      continue;
-    }
-
-    loaded.push({
-      id: row.id,
-      name: row.name,
-      version: row.version ?? 'unknown',
-      resolvedPath,
-      order: order++,
-      applyMs: performance.now() - start,
+    mounted.set(row.id, {
+      ctx: result.ctx,
+      row,
+      resolvedPath: result.resolvedPath,
+      mod: result.mod,
     });
+    loaded.push({ ...result.loaded, order: order++ });
   }
 
   return {
@@ -265,5 +414,272 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
     manifestPath: opts.manifestPath,
     safeMode,
     loadedAt: new Date().toISOString(),
+  };
+}
+
+export type UnloadResult = { ok: true; report: UnmountReport } | { ok: false; reason: string };
+
+/**
+ * Unmounts a currently-mounted plugin: runs `lifecycle.ts`'s reverse teardown
+ * sequence and drops it from `mounted`. Refuses without touching anything if
+ * the plugin isn't mounted, or if it declared `WorkflowType.apiRouter`
+ * (`getPluginUnloadability` — express 5 cannot unmount a Router).
+ */
+export async function unloadPlugin(id: string): Promise<UnloadResult> {
+  const entry = mounted.get(id);
+  if (!entry) {
+    return { ok: false, reason: `plugin "${id}" is not currently mounted` };
+  }
+
+  const unloadability = getPluginUnloadability(id);
+  if (!unloadability.unloadable) {
+    return { ok: false, reason: unloadability.reason ?? `plugin "${id}" cannot be unloaded` };
+  }
+
+  const report = await unmountPlugin(id, entry.ctx);
+  mounted.delete(id);
+  return { ok: true, report };
+}
+
+export interface ReloadPluginOptions {
+  manifestPath: string;
+  resolveFrom: string;
+  id: string;
+  /** TEST SEAM, same as `LoadPluginsOptions.resolve`. */
+  resolve?: (name: string) => Promise<string>;
+  applyTimeoutMs?: number;
+}
+
+export type ReloadResult =
+  | { ok: true; loaded: LoadedPlugin }
+  | {
+      ok: false;
+      reason: string;
+      unloadable?: false;
+      /**
+       * Only meaningful when a previously-working mount existed and the new
+       * version failed to apply (i.e. `unloadable` is not set): `true` means
+       * the old version was successfully re-applied and is live again;
+       * `false` means restoring it ALSO failed and the plugin is now fully
+       * unmounted. `undefined` means there was nothing to restore (fresh
+       * mount failure, or refusal before any teardown happened).
+       */
+      restored?: boolean;
+    };
+
+/**
+ * The actual reload sequence for one plugin id — everything `reloadPlugin()`
+ * does except serializing concurrent calls (see below). Split out so the
+ * public `reloadPlugin()` can chain overlapping calls onto this rather than
+ * running two of these concurrently for the same id.
+ *
+ * Unmounts the plugin if it's currently mounted, then mounts it fresh from
+ * the manifest row's CURRENT on-disk code. Cache-busts the import (`?t=<epoch
+ * ms>` query on the specifier) so a local-path row's edited source is
+ * actually re-evaluated rather than served stale from the ESM module cache
+ * (verified against bun's dynamic `import()` — a distinct query string is a
+ * distinct module identity).
+ *
+ * Refuses (no unmount, no remount) if the row is missing/disabled in the
+ * manifest, or if the currently-mounted instance is `unloadable: false`.
+ *
+ * Not atomic by nature (unmount, then a real import + apply happen in
+ * between) — if the new version fails, the previously-mounted module
+ * reference (captured before teardown) is re-applied against a fresh context
+ * to restore the old working state rather than leaving the plugin dark. See
+ * `ReloadResult.restored` for how that outcome is reported.
+ */
+async function reloadPluginOnce(opts: ReloadPluginOptions): Promise<ReloadResult> {
+  let manifest;
+  try {
+    manifest = readManifest(opts.manifestPath);
+  } catch (err) {
+    return { ok: false, reason: `manifest unreadable: ${errorMessage(err)}` };
+  }
+
+  const row = manifest.plugins.find((r) => r.id === opts.id);
+  if (!row) {
+    return { ok: false, reason: `no plugin with id "${opts.id}" in the manifest` };
+  }
+  if (row.disabled) {
+    return { ok: false, reason: `plugin "${opts.id}" is disabled in the manifest` };
+  }
+
+  // Captured BEFORE any teardown — `unloadPlugin` below deletes this same
+  // entry from `mounted`, but the module object it references stays alive as
+  // long as we hold this reference, so a failed reload can still re-apply it.
+  const previous = mounted.get(opts.id);
+
+  if (previous) {
+    const unloaded = await unloadPlugin(opts.id);
+    if (!unloaded.ok) {
+      return { ok: false, reason: unloaded.reason, unloadable: false };
+    }
+  }
+
+  const resolve = opts.resolve ?? ((name: string) => resolveViaAnchor(opts.resolveFrom, name));
+  const applyTimeoutMs = opts.applyTimeoutMs ?? DEFAULT_APPLY_TIMEOUT_MS;
+  const cacheBust = Date.now();
+  const result = await loadOneRow(
+    row,
+    resolve,
+    opts.resolveFrom,
+    applyTimeoutMs,
+    (p) => import(`${p}?t=${cacheBust}`),
+  );
+  if (result.ok) {
+    mounted.set(row.id, {
+      ctx: result.ctx,
+      row,
+      resolvedPath: result.resolvedPath,
+      mod: result.mod,
+    });
+    return { ok: true, loaded: { ...result.loaded, order: 0 } };
+  }
+
+  // New version failed. Nothing was previously mounted (a fresh-install
+  // failure, or the row itself never applied before) — there is nothing to
+  // roll back to.
+  if (!previous) {
+    return { ok: false, reason: result.failed.error };
+  }
+
+  // Restore the previously-working version from the module reference we
+  // captured before unmounting it — no re-import, just re-running its
+  // apply() against a brand new context.
+  const restore = await applyResolvedModule(
+    previous.row,
+    previous.mod,
+    previous.resolvedPath,
+    applyTimeoutMs,
+  );
+  if (restore.ok) {
+    mounted.set(opts.id, {
+      ctx: restore.ctx,
+      row: previous.row,
+      resolvedPath: previous.resolvedPath,
+      mod: previous.mod,
+    });
+    logger.warn(
+      { id: opts.id, error: result.failed.error },
+      'plugin reload failed — restored the previously-working version',
+    );
+    return { ok: false, reason: result.failed.error, restored: true };
+  }
+
+  // The restore attempt ALSO failed (e.g. the old apply() isn't idempotent
+  // and can't safely run twice). Nothing is mounted now — say so plainly
+  // rather than pretending a rollback happened.
+  logger.warn(
+    { id: opts.id, reloadError: result.failed.error, restoreError: restore.failed.error },
+    'plugin reload failed and the previous version could not be restored — plugin is now unmounted',
+  );
+  return { ok: false, reason: result.failed.error, restored: false };
+}
+
+/** In-flight `reloadPluginOnce()` calls, keyed by plugin id — see
+ *  `reloadPlugin()`'s doc comment. */
+const inFlightReloads = new Map<string, Promise<ReloadResult>>();
+
+/**
+ * `octomux plugins reload <id>` (and the dev file watcher) call this.
+ *
+ * Serializes reloads per plugin id. The dev file watcher debounces per id
+ * (~300ms), but a save landing after a debounced reload has already started
+ * — and before it resolves — would otherwise fire a second, CONCURRENT
+ * `reloadPluginOnce()` for the same id, both racing `mounted.has()` /
+ * `unloadPlugin()` / `mounted.set()` against each other. Chain a new request
+ * onto whatever is already in flight for that id instead of running them
+ * concurrently. The map entry is removed once the chained call settles, so
+ * it never grows past the number of ids currently mid-reload.
+ */
+export function reloadPlugin(opts: ReloadPluginOptions): Promise<ReloadResult> {
+  const prior = inFlightReloads.get(opts.id) ?? Promise.resolve();
+  const chained = prior.then(
+    () => reloadPluginOnce(opts),
+    () => reloadPluginOnce(opts),
+  );
+  inFlightReloads.set(opts.id, chained);
+  chained.finally(() => {
+    if (inFlightReloads.get(opts.id) === chained) {
+      inFlightReloads.delete(opts.id);
+    }
+  });
+  return chained;
+}
+
+export interface WatchLocalPluginsOptions {
+  manifestPath: string;
+  resolveFrom: string;
+  /** Debounce window per plugin id, coalescing a save's burst of fs events
+   *  into one reload. Default 300ms. */
+  debounceMs?: number;
+}
+
+/**
+ * DEV ONLY (caller must gate on `NODE_ENV !== 'production'` — this function
+ * does not check it itself, so tests can exercise it directly). Watches every
+ * enabled LOCAL-PATH manifest row's directory (the documented dev loop — an
+ * absolute `row.name`, never an installed npm package) and calls
+ * `reloadPlugin()` on a debounced change.
+ *
+ * Best-effort: `fs.watch`'s `recursive: true` is unsupported on Linux (Node/
+ * Bun both silently ignore it there), so a save in a nested directory won't
+ * trigger a reload on that platform — the same ceiling every `fs.watch`-based
+ * dev tool has. A row whose directory can't be watched (already deleted,
+ * permissions) is logged and skipped, never a crash.
+ *
+ * Returns a stop function that closes every watcher and cancels any pending
+ * debounce timer.
+ */
+export function watchLocalPlugins(opts: WatchLocalPluginsOptions): () => void {
+  const debounceMs = opts.debounceMs ?? 300;
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const watchers: fs.FSWatcher[] = [];
+
+  let manifest;
+  try {
+    manifest = readManifest(opts.manifestPath);
+  } catch (err) {
+    logger.warn({ err }, 'plugin watcher: manifest unreadable — watching nothing');
+    return () => {};
+  }
+
+  const triggerReload = (id: string) => {
+    const existing = timers.get(id);
+    if (existing) clearTimeout(existing);
+    timers.set(
+      id,
+      setTimeout(() => {
+        timers.delete(id);
+        reloadPlugin({ manifestPath: opts.manifestPath, resolveFrom: opts.resolveFrom, id })
+          .then((result) => {
+            if (result.ok) {
+              logger.info({ id }, 'plugin watcher: reloaded on save');
+            } else {
+              logger.warn({ id, reason: result.reason }, 'plugin watcher: reload failed');
+            }
+          })
+          .catch((err) => logger.warn({ id, err }, 'plugin watcher: reload threw'));
+      }, debounceMs),
+    );
+  };
+
+  for (const row of manifest.plugins) {
+    if (row.disabled || !path.isAbsolute(row.name)) continue;
+    try {
+      const watcher = fs.watch(row.name, { recursive: true }, () => triggerReload(row.id));
+      watchers.push(watcher);
+    } catch (err) {
+      logger.warn({ id: row.id, path: row.name, err }, 'plugin watcher: failed to watch directory');
+    }
+  }
+
+  logger.info({ watching: watchers.length }, 'plugin watcher: started (dev only)');
+
+  return () => {
+    for (const watcher of watchers) watcher.close();
+    for (const timer of timers.values()) clearTimeout(timer);
+    timers.clear();
   };
 }

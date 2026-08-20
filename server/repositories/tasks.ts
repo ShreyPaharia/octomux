@@ -7,6 +7,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
+import { deleteFactsForTask } from './plugin-facts.js';
 import { SQL_EXCLUDE_AUTO_REVIEW } from '../task-query.js';
 import type { Task, TaskUpdate, TaskExternalRef } from '../types.js';
 import type { SQLQueryBindings } from '../sqlite.js';
@@ -541,6 +542,13 @@ export function restoreTask(id: string): void {
 
 /** Hard-delete a task row (call after deleteTask cleanup is done). */
 export function hardDeleteTask(id: string): void {
+  // Plugin facts are task-scoped and die with the task (SHR-255). `plugin_facts`
+  // deliberately has no FK on task_id — the table is an observation log written
+  // by out-of-process plugins, and a FK would make a fact write fail on a task
+  // row that is mid-delete. Cleanup is explicit here instead. Ordered BEFORE the
+  // task row goes so a crash between the two leaves orphaned facts (harmless,
+  // task-keyed, never read) rather than a live task whose facts just vanished.
+  deleteFactsForTask(id);
   getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id);
   logger.info({ task_id: id, operation: 'hardDeleteTask' }, 'task hard-deleted');
 }
