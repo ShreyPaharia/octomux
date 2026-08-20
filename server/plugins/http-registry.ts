@@ -55,7 +55,12 @@ export function pluginRouteCounts(): Record<string, number> {
  */
 export function createPluginParentRouter(): Router {
   const router: Router = Router();
-  router.all(/.*/, (_req, res) => {
+  // Path-less terminal middleware, deliberately NOT `router.all(<pattern>, ...)`:
+  // `server/registry/route-inventory.ts` walks the express layer stack and
+  // assumes every layer's path is a string, so a RegExp route here crashes the
+  // drift test. A `use` layer contributes no route entry at all, which is also
+  // what we want — /api/p is a table, not a declared surface.
+  router.use((_req, res) => {
     res.status(404).json({ error: 'no such plugin route' });
   });
   return router;
