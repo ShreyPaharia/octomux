@@ -24,7 +24,9 @@ import { router as schedulesRouter } from './routes/schedules.js';
 import { router as kindsRouter } from './routes/kinds.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
+import { router as pluginUiRouter } from './routes/plugin-ui.js';
 import { listWorkflows } from './workflows/registry.js';
+import { createPluginParentRouter } from './plugins/http-registry.js';
 import { mountCapabilityRoutes } from './registry/mount.js';
 
 import { insertWorktreeIfAbsent, insertTaskIfAbsent, inTransaction } from './repositories/index.js';
@@ -44,6 +46,16 @@ export function setupRoutes(app: Express): void {
   app.use(agentDefsRouter);
   app.use(orchestratorRouter);
   app.use(integrationsRouter);
+  // The plugin route table's single parent router. Mounted ONCE, never
+  // unmounted — that is what makes a plugin unloadable (SHR-253). Everything
+  // under /api/p is a table lookup, so removing a plugin deletes rows rather
+  // than trying to unmount express middleware, which express 5 cannot do.
+  app.use('/api/p', createPluginParentRouter());
+  app.use(pluginUiRouter);
+
+  // DEPRECATED: `WorkflowType.apiRouter`. A plugin that declares one cannot be
+  // unloaded and reports `unloadable: false`. Kept working so nothing breaks in
+  // place; built-ins migrate off it onto ctx.http.route() one at a time.
   for (const wf of listWorkflows()) {
     if (wf.apiRouter) app.use(wf.apiRouter);
   }

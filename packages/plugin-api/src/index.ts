@@ -16,6 +16,16 @@ export interface PluginContext {
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly http: HttpRegistrar;
+  readonly facts: FactsRegistrar;
+  readonly ui: UiRegistrar;
+  /**
+   * Registers a teardown callback run when this plugin unmounts, in reverse
+   * registration order. Everything registered *through* `ctx` is tracked
+   * automatically; `effect` covers what the plugin owns itself — timers,
+   * watchers, sockets. Anything not routed through `ctx` cannot be tracked.
+   */
+  effect(dispose: () => void | Promise<void>): void;
 }
 
 // Structural minimum the host satisfies. NOT pino's Logger — a types-only package
@@ -51,6 +61,123 @@ export interface IntegrationRegistrar {
 }
 export interface HarnessRegistrar {
   register(h: PluginHarness): void;
+}
+
+/**
+ * `ctx.http` — route registration as DATA, not an Express Router.
+ *
+ * `WorkflowType.apiRouter` hands a plugin a Router, and express 5 cannot
+ * unmount one; that single fact is why hot reload was a non-goal. Routes
+ * registered here become rows in a lookup table behind one permanently-mounted
+ * parent router, so removing a plugin deletes its rows and nothing was ever
+ * mounted. Paths are namespaced under the manifest row id — a plugin declares
+ * `/coverage/:task` and it serves at `/api/p/<pluginId>/coverage/:task`.
+ */
+export interface HttpRegistrar {
+  route(method: HttpMethod, path: string, handler: PluginRouteHandler): void;
+}
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+/**
+ * Deliberately NOT express's `RequestHandler`: a types-only package must not
+ * take an express type dependency, and the host owns the adapter. The shapes
+ * are the subset the host guarantees.
+ */
+export type PluginRouteHandler = (req: PluginRequest, res: PluginResponse) => void | Promise<void>;
+export interface PluginRequest {
+  readonly params: Record<string, string>;
+  readonly query: Record<string, unknown>;
+  readonly body: unknown;
+}
+export interface PluginResponse {
+  status(code: number): PluginResponse;
+  json(body: unknown): void;
+}
+
+/**
+ * `ctx.facts` — a typed, task-scoped, append-only log every plugin can write
+ * to and read from. The only wire between plugin types before this was
+ * `HookEnvelope`: seven fixed event names, outbound only, fire-and-forget,
+ * with no read path at all.
+ *
+ * Fact types are namespaced under the manifest row id, so a plugin can add
+ * `coverage-bot:coverage` and can never overwrite `core:diff`. Facts are
+ * task-scoped and die with the task. This is an observation log, not event
+ * sourcing — tasks remain the source of truth.
+ */
+export interface FactsRegistrar {
+  /** Declares a fact type and the JSON Schema that validates writes to it.
+   *  The same schema tells the UI how to draw it (`ctx.ui`). */
+  define(def: FactTypeDefinition): void;
+  put(taskId: string, localType: string, payload: unknown): Promise<void>;
+  read(taskId: string, opts?: FactQuery): Promise<Fact[]>;
+  /** Subscribes to a QUALIFIED type (`core:diff`, `other-plugin:coverage`).
+   *  Returns an unsubscribe; also auto-disposed on unmount. */
+  watch(qualifiedType: string, onFact: (fact: Fact) => void): () => void;
+}
+export interface FactTypeDefinition {
+  /** BARE local type. The host qualifies it to `<pluginId>:<type>`. */
+  type: string;
+  /** JSON Schema for the payload. */
+  schema: Record<string, unknown>;
+}
+export interface FactQuery {
+  /** Qualified fact type to filter on. */
+  type?: string;
+  /** Only facts with `seq` strictly greater than this. */
+  sinceSeq?: number;
+}
+export interface Fact {
+  seq: number;
+  taskId: string;
+  /** Qualified — `core:diff`, `coverage-bot:coverage`. */
+  type: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+/**
+ * `ctx.ui` — declarative bindings, never components.
+ *
+ * There is no CSP anywhere and `server/remote-auth.ts` returns `allow`
+ * unconditionally in local mode, so serving third-party ESM is not on the
+ * table. A plugin contributes a binding and the client owns every renderer:
+ * a plugin ships zero browser JavaScript and needs no build step.
+ *
+ * There is deliberately no `ctx.ui.component()` and no custom sidebar. That
+ * ceiling keeps the security model intact and keeps plugins portable onto
+ * surfaces that did not exist when they were written.
+ */
+export interface UiRegistrar {
+  panel(binding: UiPanelBinding): void;
+}
+export type UiSlot =
+  | 'task.panel'
+  | 'task.badge'
+  | 'board.card'
+  | 'nav.section'
+  | 'run.detail'
+  | 'settings.card';
+export type UiRenderer =
+  | 'stat'
+  | 'table'
+  | 'timeline'
+  | 'badge'
+  | 'markdown'
+  | 'json'
+  | 'diff'
+  | 'log';
+export interface UiPanelBinding {
+  slot: UiSlot;
+  /** BARE local fact type — the host qualifies it, same as `facts.define`. */
+  fact: string;
+  /** Renderer name. An UNKNOWN renderer degrades to `json`, never a blank. */
+  as: UiRenderer | string;
+  /** Payload key holding the primary value (renderer-specific). */
+  value?: string;
+  /** Payload key holding a delta/secondary value (renderer-specific). */
+  delta?: string;
+  title?: string;
 }
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
