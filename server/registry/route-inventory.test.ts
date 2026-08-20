@@ -88,6 +88,7 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/tasks/:id/comments',
   'GET /api/tasks/:id/commits',
   'GET /api/tasks/:id/diff',
+  'GET /api/tasks/:id/facts',
   'GET /api/tasks/:id/hooks',
   'GET /api/tasks/:id/refs',
   'GET /api/tasks/:id/updates',

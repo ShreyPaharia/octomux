@@ -56,16 +56,11 @@ function StatRenderer({ contribution, facts }: RendererProps) {
   const value = primaryValue(contribution, facts);
   const delta = payloadField(latestPayload(facts), contribution.delta);
   return (
-    <div className="flex flex-col gap-1">
-      {contribution.title && (
-        <div className="text-xs text-muted-foreground">{contribution.title}</div>
+    <div className="flex items-baseline gap-2">
+      <span className="text-2xl font-semibold text-foreground">{formatScalar(value)}</span>
+      {delta !== undefined && (
+        <span className="text-xs text-muted-foreground">{formatScalar(delta)}</span>
       )}
-      <div className="flex items-baseline gap-2">
-        <span className="text-2xl font-semibold text-foreground">{formatScalar(value)}</span>
-        {delta !== undefined && (
-          <span className="text-xs text-muted-foreground">{formatScalar(delta)}</span>
-        )}
-      </div>
     </div>
   );
 }

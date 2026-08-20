@@ -25,6 +25,7 @@ import { router as kindsRouter } from './routes/kinds.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { router as pluginUiRouter } from './routes/plugin-ui.js';
+import { router as pluginFactsRouter } from './routes/plugin-facts.js';
 import { listWorkflows } from './workflows/registry.js';
 import { createPluginParentRouter } from './plugins/http-registry.js';
 import { mountCapabilityRoutes } from './registry/mount.js';
@@ -52,6 +53,7 @@ export function setupRoutes(app: Express): void {
   // than trying to unmount express middleware, which express 5 cannot do.
   app.use('/api/p', createPluginParentRouter());
   app.use(pluginUiRouter);
+  app.use(pluginFactsRouter);
 
   // DEPRECATED: `WorkflowType.apiRouter`. A plugin that declares one cannot be
   // unloaded and reports `unloadable: false`. Kept working so nothing breaks in

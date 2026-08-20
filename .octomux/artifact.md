@@ -1,5 +1,5 @@
 ## Summary
 
-_Updated 2026-08-20 18:08:10_
+_Updated 2026-08-20 18:11:14_
 
-Bash: bun run typecheck 2>&1 | tail -5; echo "=== full server slice for A ==="; NODE_ENV=test timeo…
+Bash: sed -n '1,200p' server/index.test.ts
