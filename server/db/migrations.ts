@@ -1249,6 +1249,26 @@ export function runMigrations(instance: Database): void {
     `CREATE INDEX IF NOT EXISTS idx_tasks_depends_on
        ON tasks(depends_on) WHERE depends_on IS NOT NULL`,
   );
+
+  // ── ctx.facts — plugin fact log (2026-08-20, SHR-255) ───────────────────────
+  // Deliberately its OWN table, not the `events` table — that one is the
+  // orchestrator's control bus (repositories/orchestrator.ts, drained via
+  // managed_tasks.last_event_seq). Sharing it would put plugin observation
+  // facts into the conductor's drain and share one AUTOINCREMENT seq between
+  // control events and facts (ruling R1, plans/2026-08-20-plugin-runtime-p0.md).
+  // No FK to tasks(id): facts are deleted explicitly by task deletion
+  // (server/repositories/tasks.ts hardDeleteTask), not via ON DELETE CASCADE.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_facts (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id    TEXT NOT NULL,
+      type       TEXT NOT NULL,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugin_facts_task ON plugin_facts(task_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_plugin_facts_type ON plugin_facts(type, seq);
+  `);
 }
 
 /**

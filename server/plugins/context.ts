@@ -232,6 +232,10 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  // Declared before the registrars that push onto it (facts.watch) — see the
+  // auto-dispose note there.
+  const effects: Array<() => void | Promise<void>> = [];
+
   const facts: FactsRegistrar = {
     define(def: FactTypeDefinition) {
       assertLive('facts.define');
@@ -250,7 +254,16 @@ export function createPluginContext(id: string): PluginContext {
     },
     watch(qualifiedType: string, onFact: (fact: Fact) => void) {
       assertLive('facts.watch');
-      return watchFacts(qualifiedType, onFact);
+      const unsubscribe = watchFacts(qualifiedType, onFact);
+      // Auto-disposed on unmount, as the plugin-api doc promises. This is the
+      // ONLY thing that unsubscribes a watcher on a type the plugin does not
+      // own: `unregisterPluginFacts(pluginId)` can only reach watchers on types
+      // that plugin DEFINED, so a plugin watching `core:diff` or a sibling
+      // plugin's type would otherwise keep firing forever after it unmounts.
+      // Idempotent — a plugin that also calls the returned unsubscribe itself
+      // is fine, `watchFacts` tolerates a double unsubscribe.
+      effects.push(unsubscribe);
+      return unsubscribe;
     },
   };
 
@@ -264,8 +277,6 @@ export function createPluginContext(id: string): PluginContext {
       registerPluginUiPanel(id, binding);
     },
   };
-
-  const effects: Array<() => void | Promise<void>> = [];
 
   const ctx: PluginContext = {
     id,
