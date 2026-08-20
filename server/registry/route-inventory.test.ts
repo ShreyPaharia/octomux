@@ -117,6 +117,7 @@ const PENDING_MIGRATION: string[] = [
   'POST /api/integrations/linear/prefill',
   'POST /api/orchestrator/conversations',
   'POST /api/orchestrator/conversations/:id/global-monitor',
+  'POST /api/plugins/:id/reload',
   'POST /api/pr-extracts/:taskId/emit',
   'POST /api/preflight/stash',
   'POST /api/reviews',

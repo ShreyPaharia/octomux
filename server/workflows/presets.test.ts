@@ -6,8 +6,14 @@ import path from 'path';
 // Side-effect import registers every code handler, which `checkPresetShape`
 // needs to accept an `execution: task|chat` preset (§3.2 last rule).
 import './index.js';
-import { checkPresetShape, loadPresets, listPresets, reloadPresets } from './presets.js';
-import { listCronWorkflowKinds } from './registry.js';
+import {
+  checkPresetShape,
+  loadPresets,
+  listPresets,
+  reloadPresets,
+  unregisterPluginKinds,
+} from './presets.js';
+import { listCronWorkflowKinds, getWorkflow, registerPluginWorkflow } from './registry.js';
 
 const VALID_SESSION = {
   kind: 'my-kind',
@@ -515,5 +521,94 @@ describe('plugin tier', () => {
     } finally {
       fs.rmSync(devDir, { recursive: true, force: true });
     }
+  });
+
+  describe('unregisterPluginKinds', () => {
+    it('removes a preset-sourced kind from both the presets cache and the workflow registry', () => {
+      writePluginKind('demo', 'changelog', {
+        kind: 'changelog',
+        displayName: 'Changelog',
+        execution: 'session',
+      });
+      writeManifest([{ id: 'demo', name: 'demo' }]);
+      reloadPresets();
+
+      expect(listPresets().some((p) => p.kind === 'demo:changelog')).toBe(true);
+      expect(getWorkflow('demo:changelog')).toBeDefined();
+
+      const removed = unregisterPluginKinds('demo');
+
+      expect(removed).toEqual(['demo:changelog']);
+      expect(listPresets().some((p) => p.kind === 'demo:changelog')).toBe(false);
+      expect(getWorkflow('demo:changelog')).toBeUndefined();
+    });
+
+    it('also removes a kind registered directly via ctx.workflows.register(), with no matching preset file', () => {
+      registerPluginWorkflow('nopreset:direct', {
+        kind: 'nopreset:direct',
+        displayName: 'Direct',
+        surfaces: ['feed'],
+      });
+      expect(getWorkflow('nopreset:direct')).toBeDefined();
+
+      const removed = unregisterPluginKinds('nopreset');
+
+      expect(removed).toEqual(['nopreset:direct']);
+      expect(getWorkflow('nopreset:direct')).toBeUndefined();
+    });
+
+    it('never touches another plugin, a home kind, or a built-in kind', () => {
+      writePluginKind('demo', 'changelog', {
+        kind: 'changelog',
+        displayName: 'Changelog',
+        execution: 'session',
+      });
+      writePluginKind('other', 'thing', {
+        kind: 'thing',
+        displayName: 'Thing',
+        execution: 'session',
+      });
+      writeHomeKind('weekly-update', {
+        kind: 'weekly-update',
+        displayName: 'My Weekly Update',
+        execution: 'session',
+      });
+      writeManifest([
+        { id: 'demo', name: 'demo' },
+        { id: 'other', name: 'other' },
+      ]);
+      reloadPresets();
+
+      unregisterPluginKinds('demo');
+
+      expect(getWorkflow('other:thing')).toBeDefined();
+      expect(getWorkflow('weekly-update')?.displayName).toBe('My Weekly Update');
+      expect(getWorkflow('doc-drift')).toBeDefined();
+    });
+
+    it('returns an empty array and logs nothing for a plugin that owns no kinds', () => {
+      expect(unregisterPluginKinds('nothing-here')).toEqual([]);
+    });
+
+    it('a later mergePresetsIntoRegistry() (unrelated preset write) does not resurrect an unmounted plugin kind whose manifest row was disabled first', () => {
+      writePluginKind('demo', 'changelog', {
+        kind: 'changelog',
+        displayName: 'Changelog',
+        execution: 'session',
+      });
+      writeManifest([{ id: 'demo', name: 'demo' }]);
+      reloadPresets();
+      expect(getWorkflow('demo:changelog')).toBeDefined();
+
+      unregisterPluginKinds('demo');
+      // Simulates the real unload sequence completing: the manifest row is
+      // disabled before any further reloadPresets() runs, so the plugin
+      // tier's next scan skips it — see this function's own doc comment for
+      // the one case where a reload racing in WOULD legitimately re-add it.
+      writeManifest([{ id: 'demo', name: 'demo', disabled: true }]);
+
+      reloadPresets(); // simulates an unrelated UI kind write elsewhere
+      expect(getWorkflow('demo:changelog')).toBeUndefined();
+    });
   });
 });

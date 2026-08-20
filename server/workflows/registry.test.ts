@@ -5,6 +5,7 @@ import {
   registerPluginWorkflow,
   getWorkflow,
   listWorkflows,
+  unregisterWorkflow,
 } from './registry.js';
 
 describe('workflow registry', () => {
@@ -88,5 +89,30 @@ describe('registerPluginWorkflow key/kind agreement', () => {
     registerPluginWorkflow('demo:changelog', { kind: 'changelog' } as WorkflowType);
     expect(getWorkflow('demo:changelog')?.kind).toBe('demo:changelog');
     expect(getWorkflow('changelog')).toBeUndefined();
+  });
+});
+
+describe('unregisterWorkflow', () => {
+  it('removes a qualified (plugin-owned) kind', () => {
+    registerPluginWorkflow('unreg-demo:thing', {
+      kind: 'unreg-demo:thing',
+      displayName: 'Thing',
+      surfaces: ['feed'],
+    });
+    expect(unregisterWorkflow('unreg-demo:thing')).toBe(true);
+    expect(getWorkflow('unreg-demo:thing')).toBeUndefined();
+  });
+
+  it('returns false for a kind that was never registered', () => {
+    expect(unregisterWorkflow('unreg-demo:never-existed')).toBe(false);
+  });
+
+  // R4: a bare kind is always core/home/built-in — refusing on shape alone
+  // (no `:`) makes it structurally impossible for a plugin unmount to delete
+  // a kind the UI still needs, with no duplicate-registration guard required.
+  it('refuses a bare (unqualified) kind, even one that exists', () => {
+    registerWorkflow({ kind: 'core-ish', displayName: 'Core-ish', surfaces: ['feed'] });
+    expect(unregisterWorkflow('core-ish')).toBe(false);
+    expect(getWorkflow('core-ish')).toBeDefined();
   });
 });

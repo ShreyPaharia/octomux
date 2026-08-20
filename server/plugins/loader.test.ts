@@ -2,9 +2,17 @@ import { describe, it, expect, beforeEach, afterEach, vi, mock, spyOn } from '..
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { loadPlugins } from './loader.js';
+import {
+  loadPlugins,
+  unloadPlugin,
+  reloadPlugin,
+  watchLocalPlugins,
+  getMountedPlugin,
+  resetMountedPlugins,
+} from './loader.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
-import { listHarnesses, resetHarnesses } from '../harnesses/registry.js';
+import { listHarnesses, resetHarnesses, getHarness } from '../harnesses/registry.js';
+import { getWorkflow } from '../workflows/registry.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -454,5 +462,271 @@ plugins:
       kvThrows: true,
     });
     delete (globalThis as Record<string, unknown>).__octomuxCtxProbe;
+  });
+});
+
+describe('unloadPlugin / reloadPlugin', () => {
+  afterEach(() => {
+    resetMountedPlugins();
+    resetHarnesses();
+  });
+
+  it('reloadPlugin mounts a plugin that was not previously loaded', async () => {
+    const abs = writeModule(
+      'reload-fresh.mjs',
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reloadfresh
+    name: ${abs}
+`);
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'reloadfresh',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.loaded.id).toBe('reloadfresh');
+    }
+    expect(getHarness('reloadfresh:v1').id).toBe('reloadfresh:v1');
+    expect(getMountedPlugin('reloadfresh')).toBeDefined();
+  });
+
+  it('reloadPlugin on an already-mounted plugin unmounts the old registrations and re-evaluates the edited source (cache-busted, not served stale)', async () => {
+    const modPath = path.join(tmpDir, 'reload-hot.mjs');
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reloadhot
+    name: ${modPath}
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(getHarness('reloadhot:v1').id).toBe('reloadhot:v1');
+
+    // Edit the source on disk — v2 replaces v1.
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v2', displayName: 'V2', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'reloadhot',
+    });
+
+    expect(result.ok).toBe(true);
+    // Old registration is gone — proves unmount actually ran before remount.
+    expect(() => getHarness('reloadhot:v1')).toThrow();
+    // New registration is present — proves the edited file was re-evaluated,
+    // not served from the ESM module cache under the same resolved path.
+    expect(getHarness('reloadhot:v2').id).toBe('reloadhot:v2');
+  });
+
+  it('reloadPlugin refuses a plugin not present in the manifest', async () => {
+    const manifestPath = writeManifest(`plugins: []\n`);
+    const result = await reloadPlugin({ manifestPath, resolveFrom: nodeModulesDir, id: 'ghost' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/no plugin with id/);
+  });
+
+  it('reloadPlugin refuses a disabled row without mounting it', async () => {
+    const abs = writeModule('reload-disabled.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reloaddisabled
+    name: ${abs}
+    disabled: true
+`);
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'reloaddisabled',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/disabled/);
+    expect(getMountedPlugin('reloaddisabled')).toBeUndefined();
+  });
+
+  it('reloadPlugin refuses to unmount+remount a plugin that registered an apiRouter workflow', async () => {
+    const abs = writeModule(
+      'reload-unloadable.mjs',
+      "export async function apply(ctx) { ctx.workflows.register({ kind: 'legacy', displayName: 'Legacy', surfaces: ['feed'], apiRouter: () => {} }); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reloadunloadable
+    name: ${abs}
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(getWorkflow('reloadunloadable:legacy')).toBeDefined();
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'reloadunloadable',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.unloadable).toBe(false);
+      expect(result.reason).toMatch(/apiRouter/);
+    }
+    // Untouched — refusal happened before any teardown.
+    expect(getWorkflow('reloadunloadable:legacy')).toBeDefined();
+    expect(getMountedPlugin('reloadunloadable')).toBeDefined();
+  });
+
+  it('unloadPlugin tears down a mounted plugin and drops it from the mount table', async () => {
+    const abs = writeModule(
+      'unload-basic.mjs',
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: unloadbasic
+    name: ${abs}
+`);
+    await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(getMountedPlugin('unloadbasic')).toBeDefined();
+
+    const result = await unloadPlugin('unloadbasic');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.report.released.harnessIds).toEqual(['unloadbasic:v1']);
+    }
+    expect(() => getHarness('unloadbasic:v1')).toThrow();
+    expect(getMountedPlugin('unloadbasic')).toBeUndefined();
+  });
+
+  it('unloadPlugin refuses a plugin id that is not currently mounted', async () => {
+    const result = await unloadPlugin('never-mounted');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/not currently mounted/);
+  });
+});
+
+/** Polls `check` until it returns true or `timeoutMs` elapses. Real timers
+ *  only — `fs.watch` is real OS filesystem-event delivery, which fake timers
+ *  can't simulate at all. */
+async function waitUntil(check: () => boolean, timeoutMs = 4000, intervalMs = 20): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  if (!check()) throw new Error(`waitUntil: condition never became true within ${timeoutMs}ms`);
+}
+
+describe('watchLocalPlugins', () => {
+  const stops: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const stop of stops.splice(0)) stop();
+    resetMountedPlugins();
+    resetHarnesses();
+  });
+
+  it('reloads an absolute-path (local dev) plugin on a debounced file save', async () => {
+    const modPath = path.join(tmpDir, 'watch-hot.mjs');
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: watchhot
+    name: ${modPath}
+`);
+
+    await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(getHarness('watchhot:v1').id).toBe('watchhot:v1');
+
+    const stop = watchLocalPlugins({ manifestPath, resolveFrom: nodeModulesDir, debounceMs: 20 });
+    stops.push(stop);
+    // fs.watch's underlying OS watch takes a moment to actually attach after
+    // fs.watch() returns — writing immediately can race that and miss the
+    // event entirely. A short settle delay before the write is standard
+    // practice for fs.watch-based tests, not a fixed sleep waiting for the
+    // reload itself (that part still polls via waitUntil below).
+    await new Promise((r) => setTimeout(r, 50));
+
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v2', displayName: 'V2', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+
+    await waitUntil(() => {
+      try {
+        return getHarness('watchhot:v2').id === 'watchhot:v2';
+      } catch {
+        return false;
+      }
+    });
+    expect(() => getHarness('watchhot:v1')).toThrow();
+  });
+
+  it('ignores disabled and non-local (bare-name) rows — no reload attempt, no crash', async () => {
+    const abs = writeModule('watch-disabled.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: watchdisabled
+    name: ${abs}
+    disabled: true
+  - id: watchbare
+    name: some-bare-package-name
+`);
+
+    // Must not throw even though `watchbare`'s "directory" doesn't exist and
+    // `watchdisabled` is skipped outright.
+    const stop = watchLocalPlugins({ manifestPath, resolveFrom: nodeModulesDir, debounceMs: 20 });
+    stops.push(stop);
+
+    fs.writeFileSync(abs, 'export async function apply(ctx) { ctx.effect(() => {}); }\n', 'utf-8');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(getMountedPlugin('watchdisabled')).toBeUndefined();
+  });
+
+  it('stop() closes every watcher — a save afterward triggers no reload', async () => {
+    const modPath = path.join(tmpDir, 'watch-stop.mjs');
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: watchstop
+    name: ${modPath}
+`);
+    await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    const stop = watchLocalPlugins({ manifestPath, resolveFrom: nodeModulesDir, debounceMs: 20 });
+    stop(); // closed before any save
+
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v2', displayName: 'V2', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+    await new Promise((r) => setTimeout(r, 150));
+    expect(() => getHarness('watchstop:v2')).toThrow();
+    expect(getHarness('watchstop:v1').id).toBe('watchstop:v1');
   });
 });

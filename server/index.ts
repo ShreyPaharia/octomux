@@ -14,7 +14,8 @@ import { assetRoot } from './assets.js';
 import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './remote-auth.js';
 import { getDb } from './db.js';
 import { octomuxRoot } from './octomux-root.js';
-import { loadPlugins } from './plugins/loader.js';
+import { loadPlugins, watchLocalPlugins } from './plugins/loader.js';
+import { pluginRouteCounts } from './plugins/http-registry.js';
 import { manifestPath, pluginModulesDir, pluginReportPath } from './plugins/paths.js';
 import {
   setupTerminalWebSocket,
@@ -77,7 +78,14 @@ const pluginReport = await loadPlugins({
 });
 try {
   fs.mkdirSync(octomuxRoot(), { recursive: true });
-  fs.writeFileSync(pluginReportPath(), JSON.stringify(pluginReport, null, 2));
+  // `routeCounts` (SHR-253) is snapshotted here, not inside `loadPlugins()`
+  // itself — the route table only reflects the CURRENT boot's registrations
+  // once every plugin's apply() has run, which is exactly this point.
+  // `octomux doctor` reads it back via `LoadReportWithMeta` (see
+  // `cli/src/commands/doctor.ts`'s doc comment — this was the known gap it
+  // was written ahead of).
+  const persisted = { ...pluginReport, routeCounts: pluginRouteCounts() };
+  fs.writeFileSync(pluginReportPath(), JSON.stringify(persisted, null, 2));
 } catch (err) {
   logger.warn({ err }, 'failed to persist plugin load report');
 }
@@ -89,6 +97,15 @@ if (pluginReport.failed.length > 0) {
 }
 
 const app = createApp();
+
+// Dev-only hot reload for local-path plugin rows (SHR-254). Never in
+// production — an npm-installed plugin's `node_modules` tree isn't the dev
+// loop this exists for, and a stray reload against a production install is
+// pure downside.
+if (process.env.NODE_ENV !== 'production') {
+  watchLocalPlugins({ manifestPath: manifestPath(), resolveFrom: pluginModulesDir() });
+}
+
 const server = createServer(app);
 const PORT = process.env.OCTOMUX_PORT || process.env.PORT || 7777;
 
