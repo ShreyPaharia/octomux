@@ -21,7 +21,7 @@
 import type { Fact, FactQuery, FactTypeDefinition } from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
 import { qualify } from './qualify.js';
-import { validateAgainstSchema } from '../services/output-contract.js';
+import { forgetCompiledSchema, validateAgainstSchema } from '../services/output-contract.js';
 import { insertFact, readFactsForTask } from '../repositories/plugin-facts.js';
 
 const logger = childLogger('plugins/facts');
@@ -140,7 +140,18 @@ export function unregisterPluginFacts(pluginId: string): void {
   for (const [qualified, def] of definitions) {
     if (def.pluginId !== pluginId) continue;
     definitions.delete(qualified);
+    // Drops watchers on this type registered by ANY plugin, not just this one.
+    // That is deliberate: the type's only writer is going away, so no further
+    // fact of this type can ever arrive and every watcher on it is already
+    // dead. A watcher this plugin placed on somebody ELSE's type is released
+    // separately, by the effect stack in `context.ts` — see the note there.
     watchers.delete(qualified);
+    // The ajv cache in `output-contract.ts` is keyed on the type string alone
+    // and never notices a schema change. Reload (SHR-254) re-runs apply(),
+    // which may redefine this same qualified type with a DIFFERENT schema;
+    // without this bust, every later write would validate against the old
+    // schema silently, with no error and no log.
+    forgetCompiledSchema(qualified);
   }
 }
 

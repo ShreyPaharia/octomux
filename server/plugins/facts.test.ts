@@ -133,6 +133,38 @@ describe('plugins/facts', () => {
     expect(facts).toHaveLength(1);
   });
 
+  // The reload path (SHR-254) is unregister -> re-apply() -> redefine. The ajv
+  // cache in output-contract.ts is keyed on the type string alone and never
+  // notices the schema changed, so without a bust in unregisterPluginFacts the
+  // redefined type keeps validating against the OLD schema — silently, with no
+  // error and no log. Caught in review of SHR-255; this is the regression.
+  it('redefining a type after unregister validates against the NEW schema', async () => {
+    defineFactType('coverage-bot', {
+      type: 'coverage',
+      schema: { type: 'object', properties: { pct: { type: 'number' } }, required: ['pct'] },
+    });
+    await expect(
+      putFact('coverage-bot', 'task-1', 'coverage', { pct: 81 }),
+    ).resolves.toBeUndefined();
+
+    unregisterPluginFacts('coverage-bot');
+
+    // Same qualified type, incompatible schema: pct is now a string.
+    defineFactType('coverage-bot', {
+      type: 'coverage',
+      schema: { type: 'object', properties: { pct: { type: 'string' } }, required: ['pct'] },
+    });
+
+    // Valid under the NEW schema, would have failed under the old one.
+    await expect(
+      putFact('coverage-bot', 'task-1', 'coverage', { pct: 'x' }),
+    ).resolves.toBeUndefined();
+    // Valid under the OLD schema, must now be rejected.
+    await expect(putFact('coverage-bot', 'task-1', 'coverage', { pct: 81 })).rejects.toThrow(
+      /schema validation/,
+    );
+  });
+
   it('unregisterPluginFacts only touches the named plugin', async () => {
     defineFactType('coverage-bot', { type: 'coverage', schema: { type: 'object' } });
     defineFactType('reviewer-bot', { type: 'review', schema: { type: 'object' } });
