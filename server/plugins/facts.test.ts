@@ -94,9 +94,9 @@ describe('plugins/facts', () => {
 
   it("fires a plugin's watch on a core fact", async () => {
     const seen: unknown[] = [];
-    watchFacts('core:diff', (fact) => seen.push(fact.payload));
+    watchFacts('core:review.published', (fact) => seen.push(fact.payload));
 
-    await putCoreFact('task-1', 'core:diff', { files: 3 });
+    await putCoreFact('task-1', 'core:review.published', { files: 3 });
     expect(seen).toEqual([{ files: 3 }]);
   });
 
@@ -110,6 +110,25 @@ describe('plugins/facts', () => {
     for (const type of CORE_FACT_TYPES) {
       await expect(putCoreFact('task-1', type, {})).resolves.toBeUndefined();
     }
+  });
+
+  // Finding 5 (SHR-255 review): CORE_FACT_TYPES had no producer at all —
+  // narrowed to just `core:review.published`, now wired from
+  // `server/workflows/reviewer/publish-review.ts`. This is the ticket's own
+  // "Done when": a plugin defines nothing, watches a core fact, and its
+  // callback fires when core publishes it.
+  it('a plugin subscribes to core:review.published and fires on it, defining nothing', async () => {
+    const seen: unknown[] = [];
+    watchFacts('core:review.published', (fact) => seen.push(fact.payload));
+
+    await putCoreFact('task-1', 'core:review.published', {
+      taskId: 'task-1',
+      github_review_url: 'https://github.com/o/r/pull/1#pullrequestreview-1',
+    });
+
+    expect(seen).toEqual([
+      { taskId: 'task-1', github_review_url: 'https://github.com/o/r/pull/1#pullrequestreview-1' },
+    ]);
   });
 
   it('unregisterPluginFacts drops definitions so a later put is rejected as undefined', async () => {
@@ -163,6 +182,33 @@ describe('plugins/facts', () => {
     await expect(putFact('coverage-bot', 'task-1', 'coverage', { pct: 81 })).rejects.toThrow(
       /schema validation/,
     );
+  });
+
+  // Finding 1 (SHR-255 review): a reload of plugin A must not silently kill
+  // plugin B's watcher on a type A defines. Ownership of a watcher's
+  // lifecycle belongs to the WATCHING plugin's own effect stack
+  // (`ctx.facts.watch` in `context.ts`), not to the type-defining plugin —
+  // `unregisterPluginFacts(A)` must leave foreign watchers alone.
+  it("a reload of the defining plugin does not kill another plugin's watcher", async () => {
+    defineFactType('coverage-bot', {
+      type: 'coverage',
+      schema: { type: 'object', properties: { pct: { type: 'number' } } },
+    });
+
+    const seen: unknown[] = [];
+    // "reviewer-bot" watches coverage-bot's type — it never called define.
+    watchFacts('coverage-bot:coverage', (fact) => seen.push(fact.payload));
+
+    // Reload: unmount unregisters coverage-bot's definitions, then apply()
+    // runs again and redefines the same qualified type.
+    unregisterPluginFacts('coverage-bot');
+    defineFactType('coverage-bot', {
+      type: 'coverage',
+      schema: { type: 'object', properties: { pct: { type: 'number' } } },
+    });
+
+    await putFact('coverage-bot', 'task-1', 'coverage', { pct: 42 });
+    expect(seen).toEqual([{ pct: 42 }]);
   });
 
   it('unregisterPluginFacts only touches the named plugin', async () => {

@@ -17,6 +17,7 @@
 import type { UiPanelBinding, UiSlot } from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
 import { qualify } from './qualify.js';
+import { isFactTypeDefined } from './facts.js';
 
 const logger = childLogger('plugins/ui-registry');
 
@@ -40,6 +41,10 @@ export interface UiContribution extends UiPanelBinding {
 
 /** pluginId -> its contributions, insertion order preserved. */
 const contributions = new Map<string, UiContribution[]>();
+
+/** Qualified fact types already warned about via `listUiContributions` — logs
+ *  once per type, not once per request. */
+const warnedMissingFactType = new Set<string>();
 
 /** Registers a panel binding. `binding.fact` is BARE; this qualifies it.
  *
@@ -71,12 +76,28 @@ export function registerPluginUiPanel(pluginId: string, binding: UiPanelBinding)
 /**
  * Every contribution, for `GET /api/plugin-ui/contributions`.
  *
- * STEP-0 ships the empty-table behaviour rather than a throwing stub — the
- * route is mounted at boot and a throw here would 500 the SPA before task D
- * lands. Task D replaces the body.
+ * Also where a `binding.fact` typo gets its only diagnostic: checked here
+ * rather than in `registerPluginUiPanel` because ordering between
+ * `facts.define()` and `ui.panel()` inside one `apply()` is the plugin
+ * author's choice — checking at registration time would false-positive
+ * whenever `ui.panel()` runs first. By the time anything reads this list,
+ * every plugin's `apply()` has already returned, so a still-undefined type
+ * is a real typo, not a race. A NOT-throw: an unmatched binding renders as a
+ * permanently empty panel, which is a plugin authoring bug, not a reason to
+ * 500 every other plugin's panels too.
  */
 export function listUiContributions(): UiContribution[] {
-  return Array.from(contributions.values()).flat();
+  const all = Array.from(contributions.values()).flat();
+  for (const c of all) {
+    if (!isFactTypeDefined(c.factType) && !warnedMissingFactType.has(c.factType)) {
+      warnedMissingFactType.add(c.factType);
+      logger.warn(
+        { plugin_id: c.pluginId, slot: c.slot, fact_type: c.factType },
+        'ui.panel binds a fact type that was never defined — check binding.fact for a typo',
+      );
+    }
+  }
+  return all;
 }
 
 /** Drops a plugin's contributions. Called on unmount — the panel must vanish
@@ -86,7 +107,8 @@ export function unregisterPluginUi(pluginId: string): void {
   logger.info({ plugin_id: pluginId }, 'plugin ui contributions unregistered');
 }
 
-/** Test-only: clears all contributions. */
+/** Test-only: clears all contributions and the missing-fact-type warn dedupe. */
 export function resetPluginUi(): void {
   contributions.clear();
+  warnedMissingFactType.clear();
 }

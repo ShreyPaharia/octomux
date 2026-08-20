@@ -13,7 +13,7 @@ import { listRunsForWorkflow, finishRun } from '../../repositories/runs.js';
 import { badRequest, notFound, conflict } from '../../services/errors.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
-import { registerPluginRoute } from '../../plugins/http-registry.js';
+import { registerPluginRoute, freezeCoreHttpRoutes } from '../../plugins/http-registry.js';
 import type { PrExtractRisk, RunResult, Task } from '../../types.js';
 import type { PluginRequest, PluginResponse, PluginRouteHandler } from '@octomux/plugin-api';
 
@@ -23,14 +23,14 @@ export const router = Router();
 
 /**
  * `POST /api/pr-extracts/:taskId/emit` intentionally does NOT get a
- * `ctx.http.route()` twin: it's gated on `requireBearerHookToken`, which
- * reads `req.headers.authorization` — a plugin's `PluginRequest`
- * (`params`/`query`/`body` only, per `@octomux/plugin-api`) has no headers
- * field, so an auth-gated route cannot be expressed through the new
- * mechanism as pinned today. Registering it anyway would mean either
- * shipping it unauthenticated at the new URL (a real regression) or
- * silently duplicating the auth check outside the pinned contract. Left on
- * the legacy Express router, which still runs the real check.
+ * `ctx.http.route()` twin. `PluginRequest.headers` exists today, so that is
+ * no longer why. The real reason: this route's absolute path
+ * (`/api/pr-extracts/:taskId/emit`) is hardcoded by callers —
+ * `cli/src/commands/pr-extract-emit.ts` and any external hook sender — and
+ * `/api/p/<pluginId>/...` (`server/api.ts`, off-limits here) is a fixed,
+ * different mount point. There is no way to reproduce this exact legacy
+ * absolute path under the new namespace, so it stays on the legacy Express
+ * router, which still runs `requireBearerHookToken`.
  *
  * The two read-only GET routes below carry no auth and no header
  * dependency, so they migrate cleanly: both are also registered through
@@ -56,6 +56,12 @@ const getExtractHandler: PluginRouteHandler = (req, res) => {
 
 registerPluginRoute('pr-extract', 'GET', '/pr-extracts', listExtractsHandler);
 registerPluginRoute('pr-extract', 'GET', '/pr-extracts/:id', getExtractHandler);
+// Reserves 'pr-extract' against a plugin manifest claiming the same id — see
+// `RESERVED_ROUTE_PLUGIN_IDS` in `http-registry.ts`. Must run after the two
+// registrations above and before any plugin's `apply()` can reach
+// `registerPluginRoute`, same ordering as `freezeCoreHarnesses()` /
+// `freezeCoreProviders()`.
+freezeCoreHttpRoutes();
 
 /**
  * Finish the pr-extract run row for this task, if one exists. `pr_extracts`

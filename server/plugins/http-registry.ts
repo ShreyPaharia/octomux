@@ -26,6 +26,29 @@ import { childLogger } from '../logger.js';
 
 const logger = childLogger('plugins/http-registry');
 
+/**
+ * Plugin ids core itself registers routes under. Nothing reserves the id
+ * namespace by default — a third-party manifest row with `id: pr-extract`
+ * would otherwise share pr-extract's own bucket in `table`, and that
+ * plugin's unmount (`unregisterPluginRoutes`) would delete core's routes
+ * along with its own. Same shape as `CORE_HARNESS_IDS`
+ * (`server/harnesses/registry.ts`) / `CORE_PROVIDER_KINDS`
+ * (`server/integrations/registry.ts`).
+ */
+export const RESERVED_ROUTE_PLUGIN_IDS = ['pr-extract'] as const;
+
+let frozen = false;
+
+/**
+ * Locks `RESERVED_ROUTE_PLUGIN_IDS` against further registration. Call once
+ * core's own routes under a reserved id have registered (`pr-extract/routes.ts`
+ * calls this at module scope, right after its own `registerPluginRoute`
+ * calls) and before any plugin's `apply()` can run.
+ */
+export function freezeCoreHttpRoutes(): void {
+  frozen = true;
+}
+
 interface RouteEntry {
   method: HttpMethod;
   path: string; // normalized: always starts with '/'
@@ -97,6 +120,16 @@ export function registerPluginRoute(
   path: string,
   handler: PluginRouteHandler,
 ): void {
+  // Checked first, same reasoning as the harness/provider registries: once
+  // frozen, a reserved id is permanently closed to new registrations, core's
+  // own included — core only ever registers once, at boot, before freezing.
+  if (frozen && (RESERVED_ROUTE_PLUGIN_IDS as readonly string[]).includes(pluginId)) {
+    logger.warn(
+      { plugin_id: pluginId, method, path },
+      'refusing to register under reserved route plugin id',
+    );
+    return;
+  }
   const normalizedMethod = method.toUpperCase() as HttpMethod;
   const normalizedPath = normalizePath(path);
   const key = routeKey(normalizedMethod, normalizedPath);
@@ -117,8 +150,14 @@ export function registerPluginRoute(
 }
 
 /** Drops every route a plugin registered. Safe to call for a plugin that
- *  registered none — unmount calls it unconditionally. */
+ *  registered none — unmount calls it unconditionally. Refuses (logs a warn,
+ *  no-op) on any `RESERVED_ROUTE_PLUGIN_IDS` member — a plugin that squats a
+ *  reserved id must never be able to take core's routes down with it. */
 export function unregisterPluginRoutes(pluginId: string): void {
+  if ((RESERVED_ROUTE_PLUGIN_IDS as readonly string[]).includes(pluginId)) {
+    logger.warn({ plugin_id: pluginId }, 'refusing to unregister reserved route plugin id');
+    return;
+  }
   const pluginRoutes = table.get(pluginId);
   if (!pluginRoutes) return;
   table.delete(pluginId);
@@ -207,7 +246,8 @@ export function createPluginParentRouter(): Router {
   return router;
 }
 
-/** Test-only: clears the whole table. */
+/** Test-only: clears the whole table and unfreezes the reserved-id guard. */
 export function resetPluginRoutes(): void {
   table.clear();
+  frozen = false;
 }

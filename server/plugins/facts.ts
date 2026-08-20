@@ -29,13 +29,22 @@ const logger = childLogger('plugins/facts');
 /**
  * Fact types core owns. A plugin can never define or write one of these —
  * they are published by core and read by plugins.
+ *
+ * This is what core ACTUALLY publishes today, not an aspirational list.
+ * `core:review.published` is wired from `server/workflows/reviewer/publish-review.ts`.
+ * The original draft also listed `core:diff`, `core:tests.passed`, and
+ * `core:pr.opened` — cut here because nothing in `server/` emits them: diffs
+ * are computed on demand per request rather than produced at a point in
+ * time, nothing in core runs tests and records a verdict, and there's no
+ * single PR-creation call site (PR URLs arrive from several paths). Shipping
+ * a fact type no producer ever writes makes a promise the API doesn't keep,
+ * with no way for a plugin author to tell the difference from one that
+ * works. The bare `core:` prefix stays reserved wholesale either way
+ * (`defineFactType` above) so more can be added later without a plugin
+ * having squatted them first — add a member here only once a real producer
+ * exists for it.
  */
-export const CORE_FACT_TYPES = [
-  'core:diff',
-  'core:tests.passed',
-  'core:review.published',
-  'core:pr.opened',
-] as const;
+export const CORE_FACT_TYPES = ['core:review.published'] as const;
 
 interface FactTypeRegistration {
   pluginId: string;
@@ -97,6 +106,14 @@ export async function readFacts(taskId: string, opts?: FactQuery): Promise<Fact[
   return readFactsForTask(taskId, opts);
 }
 
+/** Whether a QUALIFIED fact type has a live `define()` registration. Used by
+ *  `ui-registry.ts` to warn on a `ctx.ui.panel({ fact })` typo — a binding
+ *  whose fact type nothing ever defined renders a permanently empty panel
+ *  with no other diagnostic. */
+export function isFactTypeDefined(qualifiedType: string): boolean {
+  return definitions.has(qualifiedType);
+}
+
 /** Subscribes to a QUALIFIED fact type. In-process emitter fired on write —
  *  never a DB poll. Returns an unsubscribe. */
 export function watchFacts(qualifiedType: string, onFact: (fact: Fact) => void): () => void {
@@ -134,18 +151,22 @@ function notifyWatchers(qualifiedType: string, fact: Fact): void {
   }
 }
 
-/** Drops a plugin's fact-type definitions and watchers. Called on unmount.
+/** Drops a plugin's fact-type definitions. Called on unmount.
  *  Does NOT delete already-written facts — those die with their task. */
 export function unregisterPluginFacts(pluginId: string): void {
   for (const [qualified, def] of definitions) {
     if (def.pluginId !== pluginId) continue;
     definitions.delete(qualified);
-    // Drops watchers on this type registered by ANY plugin, not just this one.
-    // That is deliberate: the type's only writer is going away, so no further
-    // fact of this type can ever arrive and every watcher on it is already
-    // dead. A watcher this plugin placed on somebody ELSE's type is released
-    // separately, by the effect stack in `context.ts` — see the note there.
-    watchers.delete(qualified);
+    // Watchers on this type are deliberately left alone. A watcher's
+    // lifecycle belongs to whichever plugin REGISTERED it, not to the
+    // plugin that defined the type: `ctx.facts.watch` (`context.ts`) pushes
+    // the unsubscribe onto the WATCHING plugin's own effect stack, released
+    // when that plugin itself unmounts. This used to delete the whole Set
+    // here on the theory that "the type's only writer is going away, so
+    // every watcher on it is already dead" — true for an UNLOAD, false for
+    // a RELOAD (SHR-254), which redefines this same qualified type moments
+    // later. Deleting the Set on reload silently killed a sibling plugin's
+    // live subscription — no error, no log, just a dead unsubscribe closure.
     // The ajv cache in `output-contract.ts` is keyed on the type string alone
     // and never notices a schema change. Reload (SHR-254) re-runs apply(),
     // which may redefine this same qualified type with a DIFFERENT schema;

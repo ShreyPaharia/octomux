@@ -13,6 +13,9 @@ import {
 import { manifestPath as defaultManifestPath } from './paths.js';
 import { listHarnesses, resetHarnesses, getHarness } from '../harnesses/registry.js';
 import { getWorkflow } from '../workflows/registry.js';
+import { resetPluginRoutes, pluginRouteCounts } from './http-registry.js';
+import { resetFacts } from './facts.js';
+import { subscribeServerEvents } from '../events.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -469,6 +472,8 @@ describe('unloadPlugin / reloadPlugin', () => {
   afterEach(() => {
     resetMountedPlugins();
     resetHarnesses();
+    resetPluginRoutes();
+    resetFacts();
   });
 
   it('reloadPlugin mounts a plugin that was not previously loaded', async () => {
@@ -617,6 +622,219 @@ plugins:
     const result = await unloadPlugin('never-mounted');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/not currently mounted/);
+  });
+
+  it('reloadPlugin serializes overlapping calls for the same id — apply() never runs concurrently', async () => {
+    // A save landing mid-reload used to fire a second, concurrent
+    // reloadPlugin() for the same id (Finding 1). Fire two calls back to
+    // back with no await between them and prove the second waits for the
+    // first: a module-scope counter tracks how many apply() invocations for
+    // THIS id are in flight at once — it must never exceed 1.
+    const modPath = path.join(tmpDir, 'racer.mjs');
+    fs.writeFileSync(
+      modPath,
+      `let concurrent = 0;
+       export async function apply(ctx) {
+         concurrent++;
+         globalThis.__racerMaxConcurrent = Math.max(globalThis.__racerMaxConcurrent || 0, concurrent);
+         await new Promise((r) => setTimeout(r, 40));
+         concurrent--;
+         ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) });
+       }\n`,
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: racer
+    name: ${modPath}
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(getHarness('racer:v1').id).toBe('racer:v1');
+
+    delete (globalThis as Record<string, unknown>).__racerMaxConcurrent;
+
+    const [r1, r2] = await Promise.all([
+      reloadPlugin({ manifestPath, resolveFrom: nodeModulesDir, id: 'racer' }),
+      reloadPlugin({ manifestPath, resolveFrom: nodeModulesDir, id: 'racer' }),
+    ]);
+
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect((globalThis as Record<string, unknown>).__racerMaxConcurrent).toBe(1);
+    expect(getHarness('racer:v1').id).toBe('racer:v1');
+    delete (globalThis as Record<string, unknown>).__racerMaxConcurrent;
+  });
+
+  it('reloadPlugin restores the previously-working version when the new version fails to apply, and reports restored: true', async () => {
+    const modPath = path.join(tmpDir, 'rollback-good.mjs');
+    fs.writeFileSync(
+      modPath,
+      "export async function apply(ctx) { ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) }); }\n",
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: rollbackgood
+    name: ${modPath}
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(getHarness('rollbackgood:v1').id).toBe('rollbackgood:v1');
+
+    // A bad dev edit — the new version throws in apply().
+    fs.writeFileSync(
+      modPath,
+      "export async function apply() { throw new Error('bad edit'); }\n",
+      'utf-8',
+    );
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'rollbackgood',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('bad edit');
+      expect(result.restored).toBe(true);
+    }
+    // The OLD version is live again, not just left un-torn-down — proves the
+    // module was actually re-applied against a fresh context.
+    expect(getHarness('rollbackgood:v1').id).toBe('rollbackgood:v1');
+    expect(getMountedPlugin('rollbackgood')).toBeDefined();
+  });
+
+  it('reloadPlugin reports restored: false and leaves nothing mounted when the rollback itself cannot re-apply', async () => {
+    // The old module's apply() is only safe to run once (its closure state
+    // makes a second call throw) — this is the "genuine restore is not
+    // achievable" branch: the result must say so honestly rather than
+    // pretend a rollback happened.
+    const modPath = path.join(tmpDir, 'rollback-bad.mjs');
+    fs.writeFileSync(
+      modPath,
+      `let calls = 0;
+       export async function apply(ctx) {
+         calls++;
+         if (calls > 1) throw new Error('not idempotent — cannot re-apply');
+         ctx.harnesses.register({ id: 'v1', displayName: 'V1', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) });
+       }\n`,
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: rollbackbad
+    name: ${modPath}
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(getHarness('rollbackbad:v1').id).toBe('rollbackbad:v1');
+
+    // Edited on disk to a version that fails immediately — forces a rollback
+    // attempt against the ORIGINAL module object (still in memory, calls===1).
+    fs.writeFileSync(
+      modPath,
+      "export async function apply() { throw new Error('new version broken'); }\n",
+      'utf-8',
+    );
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'rollbackbad',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toContain('new version broken');
+      expect(result.restored).toBe(false);
+    }
+    expect(() => getHarness('rollbackbad:v1')).toThrow();
+    expect(getMountedPlugin('rollbackbad')).toBeUndefined();
+  });
+
+  it('a plugin that registers a route and a fact type and THEN throws in apply() leaves nothing registered, so a later reload of the same id succeeds', async () => {
+    // Finding 5: before the fix, a partial apply() failure only revoked the
+    // context — the route/fact registered before the throw leaked forever,
+    // `mounted` never got an entry, and the next reload skipped the unmount
+    // (mounted.has() === false) and hit "already registered"/"already
+    // defined" against those leftovers.
+    const modPath = path.join(tmpDir, 'partial-fail.mjs');
+    fs.writeFileSync(
+      modPath,
+      `export async function apply(ctx) {
+         ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
+         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+         throw new Error('boom after partial registration');
+       }\n`,
+      'utf-8',
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: partialfail
+    name: ${modPath}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'partialfail', phase: 'apply' });
+    // Nothing survives the failed apply() — the route it registered before
+    // throwing is already gone, and the plugin was never added to `mounted`.
+    expect(pluginRouteCounts()['partialfail']).toBeUndefined();
+    expect(getMountedPlugin('partialfail')).toBeUndefined();
+
+    // Fix the source (no throw) and reload — must succeed, not error with
+    // "already registered" / "already defined" against the failed attempt's
+    // leftovers.
+    fs.writeFileSync(
+      modPath,
+      `export async function apply(ctx) {
+         ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
+         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+       }\n`,
+      'utf-8',
+    );
+
+    const result = await reloadPlugin({
+      manifestPath,
+      resolveFrom: nodeModulesDir,
+      id: 'partialfail',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(pluginRouteCounts()['partialfail']).toBe(1);
+  });
+
+  it('broadcasts plugin:ui-updated on a successful mount', async () => {
+    const abs = writeModule('broadcast-mount.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: broadcastmount
+    name: ${abs}
+`);
+
+    const events: unknown[] = [];
+    const unsubscribe = subscribeServerEvents((event) => events.push(event));
+    let result;
+    try {
+      result = await reloadPlugin({
+        manifestPath,
+        resolveFrom: nodeModulesDir,
+        id: 'broadcastmount',
+      });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(result.ok).toBe(true);
+    expect(events).toContainEqual({
+      type: 'plugin:ui-updated',
+      payload: { pluginId: 'broadcastmount' },
+    });
   });
 });
 

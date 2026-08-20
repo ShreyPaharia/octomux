@@ -21,9 +21,10 @@ import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
 import { childLogger } from '../logger.js';
+import { broadcast } from '../events.js';
 import { readManifest } from './manifest.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
-import { createPluginContext, revokePluginContext } from './context.js';
+import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
 import type { UnmountReport } from './lifecycle.js';
 import type { LoadReport, LoadedPlugin, PluginContext, PluginRow } from '@octomux/plugin-api';
@@ -33,11 +34,15 @@ const logger = childLogger('plugins/loader');
 const DEFAULT_APPLY_TIMEOUT_MS = 10_000;
 
 /** Runtime handle for one currently-mounted plugin — everything `unloadPlugin`/
- *  `reloadPlugin` need to tear it down or re-mount it. */
+ *  `reloadPlugin` need to tear it down or re-mount it. `mod` is the already-
+ *  evaluated module object (kept alive by this reference) — `reloadPlugin`
+ *  uses it to roll a failed reload back to the previously-working version
+ *  without re-importing anything. */
 export interface MountedPlugin {
   ctx: PluginContext;
   row: PluginRow;
   resolvedPath: string;
+  mod: Record<string, unknown>;
 }
 
 /** pluginId -> live mount state, for every plugin currently applied and not
@@ -135,15 +140,25 @@ function pluginApply(mod: Record<string, unknown>): ((ctx: PluginContext) => unk
 }
 
 type LoadOneResult =
-  | { ok: true; loaded: Omit<LoadedPlugin, 'order'>; ctx: PluginContext; resolvedPath: string }
+  | {
+      ok: true;
+      loaded: Omit<LoadedPlugin, 'order'>;
+      ctx: PluginContext;
+      resolvedPath: string;
+      mod: Record<string, unknown>;
+    }
+  | { ok: false; failed: LoadReport['failed'][number] };
+
+type ResolveImportResult =
+  | { ok: true; mod: Record<string, unknown>; resolvedPath: string }
   | { ok: false; failed: LoadReport['failed'][number] };
 
 /**
- * Resolves, imports, and applies ONE manifest row — the exact body
- * `loadPlugins()`'s boot loop runs per row, factored out so `reloadPlugin()`
- * can run the identical sequence for a single row without a whole-manifest
- * pass. Never throws; failure becomes the `{ ok: false }` branch, matching
- * `loadPlugins()`'s own per-row isolation policy.
+ * Resolves and imports ONE manifest row's module — split out from applying it
+ * so `reloadPlugin()`'s rollback path can re-apply an already-resolved OLD
+ * module without re-resolving/re-importing it. Never throws; failure becomes
+ * the `{ ok: false }` branch, matching `loadPlugins()`'s per-row isolation
+ * policy.
  *
  * `importPath` is a seam: `reloadPlugin()` passes a cache-busted specifier so
  * a dev edit to a local-path plugin's source is actually re-evaluated — the
@@ -151,13 +166,13 @@ type LoadOneResult =
  * the same path a second time silently hands back the stale, already-
  * evaluated module.
  */
-async function loadOneRow(
+async function resolveAndImportRow(
   row: PluginRow,
   resolve: (name: string) => Promise<string>,
   resolveFrom: string,
   applyTimeoutMs: number,
-  importPath: (resolvedPath: string) => Promise<Record<string, unknown>> = (p) => import(p),
-): Promise<LoadOneResult> {
+  importPath: (resolvedPath: string) => Promise<Record<string, unknown>>,
+): Promise<ResolveImportResult> {
   let resolvedPath: string;
   try {
     resolvedPath = await resolve(row.name);
@@ -204,6 +219,30 @@ async function loadOneRow(
     };
   }
 
+  return { ok: true, mod, resolvedPath };
+}
+
+/**
+ * Applies an already-resolved/imported module for a row — the second half of
+ * what used to be `loadOneRow()`, split out so `reloadPlugin()`'s rollback
+ * path can re-apply the OLD module (still in memory) against a fresh context
+ * without touching disk again.
+ *
+ * On failure, unmounts whatever the plugin managed to register before it
+ * threw/timed out (SHR-254 review finding: a partial `apply()` used to only
+ * revoke the context, leaking every registration made before the throw and
+ * wedging the next reload against "already registered"/"already defined").
+ * `unmountPlugin` is safe to call here even though this plugin was never
+ * added to `mounted` — every registry's `unregisterPlugin*` is a no-op-safe
+ * delete, and `unmountPlugin` itself documents being safe when nothing was
+ * released.
+ */
+async function applyResolvedModule(
+  row: PluginRow,
+  mod: Record<string, unknown>,
+  resolvedPath: string,
+  applyTimeoutMs: number,
+): Promise<LoadOneResult> {
   const apply = pluginApply(mod);
   if (!apply) {
     const message = `plugin module has no apply() export`;
@@ -218,17 +257,24 @@ async function loadOneRow(
   try {
     await withTimeout(Promise.resolve(apply(ctx)), applyTimeoutMs, `plugin "${row.id}" apply()`);
   } catch (err) {
-    // A timed-out apply() races on, uncancelled, in the background. Revoke
-    // the context now so a late registration after the deadline can never
-    // reach the live registries — a plugin reported `failed` must not be
-    // able to silently install a harness/provider/workflow later.
-    revokePluginContext(ctx);
+    // A timed-out apply() races on, uncancelled, in the background. Tear
+    // down whatever it already registered AND revoke the context (via
+    // unmountPlugin's own disposePluginContext step) so neither a late
+    // registration after the deadline, nor a leftover registration from
+    // before the throw, can survive a plugin reported `failed`.
+    await unmountPlugin(row.id, ctx);
     logger.warn({ id: row.id, name: row.name, err }, 'plugin apply() failed');
     return {
       ok: false,
       failed: { id: row.id, name: row.name, error: errorMessage(err), phase: 'apply' },
     };
   }
+
+  // SHR-256: a successful mount changes what `GET /api/plugin-ui/contributions`
+  // returns (this plugin may have contributed panels), so tell clients to
+  // refetch. Covers every path that ends here: initial boot load, an
+  // explicit reload, and reloadPlugin's rollback re-apply of the old module.
+  broadcast({ type: 'plugin:ui-updated', payload: { pluginId: row.id } });
 
   return {
     ok: true,
@@ -241,7 +287,26 @@ async function loadOneRow(
     },
     ctx,
     resolvedPath,
+    mod,
   };
+}
+
+/**
+ * Resolves, imports, and applies ONE manifest row — the exact body
+ * `loadPlugins()`'s boot loop runs per row, factored out so `reloadPlugin()`
+ * can run the identical sequence for a single row without a whole-manifest
+ * pass. Never throws; failure becomes the `{ ok: false }` branch.
+ */
+async function loadOneRow(
+  row: PluginRow,
+  resolve: (name: string) => Promise<string>,
+  resolveFrom: string,
+  applyTimeoutMs: number,
+  importPath: (resolvedPath: string) => Promise<Record<string, unknown>> = (p) => import(p),
+): Promise<LoadOneResult> {
+  const resolved = await resolveAndImportRow(row, resolve, resolveFrom, applyTimeoutMs, importPath);
+  if (!resolved.ok) return resolved;
+  return applyResolvedModule(row, resolved.mod, resolved.resolvedPath, applyTimeoutMs);
 }
 
 /**
@@ -334,7 +399,12 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
       continue;
     }
 
-    mounted.set(row.id, { ctx: result.ctx, row, resolvedPath: result.resolvedPath });
+    mounted.set(row.id, {
+      ctx: result.ctx,
+      row,
+      resolvedPath: result.resolvedPath,
+      mod: result.mod,
+    });
     loaded.push({ ...result.loaded, order: order++ });
   }
 
@@ -382,12 +452,29 @@ export interface ReloadPluginOptions {
 
 export type ReloadResult =
   | { ok: true; loaded: LoadedPlugin }
-  | { ok: false; reason: string; unloadable?: false };
+  | {
+      ok: false;
+      reason: string;
+      unloadable?: false;
+      /**
+       * Only meaningful when a previously-working mount existed and the new
+       * version failed to apply (i.e. `unloadable` is not set): `true` means
+       * the old version was successfully re-applied and is live again;
+       * `false` means restoring it ALSO failed and the plugin is now fully
+       * unmounted. `undefined` means there was nothing to restore (fresh
+       * mount failure, or refusal before any teardown happened).
+       */
+      restored?: boolean;
+    };
 
 /**
- * `octomux plugins reload <id>` (and, later, the dev file watcher): unmount
- * the plugin if it's currently mounted, then mount it fresh from the
- * manifest row's CURRENT on-disk code. Cache-busts the import (`?t=<epoch
+ * The actual reload sequence for one plugin id — everything `reloadPlugin()`
+ * does except serializing concurrent calls (see below). Split out so the
+ * public `reloadPlugin()` can chain overlapping calls onto this rather than
+ * running two of these concurrently for the same id.
+ *
+ * Unmounts the plugin if it's currently mounted, then mounts it fresh from
+ * the manifest row's CURRENT on-disk code. Cache-busts the import (`?t=<epoch
  * ms>` query on the specifier) so a local-path row's edited source is
  * actually re-evaluated rather than served stale from the ESM module cache
  * (verified against bun's dynamic `import()` — a distinct query string is a
@@ -395,8 +482,14 @@ export type ReloadResult =
  *
  * Refuses (no unmount, no remount) if the row is missing/disabled in the
  * manifest, or if the currently-mounted instance is `unloadable: false`.
+ *
+ * Not atomic by nature (unmount, then a real import + apply happen in
+ * between) — if the new version fails, the previously-mounted module
+ * reference (captured before teardown) is re-applied against a fresh context
+ * to restore the old working state rather than leaving the plugin dark. See
+ * `ReloadResult.restored` for how that outcome is reported.
  */
-export async function reloadPlugin(opts: ReloadPluginOptions): Promise<ReloadResult> {
+async function reloadPluginOnce(opts: ReloadPluginOptions): Promise<ReloadResult> {
   let manifest;
   try {
     manifest = readManifest(opts.manifestPath);
@@ -412,7 +505,12 @@ export async function reloadPlugin(opts: ReloadPluginOptions): Promise<ReloadRes
     return { ok: false, reason: `plugin "${opts.id}" is disabled in the manifest` };
   }
 
-  if (mounted.has(opts.id)) {
+  // Captured BEFORE any teardown — `unloadPlugin` below deletes this same
+  // entry from `mounted`, but the module object it references stays alive as
+  // long as we hold this reference, so a failed reload can still re-apply it.
+  const previous = mounted.get(opts.id);
+
+  if (previous) {
     const unloaded = await unloadPlugin(opts.id);
     if (!unloaded.ok) {
       return { ok: false, reason: unloaded.reason, unloadable: false };
@@ -429,12 +527,85 @@ export async function reloadPlugin(opts: ReloadPluginOptions): Promise<ReloadRes
     applyTimeoutMs,
     (p) => import(`${p}?t=${cacheBust}`),
   );
-  if (!result.ok) {
+  if (result.ok) {
+    mounted.set(row.id, {
+      ctx: result.ctx,
+      row,
+      resolvedPath: result.resolvedPath,
+      mod: result.mod,
+    });
+    return { ok: true, loaded: { ...result.loaded, order: 0 } };
+  }
+
+  // New version failed. Nothing was previously mounted (a fresh-install
+  // failure, or the row itself never applied before) — there is nothing to
+  // roll back to.
+  if (!previous) {
     return { ok: false, reason: result.failed.error };
   }
 
-  mounted.set(row.id, { ctx: result.ctx, row, resolvedPath: result.resolvedPath });
-  return { ok: true, loaded: { ...result.loaded, order: 0 } };
+  // Restore the previously-working version from the module reference we
+  // captured before unmounting it — no re-import, just re-running its
+  // apply() against a brand new context.
+  const restore = await applyResolvedModule(
+    previous.row,
+    previous.mod,
+    previous.resolvedPath,
+    applyTimeoutMs,
+  );
+  if (restore.ok) {
+    mounted.set(opts.id, {
+      ctx: restore.ctx,
+      row: previous.row,
+      resolvedPath: previous.resolvedPath,
+      mod: previous.mod,
+    });
+    logger.warn(
+      { id: opts.id, error: result.failed.error },
+      'plugin reload failed — restored the previously-working version',
+    );
+    return { ok: false, reason: result.failed.error, restored: true };
+  }
+
+  // The restore attempt ALSO failed (e.g. the old apply() isn't idempotent
+  // and can't safely run twice). Nothing is mounted now — say so plainly
+  // rather than pretending a rollback happened.
+  logger.warn(
+    { id: opts.id, reloadError: result.failed.error, restoreError: restore.failed.error },
+    'plugin reload failed and the previous version could not be restored — plugin is now unmounted',
+  );
+  return { ok: false, reason: result.failed.error, restored: false };
+}
+
+/** In-flight `reloadPluginOnce()` calls, keyed by plugin id — see
+ *  `reloadPlugin()`'s doc comment. */
+const inFlightReloads = new Map<string, Promise<ReloadResult>>();
+
+/**
+ * `octomux plugins reload <id>` (and the dev file watcher) call this.
+ *
+ * Serializes reloads per plugin id. The dev file watcher debounces per id
+ * (~300ms), but a save landing after a debounced reload has already started
+ * — and before it resolves — would otherwise fire a second, CONCURRENT
+ * `reloadPluginOnce()` for the same id, both racing `mounted.has()` /
+ * `unloadPlugin()` / `mounted.set()` against each other. Chain a new request
+ * onto whatever is already in flight for that id instead of running them
+ * concurrently. The map entry is removed once the chained call settles, so
+ * it never grows past the number of ids currently mid-reload.
+ */
+export function reloadPlugin(opts: ReloadPluginOptions): Promise<ReloadResult> {
+  const prior = inFlightReloads.get(opts.id) ?? Promise.resolve();
+  const chained = prior.then(
+    () => reloadPluginOnce(opts),
+    () => reloadPluginOnce(opts),
+  );
+  inFlightReloads.set(opts.id, chained);
+  chained.finally(() => {
+    if (inFlightReloads.get(opts.id) === chained) {
+      inFlightReloads.delete(opts.id);
+    }
+  });
+  return chained;
 }
 
 export interface WatchLocalPluginsOptions {

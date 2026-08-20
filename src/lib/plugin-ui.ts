@@ -4,9 +4,8 @@
  * Client data layer for `ctx.ui` contributions (SHR-256). Fetches the binding
  * table from `GET /api/plugin-ui/contributions` (server/routes/plugin-ui.ts)
  * and, per binding, the fact payload it renders from
- * `GET /api/tasks/:id/facts` (server/routes/plugin-facts.ts — new in this
- * change, NOT YET mounted; see that file's module doc for the one-line
- * `server/api.ts` wiring the controller needs to add).
+ * `GET /api/tasks/:id/facts` (server/routes/plugin-facts.ts, mounted in
+ * `server/api.ts`).
  *
  * Follows the same `useResource` shape as everything else in
  * `src/lib/hooks.ts` — no hand-rolled fetch/state pattern. `request` is
@@ -69,11 +68,11 @@ function readTaskFacts(taskId: string, type: string): Promise<PluginFact[]> {
  *
  * Refetches on a `plugin:ui-updated` event so a plugin mount/unmount updates
  * the UI with no page reload (ruling R7, plans/2026-08-20-plugin-runtime-p0.md).
- * That event type does not exist on `ServerEvent` yet (`packages/types/src/
- * index.ts`) — `server/plugins/lifecycle.ts` (SHR-254, not landed) is where a
- * real unmount would call `broadcast()`. `event.type` is cast to `string` so
- * this compiles today and starts working the moment that lands; until then
- * the filter simply never matches and contributions only refresh on remount.
+ * The event type is declared on `ServerEvent` (`packages/types/src/index.ts`)
+ * and broadcast from `server/plugins/lifecycle.ts` and `server/plugins/loader.ts`
+ * (SHR-254, landed). `event.type` is still cast to `string` here only because
+ * this module doesn't otherwise import `ServerEvent`, not because the type is
+ * missing.
  */
 export function usePluginUiContributions(slot: UiSlot) {
   const { data, loading, error } = useResource<UiContribution[]>(

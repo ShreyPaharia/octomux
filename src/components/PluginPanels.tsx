@@ -1,10 +1,10 @@
 /**
  * src/components/PluginPanels.tsx
  *
- * Renders every `ctx.ui` contribution for one slot (SHR-256). Not wired into
- * any page by this change — see the module doc on `src/lib/plugin-ui.ts` for
- * the data layer, and the SHR-256 task report for the one line the task
- * detail page (`src/pages/TaskDetail.tsx`) needs to mount `slot="task.panel"`.
+ * Renders every `ctx.ui` contribution for one slot (SHR-256). Wired into the
+ * task detail page (`src/pages/TaskDetail.tsx`), which mounts
+ * `<PluginPanels slot="task.panel" taskId={task.id} />`. See the module doc
+ * on `src/lib/plugin-ui.ts` for the data layer.
  *
  * A plugin contributes a binding, never a component (packages/plugin-api's
  * `UiRegistrar` doc) — this is the ONLY place plugin-declared UI reaches the

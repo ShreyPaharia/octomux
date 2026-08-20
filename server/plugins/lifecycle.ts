@@ -10,6 +10,7 @@
  * per-plugin isolation policy).
  */
 import { childLogger } from '../logger.js';
+import { broadcast } from '../events.js';
 import { disposePluginContext } from './context.js';
 import { unregisterPluginRoutes, pluginRouteCounts } from './http-registry.js';
 import { unregisterPluginFacts } from './facts.js';
@@ -80,15 +81,18 @@ export function getPluginUnloadability(pluginId: string): PluginUnloadability {
 
 /** Runs `fn`, logging + recording a failure instead of throwing. Returns the
  *  result on success, `undefined` on failure — every caller below treats
- *  `undefined` as "this step released nothing". */
-function step<T>(
+ *  `undefined` as "this step released nothing". `fn` may be sync or async —
+ *  the `await` inside the `try` catches a rejected promise too, not just a
+ *  synchronous throw, so one failing step (sync or async) never strands the
+ *  rest of the sequence. */
+async function step<T>(
   pluginId: string,
   failures: UnmountFailure[],
   name: string,
-  fn: () => T,
-): T | undefined {
+  fn: () => T | Promise<T>,
+): Promise<T | undefined> {
   try {
-    return fn();
+    return await fn();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     failures.push({ step: name, error: message });
@@ -113,31 +117,31 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   // Snapshot counts BEFORE each unregister call — the registries only expose
   // "what's there now", not "what did I just remove".
   const routeCount = pluginRouteCounts()[pluginId] ?? 0;
-  step(pluginId, failures, 'routes', () => unregisterPluginRoutes(pluginId));
+  await step(pluginId, failures, 'routes', () => unregisterPluginRoutes(pluginId));
 
-  step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
+  await step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
   // No public count for fact-type definitions — `facts.ts` is DO NOT EDIT for
   // this task and exposes no getter beyond `unregisterPluginFacts` itself.
 
   const uiCount = listUiContributions().filter((c) => c.pluginId === pluginId).length;
-  step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
+  await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
 
   const workflowKinds =
-    step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId)) ?? [];
+    (await step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId))) ?? [];
 
   const prefix = `${pluginId}:`;
   const harnessIds = listHarnesses()
     .map((h) => h.id)
     .filter((id) => id.startsWith(prefix));
   for (const id of harnessIds) {
-    step(pluginId, failures, `harness:${id}`, () => unregisterHarness(id));
+    await step(pluginId, failures, `harness:${id}`, () => unregisterHarness(id));
   }
 
   const providerKinds = listProviders()
     .map((p) => p.kind)
     .filter((kind) => kind.startsWith(prefix));
   for (const kind of providerKinds) {
-    step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
+    await step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
   }
 
   const effectFailures =
@@ -162,6 +166,11 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   if (failures.length > 0) {
     logger.warn({ plugin_id: pluginId, failures }, 'plugin unmount had failures');
   }
+
+  // SHR-256: a mount/unmount changes what `GET /api/plugin-ui/contributions`
+  // returns, so the client must refetch — broadcast unconditionally, even if
+  // some steps above failed, since ui-registry's own step still ran.
+  broadcast({ type: 'plugin:ui-updated', payload: { pluginId } });
 
   return { pluginId, released, failures };
 }

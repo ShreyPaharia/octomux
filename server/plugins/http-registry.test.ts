@@ -14,6 +14,8 @@ const {
   pluginRouteCounts,
   createPluginParentRouter,
   resetPluginRoutes,
+  freezeCoreHttpRoutes,
+  RESERVED_ROUTE_PLUGIN_IDS,
 } = await import('./http-registry.js');
 const { errorMiddleware } = await import('../error-middleware.js');
 const { badRequest } = await import('../services/errors.js');
@@ -201,5 +203,34 @@ describe('http-registry', () => {
     resetPluginRoutes();
 
     expect(pluginRouteCounts()).toEqual({});
+  });
+
+  // Finding 2: a plugin manifest claiming a reserved id (e.g. `pr-extract`)
+  // must not be able to add its own routes into core's bucket, and must not
+  // be able to take core's routes down on unmount.
+  describe('reserved route plugin ids', () => {
+    const reservedId = RESERVED_ROUTE_PLUGIN_IDS[0];
+
+    it('a plugin cannot claim a reserved id once frozen', () => {
+      registerPluginRoute(reservedId, 'GET', '/core-route', () => {});
+      freezeCoreHttpRoutes();
+
+      registerPluginRoute(reservedId, 'GET', '/attacker-route', () => {});
+
+      expect(pluginRouteCounts()[reservedId]).toBe(1);
+    });
+
+    it("a reserved id's routes survive an unregister attempt", async () => {
+      registerPluginRoute(reservedId, 'GET', '/core-route', (_req, res) => {
+        res.status(200).json({ ok: true });
+      });
+      freezeCoreHttpRoutes();
+
+      unregisterPluginRoutes(reservedId);
+
+      expect(pluginRouteCounts()[reservedId]).toBe(1);
+      const res = await request(makeApp()).get(`/api/p/${reservedId}/core-route`);
+      expect(res.status).toBe(200);
+    });
   });
 });

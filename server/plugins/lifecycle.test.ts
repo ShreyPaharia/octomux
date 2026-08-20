@@ -7,6 +7,8 @@ import { resetFacts } from './facts.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
 import { resetProviders, getProvider, CORE_PROVIDER_KINDS } from '../integrations/registry.js';
+import { subscribeServerEvents } from '../events.js';
+import type { PluginContext } from '@octomux/plugin-api';
 
 // `workflows/registry.ts` has no resetWorkflows() (deliberate — presets.ts
 // relies on the registry never being wiped mid-process). This file's own
@@ -167,5 +169,45 @@ describe('unmountPlugin', () => {
     // targets `<pluginId>:` prefixed ids, which core ids never are.
     expect(CORE_HARNESS_IDS.some((id) => id.includes(':'))).toBe(false);
     expect(CORE_PROVIDER_KINDS.some((k) => k.includes(':'))).toBe(false);
+  });
+
+  it('broadcasts plugin:ui-updated after every unmount', async () => {
+    const pluginId = 'lc-broadcast';
+    const ctx = createPluginContext(pluginId);
+    ctx.harnesses.register(fakeHarness('v1'));
+
+    const events: unknown[] = [];
+    const unsubscribe = subscribeServerEvents((event) => events.push(event));
+    try {
+      await unmountPlugin(pluginId, ctx);
+    } finally {
+      unsubscribe();
+    }
+
+    // SHR-256: the client's plugin-ui panel list is stale the moment a
+    // mount/unmount changes what's registered — this is the signal it
+    // refetches on (`src/lib/plugin-ui.ts`).
+    expect(events).toContainEqual({ type: 'plugin:ui-updated', payload: { pluginId } });
+  });
+
+  it('a step that fails ASYNCHRONOUSLY (a rejected promise, not a sync throw) is caught too, and unmountPlugin still resolves with a report', async () => {
+    // `disposePluginContext` throws synchronously when handed a context it
+    // did not create ("context was not created by createPluginContext") —
+    // but it's an `async function`, so that synchronous throw is delivered
+    // as a REJECTED PROMISE to the caller, not a synchronous exception. Only
+    // `step()` catching an awaited `fn()` (not just a synchronously-thrown
+    // `fn()`) can catch this. Before the fix this rejection propagated
+    // straight out of `unmountPlugin`, skipping the trailing log/broadcast/
+    // return — this test would see `await unmountPlugin(...)` itself reject.
+    const bogusCtx = {} as unknown as PluginContext;
+
+    const report = await unmountPlugin('lc-async-step-fail', bogusCtx);
+
+    const effectsFailure = report.failures.find((f) => f.step === 'effects');
+    expect(effectsFailure).toBeDefined();
+    expect(effectsFailure?.error).toMatch(/not created by createPluginContext/);
+    // Nothing else in the sequence was stranded — routes/ui/etc. still ran and
+    // reported normally, exactly as the module's own doc comment promises.
+    expect(report.released.routes).toBe(0);
   });
 });
