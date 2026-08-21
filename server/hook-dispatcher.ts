@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 import { octomuxRoot } from './octomux-root.js';
 import { getHookEnabled, getTaskExternalRefs } from './repositories/index.js';
+import { evaluatePolicy } from './plugins/policy.js';
 import type { HookEventName, HookEnvelope } from './hook-types.js';
 
 export type { HookEventName, HookEnvelope };
@@ -342,9 +343,34 @@ async function fireIntegrationProviders(
       resolvedConfig = integration.config;
     }
 
+    const outcome = await evaluatePolicy('integration.send', {
+      taskId: enrichedEnvelope.task?.id,
+      data: { integrationKind: integration.kind, event, payload: enrichedEnvelope.data },
+    });
+    if (!outcome.allowed) {
+      integLogger.info(
+        {
+          task_id: enrichedEnvelope.task?.id,
+          integration_kind: integration.kind,
+          plugin_id: outcome.pluginId,
+          reason: outcome.reason,
+        },
+        'integration send denied by policy',
+      );
+      continue;
+    }
+    const patchedPayload = outcome.data.payload;
+    const envelopeToSend: HookEnvelope =
+      patchedPayload &&
+      typeof patchedPayload === 'object' &&
+      !Array.isArray(patchedPayload) &&
+      patchedPayload !== enrichedEnvelope.data
+        ? { ...enrichedEnvelope, data: patchedPayload as Record<string, unknown> }
+        : enrichedEnvelope;
+
     try {
       await Promise.race([
-        provider.handler(enrichedEnvelope, resolvedConfig),
+        provider.handler(envelopeToSend, resolvedConfig),
         new Promise<void>((_, reject) =>
           setTimeout(() => reject(new Error('provider handler timed out')), timeoutMs),
         ),

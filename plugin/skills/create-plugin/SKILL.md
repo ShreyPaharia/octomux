@@ -129,6 +129,93 @@ load-report `failed` row instead of a boot crash somewhere downstream:
   See the `configure-harness` skill for which `Harness` members are still unwired
   even once registration succeeds.
 
+## Capability grants — declare or your plugin won't load
+
+Every registrar call in `apply()` is gated by a capability the manifest row must
+declare in `grants:`. Undeclared is **denied**, not warned: the registrar throws
+synchronously, `apply()` fails, and your row lands in the load report as a
+`phase: 'apply'` failure naming the plugin and the missing capability. There is
+no partial-load path — if `ctx.policy.intercept()` throws, none of your other
+registrar calls that ran before it are undone, but the plugin as a whole is
+marked failed.
+
+| Capability              | Gates                         | Local id field / method |
+| ----------------------- | ----------------------------- | ----------------------- |
+| `workflows.register`    | `ctx.workflows.register()`    | `kind`                  |
+| `integrations.register` | `ctx.integrations.register()` | `kind`                  |
+| `harnesses.register`    | `ctx.harnesses.register()`    | `id`                    |
+| `http.route`            | `ctx.http.route()`            | —                       |
+| `facts.define`          | `ctx.facts.define()`          | `type`                  |
+| `facts.put`             | `ctx.facts.put()`             | —                       |
+| `ui.panel`              | `ctx.ui.panel()`              | —                       |
+| `policy.intercept`      | `ctx.policy.intercept()`      | —                       |
+
+Reads are ungated — `ctx.facts.read`/`.watch`, `ctx.settings`, `ctx.logger`,
+`ctx.effect` need no grant. Declare only what you call:
+
+```yaml
+plugins:
+  - id: spendcap
+    name: octomux-plugin-spendcap
+    grants: [policy.intercept, facts.put]
+```
+
+Widening an installed plugin's grants later (e.g. a new version starts calling
+`facts.define`) does **not** take effect on the operator's next boot just
+because your published manifest snippet says so — the operator's own
+`plugin-grants.json` ledger has to catch up via `octomux plugins approve <id>`.
+Document any new grant your release adds in your changelog; an operator who
+skips the approve step gets your call denied, not a silent no-op.
+
+## `ctx.policy` — refusing or patching an intent
+
+`ctx.policy.intercept(point, hook)` is the one registrar that can say no. It
+needs the `policy.intercept` grant. Four points: `task.launch`,
+`harness.resume`, `review.publish`, `integration.send`. Your hook gets a
+`PolicyIntent` (`point`, optional `taskId`/`repoPath`, and point-specific
+`data`) and returns one of `{ deny: string }`, `{ patch: {...} }`, or nothing
+(no opinion — pass through).
+
+Two shapes worth knowing:
+
+```js
+// A spend cap denying task.launch past a budget.
+ctx.policy.intercept('task.launch', async (intent) => {
+  if (await overBudget(intent.repoPath)) {
+    return { deny: 'monthly spend cap reached for this repo' };
+  }
+});
+
+// A router patching the model for a specific harness.
+ctx.policy.intercept('task.launch', (intent) => {
+  if (intent.data.harnessId === 'cursor') {
+    return { patch: { model: 'gpt-5.1-codex' } };
+  }
+});
+```
+
+Only `model` (`task.launch`, `harness.resume`), `verdict` (`review.publish`), and
+`payload` (`integration.send`) are patchable — a patch key a call site doesn't
+list is ignored, core decides what it honours. Hooks for a point run in
+registration order; the first `deny` short-circuits and later hooks never run;
+a `patch` merges into `intent.data` so the next hook sees your patched values.
+
+**Fail open, on purpose.** A hook that throws, or runs past the host's timeout
+(5s), is logged and treated as "no opinion" — it does not block the intent.
+Write your hook assuming a crash costs you an audit log line, not an outage:
+if being unable to reach an external spend-tracking API should be a hard stop,
+you have to encode that yourself (e.g. deny when the budget check can't be
+reached), because a thrown error from that same check fails open instead.
+
+**What gets recorded.** A deny or patch on a task-scoped intent (one with a
+`taskId`) is written twice: a `core:policy.decision` fact (readable via
+`ctx.facts.read`/`.watch` by any plugin) and a `task_updates` row of kind
+`policy` that shows in the task's Activity panel. An intent without a `taskId`
+is logged but not recorded as a fact.
+
+This is not containment — see `add-plugin` for why a `policy` deny doesn't stop
+a plugin's own code from doing whatever it wants outside `ctx`.
+
 ## Local vs. qualified ids
 
 You always declare a **local, bare** id (`kind: 'changelog'`, `id: 'my-harness'`) —

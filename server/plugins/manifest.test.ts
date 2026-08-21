@@ -246,6 +246,65 @@ plugins:
   });
 });
 
+describe('grants', () => {
+  it.each([
+    ['a single valid capability', ['http.route'], ['http.route']],
+    [
+      'multiple valid capabilities',
+      ['http.route', 'ui.panel', 'policy.intercept'],
+      ['http.route', 'ui.panel', 'policy.intercept'],
+    ],
+    ['an empty list', [], []],
+    ['duplicates, de-duped silently', ['http.route', 'http.route'], ['http.route']],
+  ])('accepts %s', (_label, grants, expected) => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    grants: ${JSON.stringify(grants)}
+`;
+    const m = parseManifest(text);
+    expect(m.plugins[0].grants).toEqual(expected);
+  });
+
+  it('omits the "grants" key entirely when the row declares none', () => {
+    const m = parseManifest(`
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+`);
+    expect(m.plugins[0].grants).toBeUndefined();
+  });
+
+  it.each([
+    ['an unknown capability', '["policy.deny"]'],
+    ['a typo of a real capability', '["http.routes"]'],
+    ['a non-array (string)', '"http.route"'],
+    ['a non-array (object)', '{}'],
+    ['an array with a non-string entry', '[42]'],
+    ['an array with a mixed valid/invalid entry', '["http.route", "nope.nope"]'],
+  ])('rejects grants that are %s', (_label, grantsJson) => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    grants: ${grantsJson}
+`;
+    expect(() => parseManifest(text)).toThrow();
+  });
+
+  it('names the offending capability and lists the valid ones on rejection', () => {
+    const text = `
+plugins:
+  - id: demo
+    name: octomux-plugin-demo
+    grants: ["policy.deny"]
+`;
+    expect(() => parseManifest(text)).toThrow(/"policy\.deny"/);
+    expect(() => parseManifest(text)).toThrow(/policy\.intercept/); // one of the valid names
+  });
+});
+
 describe('readManifest', () => {
   let tmpDir: string;
 

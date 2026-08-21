@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { registerPlugins } from './plugins.js';
+import { grantLedgerPath } from '../../../server/plugins/grants.js';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -66,6 +67,28 @@ plugins:
       manifestPath,
       plugins: [{ id: 'demo', name: 'demo-plugin', version: '1.0.0' }],
     });
+  });
+
+  it('list (text mode) shows a GRANTS column with the declared grants, or — when a row has none', async () => {
+    writeManifest(`
+plugins:
+  - id: policy-bot
+    name: policy-bot-plugin
+    grants: [policy.intercept, facts.put]
+  - id: quiet-plugin
+    name: quiet-plugin
+`);
+    // isJsonMode() defaults to JSON whenever stdout isn't a TTY (true under
+    // bun test) — force the human-readable branch, same as doctor.test.ts.
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'plugins', 'list']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('GRANTS');
+    expect(output).toContain('policy.intercept, facts.put');
+    expect(output).toContain('—');
   });
 
   it('list on a missing manifest reports zero plugins without erroring — never boots the server', async () => {
@@ -175,6 +198,88 @@ plugins:
     // wrote first was cleaned up rather than left behind.
     expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(before);
     expect(fs.readdirSync(tmpDir)).toEqual(['octomux.yml']);
+  });
+
+  describe('approve', () => {
+    it("acknowledges a row's declared grants and writes the ledger, not octomux.yml", async () => {
+      writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+    grants: [policy.intercept, facts.put]
+`);
+      const manifestBefore = fs.readFileSync(manifestPath, 'utf-8');
+
+      const program = makeProgram();
+      await program.parseAsync(['node', 'octomux', 'plugins', 'approve', 'demo']);
+
+      // octomux.yml is untouched — this writes the ledger file, not the manifest.
+      expect(fs.readFileSync(manifestPath, 'utf-8')).toBe(manifestBefore);
+
+      const ledgerFile = grantLedgerPath(manifestPath);
+      const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf-8'));
+      expect(ledger.demo).toEqual(['policy.intercept', 'facts.put']);
+
+      expect(logSpy).toHaveBeenCalled();
+      const printed = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(printed).toContain('policy.intercept, facts.put');
+      expect(printed).toContain('previously acknowledged: none');
+    });
+
+    it('shows the previous acknowledged set as the delta being approved', async () => {
+      writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+    grants: [harnesses.register]
+`);
+      let program = makeProgram();
+      await program.parseAsync(['node', 'octomux', 'plugins', 'approve', 'demo']);
+
+      // Widen the declared grants — simulating an npm update that edited octomux.yml.
+      writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+    grants: [harnesses.register, policy.intercept]
+`);
+      logSpy.mockClear();
+      program = makeProgram();
+      await program.parseAsync(['node', 'octomux', 'plugins', 'approve', 'demo']);
+
+      const printed = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(printed).toContain('harnesses.register, policy.intercept');
+      expect(printed).toContain('previously acknowledged: harnesses.register');
+    });
+
+    it('a row with no grants acknowledges the empty set and says plainly there is nothing to approve', async () => {
+      writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+`);
+      const program = makeProgram();
+      await program.parseAsync(['node', 'octomux', 'plugins', 'approve', 'demo']);
+
+      const printed = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(printed).toContain('nothing to approve');
+    });
+
+    it('unknown id exits 1 without writing the ledger', async () => {
+      writeManifest(`
+plugins:
+  - id: demo
+    name: demo-plugin
+`);
+
+      const program = makeProgram();
+      await expect(
+        program.parseAsync(['node', 'octomux', 'plugins', 'approve', 'ghost']),
+      ).rejects.toThrow(/process\.exit/);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalled();
+      expect(fs.existsSync(grantLedgerPath(manifestPath))).toBe(false);
+    });
   });
 
   describe('reload', () => {

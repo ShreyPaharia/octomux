@@ -154,6 +154,22 @@ export function registerDoctor(program: Command): void {
           console.log(
             `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms${suffix}`,
           );
+          // An older report has no `grants` key at all — omit the line
+          // entirely rather than print a misleading "none", same convention
+          // as `routeCounts` above.
+          const granted = report.grants?.[p.id];
+          if (granted !== undefined) {
+            const grantsText = granted.length > 0 ? granted.map(sanitize).join(', ') : 'none';
+            console.log(`      grants: ${grantsText}`);
+          }
+          const pending = report.pendingGrants?.[p.id];
+          if (pending && pending.length > 0) {
+            console.log(
+              chalk.yellow(
+                `      ⚠ withheld (not acknowledged): ${pending.map(sanitize).join(', ')} — run: octomux plugins approve ${p.id}`,
+              ),
+            );
+          }
         }
       }
 

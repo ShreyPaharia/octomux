@@ -26,8 +26,15 @@ import { readManifest } from './manifest.js';
 import { manifestPath as defaultManifestPath } from './paths.js';
 import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
+import { resolveGrantsForRow, allPluginGrants } from './grants.js';
 import type { UnmountReport } from './lifecycle.js';
-import type { LoadReport, LoadedPlugin, PluginContext, PluginRow } from '@octomux/plugin-api';
+import type {
+  LoadReport,
+  LoadedPlugin,
+  PluginContext,
+  PluginRow,
+  PluginCapability,
+} from '@octomux/plugin-api';
 
 const logger = childLogger('plugins/loader');
 
@@ -146,8 +153,10 @@ type LoadOneResult =
       ctx: PluginContext;
       resolvedPath: string;
       mod: Record<string, unknown>;
+      /** Declared grants withheld this attempt (declared ⊄ acknowledged). */
+      pending: PluginCapability[];
     }
-  | { ok: false; failed: LoadReport['failed'][number] };
+  | { ok: false; failed: LoadReport['failed'][number]; pending: PluginCapability[] };
 
 type ResolveImportResult =
   | { ok: true; mod: Record<string, unknown>; resolvedPath: string }
@@ -242,18 +251,39 @@ async function applyResolvedModule(
   mod: Record<string, unknown>,
   resolvedPath: string,
   applyTimeoutMs: number,
+  manifestPath: string,
 ): Promise<LoadOneResult> {
   const apply = pluginApply(mod);
   if (!apply) {
     const message = `plugin module has no apply() export`;
     logger.warn({ id: row.id, name: row.name, resolvedPath }, message);
-    return { ok: false, failed: { id: row.id, name: row.name, error: message, phase: 'import' } };
+    return {
+      ok: false,
+      failed: { id: row.id, name: row.name, error: message, phase: 'import' },
+      pending: [],
+    };
+  }
+
+  // Resolve grants against the ledger BEFORE creating the context — the
+  // context is what enforces them (`assertGranted` inside each registrar),
+  // so it must be built from the effective (possibly narrowed) set, never
+  // the row's raw `declared` list. A widened grant that hasn't been
+  // acknowledged via `octomux plugins approve <id>` is withheld this boot:
+  // the plugin still loads with whatever it already had, but the un-granted
+  // capability throws the moment it's actually used — see grants.ts's doc
+  // comment for the full ledger semantics.
+  const { effective, pending } = resolveGrantsForRow(manifestPath, row.id, row.grants);
+  if (pending.length > 0) {
+    logger.warn(
+      { id: row.id, pending },
+      'plugin declares capability grants that have not been acknowledged — withheld this boot; run: octomux plugins approve <id>',
+    );
   }
 
   // `start` is measured right here, not before resolve()/import() above —
   // `applyMs` on `LoadedPlugin` should mean what it says.
   const start = performance.now();
-  const ctx = createPluginContext(row.id);
+  const ctx = createPluginContext(row.id, effective);
   try {
     await withTimeout(Promise.resolve(apply(ctx)), applyTimeoutMs, `plugin "${row.id}" apply()`);
   } catch (err) {
@@ -267,6 +297,7 @@ async function applyResolvedModule(
     return {
       ok: false,
       failed: { id: row.id, name: row.name, error: errorMessage(err), phase: 'apply' },
+      pending,
     };
   }
 
@@ -288,6 +319,7 @@ async function applyResolvedModule(
     ctx,
     resolvedPath,
     mod,
+    pending,
   };
 }
 
@@ -302,11 +334,18 @@ async function loadOneRow(
   resolve: (name: string) => Promise<string>,
   resolveFrom: string,
   applyTimeoutMs: number,
+  manifestPath: string,
   importPath: (resolvedPath: string) => Promise<Record<string, unknown>> = (p) => import(p),
 ): Promise<LoadOneResult> {
   const resolved = await resolveAndImportRow(row, resolve, resolveFrom, applyTimeoutMs, importPath);
-  if (!resolved.ok) return resolved;
-  return applyResolvedModule(row, resolved.mod, resolved.resolvedPath, applyTimeoutMs);
+  if (!resolved.ok) return { ...resolved, pending: [] };
+  return applyResolvedModule(
+    row,
+    resolved.mod,
+    resolved.resolvedPath,
+    applyTimeoutMs,
+    manifestPath,
+  );
 }
 
 /**
@@ -385,6 +424,7 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
 
   const loaded: LoadedPlugin[] = [];
   const failed: LoadReport['failed'] = [];
+  const pendingGrants: Record<string, PluginCapability[]> = {};
   let order = 0;
 
   for (const row of manifest.manifest.plugins) {
@@ -393,7 +433,16 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
       continue;
     }
 
-    const result = await loadOneRow(row, resolve, opts.resolveFrom, applyTimeoutMs);
+    const result = await loadOneRow(
+      row,
+      resolve,
+      opts.resolveFrom,
+      applyTimeoutMs,
+      opts.manifestPath,
+    );
+    if (result.pending.length > 0) {
+      pendingGrants[row.id] = result.pending;
+    }
     if (!result.ok) {
       failed.push(result.failed);
       continue;
@@ -414,6 +463,13 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
     manifestPath: opts.manifestPath,
     safeMode,
     loadedAt: new Date().toISOString(),
+    // Every plugin's EFFECTIVE grants this boot, regardless of pending/failed
+    // status — `allPluginGrants()` reads the same in-memory map the loader
+    // just populated via `createPluginContext(id, effective)`.
+    grants: allPluginGrants(),
+    // Omitted entirely (not an empty object) when nothing is pending, so an
+    // older report and a clean boot both read the same on this field.
+    ...(Object.keys(pendingGrants).length > 0 ? { pendingGrants } : {}),
   };
 }
 
@@ -525,6 +581,7 @@ async function reloadPluginOnce(opts: ReloadPluginOptions): Promise<ReloadResult
     resolve,
     opts.resolveFrom,
     applyTimeoutMs,
+    opts.manifestPath,
     (p) => import(`${p}?t=${cacheBust}`),
   );
   if (result.ok) {
@@ -547,11 +604,16 @@ async function reloadPluginOnce(opts: ReloadPluginOptions): Promise<ReloadResult
   // Restore the previously-working version from the module reference we
   // captured before unmounting it — no re-import, just re-running its
   // apply() against a brand new context.
+  // Grants are re-resolved from `previous.row` (the OLD row, still whatever
+  // was in the manifest before this reload attempt) rather than carried over
+  // from the failed new attempt — the ledger call is idempotent (narrowing/
+  // unchanged re-records freely) so this is safe to call again.
   const restore = await applyResolvedModule(
     previous.row,
     previous.mod,
     previous.resolvedPath,
     applyTimeoutMs,
+    opts.manifestPath,
   );
   if (restore.ok) {
     mounted.set(opts.id, {

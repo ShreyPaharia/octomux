@@ -19,6 +19,8 @@ import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
+import { setPluginGrants, clearPluginGrants, assertGranted } from './grants.js';
+import { registerPolicyHook } from './policy.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -31,6 +33,8 @@ import type {
   FactsRegistrar,
   ArtifactsApi,
   UiRegistrar,
+  PolicyRegistrar,
+  PluginCapability,
   PluginWorkflow,
   PluginIntegrationProvider,
   PluginHarness,
@@ -41,11 +45,20 @@ import type {
   HttpMethod,
   PluginRouteHandler,
   UiPanelBinding,
+  PolicyPoint,
+  PolicyHook,
 } from '@octomux/plugin-api';
 import type { WorkflowType } from '../workflows/types.js';
 import type { IntegrationProvider } from '../integrations/types.js';
 import type { Harness } from '../harnesses/types.js';
 import type { ComputeProvider } from '../compute/types.js';
+
+const POLICY_POINTS: readonly PolicyPoint[] = [
+  'task.launch',
+  'harness.resume',
+  'review.publish',
+  'integration.send',
+];
 
 /**
  * Pulls a registrar's declared local id off the plugin-supplied payload and
@@ -166,7 +179,18 @@ const revokers = new WeakMap<PluginContext, () => void>();
  */
 const effectStacks = new WeakMap<PluginContext, Array<() => void | Promise<void>>>();
 
-export function createPluginContext(id: string): PluginContext {
+export function createPluginContext(
+  id: string,
+  grants?: readonly PluginCapability[],
+): PluginContext {
+  // The loader records grants before calling this; a direct caller (tests,
+  // other call sites) may pass them inline instead. Omitting the param
+  // leaves whatever was already recorded for `id` untouched — a plugin with
+  // nothing recorded is denied everything gated, by default.
+  if (grants !== undefined) {
+    setPluginGrants(id, grants);
+  }
+
   const logger = childLogger(`plugin:${id}`);
 
   // Flipped by `revokePluginContext()` when the loader's apply() timeout
@@ -193,6 +217,7 @@ export function createPluginContext(id: string): PluginContext {
   const workflows: WorkflowRegistrar = {
     register(wf: PluginWorkflow) {
       assertLive('workflows.register');
+      assertGranted(id, 'workflows.register');
       const localKind = requireLocalId(wf, 'kind', 'workflows.register');
       requireOptionalFunctionField(wf, 'apiRouter', 'workflows.register');
       requireOptionalFunctionField(wf, 'run', 'workflows.register');
@@ -203,6 +228,7 @@ export function createPluginContext(id: string): PluginContext {
   const integrations: IntegrationRegistrar = {
     register(p: PluginIntegrationProvider) {
       assertLive('integrations.register');
+      assertGranted(id, 'integrations.register');
       const localKind = requireLocalId(p, 'kind', 'integrations.register');
       requireFunctionField(p, 'validate', 'integrations.register');
       requireFunctionField(p, 'handler', 'integrations.register');
@@ -218,6 +244,7 @@ export function createPluginContext(id: string): PluginContext {
   const harnesses: HarnessRegistrar = {
     register(h: PluginHarness) {
       assertLive('harnesses.register');
+      assertGranted(id, 'harnesses.register');
       const localId = requireLocalId(h, 'id', 'harnesses.register');
       for (const field of HARNESS_REQUIRED_FN_FIELDS) {
         requireFunctionField(h, field, 'harnesses.register');
@@ -249,6 +276,7 @@ export function createPluginContext(id: string): PluginContext {
   const http: HttpRegistrar = {
     route(method: HttpMethod, path: string, handler: PluginRouteHandler) {
       assertLive('http.route');
+      assertGranted(id, 'http.route');
       if (typeof handler !== 'function') {
         throw new Error('plugin registrar: "http.route" requires a function handler');
       }
@@ -263,6 +291,7 @@ export function createPluginContext(id: string): PluginContext {
   const facts: FactsRegistrar = {
     define(def: FactTypeDefinition) {
       assertLive('facts.define');
+      assertGranted(id, 'facts.define');
       requireLocalId(def as unknown as Record<string, unknown>, 'type', 'facts.define');
       defineFactType(id, def);
     },
@@ -270,7 +299,10 @@ export function createPluginContext(id: string): PluginContext {
       // Deliberately NOT gated on `assertLive`: `put` is a write a plugin makes
       // during normal operation, long after apply() returned. The revoke guard
       // exists to stop a timed-out apply() from mutating the REGISTRIES, not to
-      // stop a healthy plugin from logging a fact.
+      // stop a healthy plugin from logging a fact. It IS grant-checked, though —
+      // `facts.put` is a listed capability regardless of the (separate) revoke
+      // lifecycle.
+      assertGranted(id, 'facts.put');
       return putFact(id, taskId, localType, payload);
     },
     read(taskId: string, opts?: FactQuery) {
@@ -318,6 +350,7 @@ export function createPluginContext(id: string): PluginContext {
   const ui: UiRegistrar = {
     panel(binding: UiPanelBinding) {
       assertLive('ui.panel');
+      assertGranted(id, 'ui.panel');
       const payload = binding as unknown as Record<string, unknown>;
       requireLocalId(payload, 'slot', 'ui.panel');
       requireLocalId(payload, 'fact', 'ui.panel');
@@ -332,6 +365,22 @@ export function createPluginContext(id: string): PluginContext {
   // a timed-out apply() from mutating the live registries, not to blind a
   // plugin to them afterward.
   const catalog = { list: () => listCatalog() };
+  const policy: PolicyRegistrar = {
+    intercept(point: PolicyPoint, hook: PolicyHook) {
+      assertLive('policy.intercept');
+      assertGranted(id, 'policy.intercept');
+      if (!POLICY_POINTS.includes(point)) {
+        throw new Error(
+          `plugin registrar: "policy.intercept" got unknown point ${JSON.stringify(point)} ` +
+            `(valid: ${POLICY_POINTS.join(', ')})`,
+        );
+      }
+      if (typeof hook !== 'function') {
+        throw new Error('plugin registrar: "policy.intercept" requires a function hook');
+      }
+      registerPolicyHook(id, point, hook);
+    },
+  };
 
   const ctx: PluginContext = {
     id,
@@ -347,6 +396,7 @@ export function createPluginContext(id: string): PluginContext {
     artifacts,
     ui,
     catalog,
+    policy,
     effect(dispose: () => void | Promise<void>) {
       assertLive('effect');
       if (typeof dispose !== 'function') {
@@ -357,6 +407,13 @@ export function createPluginContext(id: string): PluginContext {
   };
   revokers.set(ctx, () => {
     live = false;
+  });
+  // Pushed onto the effect stack rather than handled as a third WeakMap: it
+  // runs LAST (effects run in reverse registration order, and this is the
+  // very first thing registered), which is fine — nothing else in teardown
+  // depends on the grant record still being present.
+  effects.push(() => {
+    clearPluginGrants(id);
   });
   effectStacks.set(ctx, effects);
   return ctx;

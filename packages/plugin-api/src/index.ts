@@ -21,6 +21,7 @@ export interface PluginContext {
   readonly facts: FactsRegistrar;
   readonly artifacts: ArtifactsApi;
   readonly ui: UiRegistrar;
+  readonly policy: PolicyRegistrar;
   /**
    * `ctx.catalog` — a READ over what is currently installed (SHR-268): this
    * plugin's own registrations plus every sibling's and core's, as one flat
@@ -266,6 +267,100 @@ export interface UiPanelBinding {
   title?: string;
 }
 
+/**
+ * `ctx.policy` — the one verb in the plugin API that can say **no**.
+ *
+ * Every other registrar is additive: a plugin contributes a workflow, a route,
+ * a fact, a panel. None of them can stop something core was about to do.
+ * `intercept` runs a hook between "a run wants to start" and "a run starts",
+ * and that hook may deny with a reason or patch the intent on its way through.
+ *
+ * ## This is not a sandbox
+ *
+ * A plugin runs **in-process, with the DB handle, every credential, and
+ * `process.env`**. It can call the same functions core calls without going
+ * anywhere near `ctx.policy`. A capability grant does not stop it — grants are
+ * a **coordination and audit mechanism**: they record what a plugin claims to
+ * need, make that claim reviewable (`octomux doctor`), and give core one place
+ * to log every decision against a task. Nothing here confines anything.
+ * Out-of-process containment is a separate, unbuilt piece of work. Installing
+ * a plugin is exactly as trusting as running its code yourself, because it is.
+ *
+ * ## Waterfall
+ *
+ * Hooks for a point run in registration order. The FIRST `deny` short-circuits
+ * — later hooks do not run. A `patch` is merged into `intent.data` and the next
+ * hook sees the patched values. A hook that throws or exceeds the host timeout
+ * is logged and treated as "no opinion" (fail **open**): a crashing spend-cap
+ * plugin must not wedge every launch in the install.
+ *
+ * ## Points
+ *
+ * | point              | `data` keys                                  | patchable |
+ * | ------------------ | -------------------------------------------- | --------- |
+ * | `task.launch`      | `harnessId`, `model`, `agent`                | `model`   |
+ * | `harness.resume`   | `harnessId`, `model`, `prompt`               | `model`   |
+ * | `review.publish`   | `verdict`, `bodyLength`                      | `verdict` |
+ * | `integration.send` | `integrationKind`, `event`, `payload`        | `payload` |
+ *
+ * A key a call site does not list as patchable is ignored — the patch is a
+ * request, and core decides what it honours.
+ *
+ * There is deliberately no `task.merge` point: core octomux never merges a PR
+ * (`server/poller/merged-pr.ts` only *observes* merges that happened on
+ * GitHub), so there is no call site to gate. Adding one would mean inventing
+ * the merge path first.
+ */
+export interface PolicyRegistrar {
+  /** Requires the `policy.intercept` capability grant in the manifest row.
+   *  Without it this throws at registration and the plugin fails to load. */
+  intercept(point: PolicyPoint, hook: PolicyHook): void;
+}
+
+export type PolicyPoint = 'task.launch' | 'harness.resume' | 'review.publish' | 'integration.send';
+
+export interface PolicyIntent {
+  readonly point: PolicyPoint;
+  /** Present for task-scoped points. A decision on an intent without a
+   *  `taskId` is logged but not recorded as a fact — facts are task-scoped. */
+  readonly taskId?: string;
+  readonly repoPath?: string;
+  /** Point-specific fields (see the table above), with every earlier hook's
+   *  patch already applied. */
+  readonly data: Readonly<Record<string, unknown>>;
+}
+
+/** `undefined` = no opinion, pass through. */
+export type PolicyDecision =
+  | void
+  | { deny: string; patch?: never }
+  | { patch: Record<string, unknown>; deny?: never };
+
+export type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<PolicyDecision>;
+
+/**
+ * Capabilities a manifest row can grant. **Undeclared is denied** — a row with
+ * no `grants` key grants nothing, and every registrar below throws for it.
+ * That is deliberate: a warning that nobody reads is not a decision.
+ *
+ * Names are the `ctx` path of the method they gate, so the error message and
+ * the manifest line read the same. Read-only members (`facts.read`,
+ * `facts.watch`, `settings.get`, `logger`) are ungated.
+ *
+ * Again: this governs what a plugin can do *through `ctx`*. It is a statement
+ * of intent that core can enforce at its own seams and show to a human — not
+ * a privilege boundary around the plugin's code.
+ */
+export type PluginCapability =
+  | 'workflows.register'
+  | 'integrations.register'
+  | 'harnesses.register'
+  | 'http.route'
+  | 'facts.define'
+  | 'facts.put'
+  | 'ui.panel'
+  | 'policy.intercept';
+
 // Registrar payload shapes are intentionally loose here — the plan leaves the
 // concrete `WorkflowType` / `IntegrationProvider` / `Harness` bindings to the
 // server-side registries (WAVE-2/WAVE-3), which are not browser- or
@@ -282,6 +377,13 @@ export interface PluginRow {
   integrity?: string; // tarball hash; refuse to load on mismatch
   config?: Record<string, unknown>;
   disabled?: boolean;
+  /**
+   * Capabilities this plugin may use through `ctx`. Absent or empty means it
+   * gets none — see `PluginCapability`. Widening this list on an existing row
+   * does not take effect at the next boot: the added grants are withheld and
+   * reported until `octomux plugins approve <id>` acknowledges them.
+   */
+  grants?: PluginCapability[];
 }
 export interface PluginManifest {
   plugins: PluginRow[];
@@ -319,6 +421,13 @@ export interface LoadReport {
    *  `LoadReport` literals (older persisted reports, fixtures) stay valid —
    *  `loadPlugins()` itself always sets it. */
   loadedAt?: string;
+  /** Effective capability grants per plugin id — what each plugin was actually
+   *  allowed to use this boot. Printed by `octomux doctor`. Optional for the
+   *  same reason as `loadedAt`: an older persisted report won't have it. */
+  grants?: Record<string, PluginCapability[]>;
+  /** Grants a row declares that have NOT been acknowledged yet, per plugin id.
+   *  These were withheld this boot. Empty/absent when nothing is pending. */
+  pendingGrants?: Record<string, PluginCapability[]>;
 }
 
 export const PLUGIN_API_VERSION = 0;

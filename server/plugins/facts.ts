@@ -32,6 +32,9 @@ const logger = childLogger('plugins/facts');
  *
  * This is what core ACTUALLY publishes today, not an aspirational list.
  * `core:review.published` is wired from `server/workflows/reviewer/publish-review.ts`.
+ * `core:policy.decision` is wired from `server/plugins/policy.ts`, written on a
+ * policy hook's `deny` or `patch` (never on a plain allow — that would flood
+ * the log with a fact for every task-scoped intent that passed through clean).
  * The original draft also listed `core:diff`, `core:tests.passed`, and
  * `core:pr.opened` — cut here because nothing in `server/` emits them: diffs
  * are computed on demand per request rather than produced at a point in
@@ -44,7 +47,7 @@ const logger = childLogger('plugins/facts');
  * having squatted them first — add a member here only once a real producer
  * exists for it.
  */
-export const CORE_FACT_TYPES = ['core:review.published'] as const;
+export const CORE_FACT_TYPES = ['core:review.published', 'core:policy.decision'] as const;
 
 interface FactTypeRegistration {
   pluginId: string;

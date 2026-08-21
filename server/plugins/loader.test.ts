@@ -16,6 +16,7 @@ import { getWorkflow } from '../workflows/registry.js';
 import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetFacts } from './facts.js';
 import { subscribeServerEvents } from '../events.js';
+import { resetPluginGrants } from './grants.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -40,6 +41,7 @@ beforeEach(() => {
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  resetPluginGrants();
 });
 
 describe('loadPlugins', () => {
@@ -468,12 +470,97 @@ plugins:
   });
 });
 
+describe('capability grants (SHR-259)', () => {
+  afterEach(() => {
+    resetMountedPlugins();
+    resetHarnesses();
+    resetPluginRoutes();
+    resetPluginGrants();
+  });
+
+  const harnessSource = (id: string) =>
+    `export async function apply(ctx) {
+       ctx.harnesses.register({ id: '${id}', displayName: '${id}', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) });
+     }\n`;
+
+  it('a row with no grants key whose apply() calls a gated registrar fails with phase apply, naming the plugin and the capability', async () => {
+    const abs = writeModule('no-grants.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: nogrants
+    name: ${abs}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'nogrants', phase: 'apply' });
+    expect(report.failed[0].error).toContain('nogrants');
+    expect(report.failed[0].error).toContain('harnesses.register');
+  });
+
+  it('a row that declares the grant loads, and LoadReport.grants reflects what was granted', async () => {
+    const abs = writeModule('with-grant.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: withgrant
+    name: ${abs}
+    grants: [harnesses.register]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(1);
+    expect(report.grants).toEqual({ withgrant: ['harnesses.register'] });
+    expect(report.pendingGrants).toBeUndefined();
+  });
+
+  it('a widened grant on a second load is reported in pendingGrants and withheld, while the plugin still loads with its previously-acknowledged set', async () => {
+    const abs = writeModule('widen.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: widenplug
+    name: ${abs}
+    grants: [harnesses.register]
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(first.grants).toEqual({ widenplug: ['harnesses.register'] });
+    expect(first.pendingGrants).toBeUndefined();
+
+    // A plugin update (or a hand-edit) widens the declared grants without
+    // anyone running `octomux plugins approve` yet.
+    fs.writeFileSync(
+      manifestPath,
+      `
+plugins:
+  - id: widenplug
+    name: ${abs}
+    grants: [harnesses.register, http.route]
+`,
+      'utf-8',
+    );
+
+    const second = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    // Still loads — the plugin's apply() never touches ctx.http.route, so
+    // the withheld capability is never actually exercised this boot.
+    expect(second.failed).toEqual([]);
+    expect(second.loaded).toHaveLength(1);
+    expect(second.grants).toEqual({ widenplug: ['harnesses.register'] });
+    expect(second.pendingGrants).toEqual({ widenplug: ['http.route'] });
+  });
+});
+
 describe('unloadPlugin / reloadPlugin', () => {
   afterEach(() => {
     resetMountedPlugins();
     resetHarnesses();
     resetPluginRoutes();
     resetFacts();
+    resetPluginGrants();
   });
 
   it('reloadPlugin mounts a plugin that was not previously loaded', async () => {
@@ -485,6 +572,7 @@ describe('unloadPlugin / reloadPlugin', () => {
 plugins:
   - id: reloadfresh
     name: ${abs}
+    grants: [harnesses.register]
 `);
 
     const result = await reloadPlugin({
@@ -512,6 +600,7 @@ plugins:
 plugins:
   - id: reloadhot
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -573,6 +662,7 @@ plugins:
 plugins:
   - id: reloadunloadable
     name: ${abs}
+    grants: [workflows.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -604,6 +694,7 @@ plugins:
 plugins:
   - id: unloadbasic
     name: ${abs}
+    grants: [harnesses.register]
 `);
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
     expect(getMountedPlugin('unloadbasic')).toBeDefined();
@@ -647,6 +738,7 @@ plugins:
 plugins:
   - id: racer
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -678,6 +770,7 @@ plugins:
 plugins:
   - id: rollbackgood
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -728,6 +821,7 @@ plugins:
 plugins:
   - id: rollbackbad
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -777,6 +871,7 @@ plugins:
 plugins:
   - id: partialfail
     name: ${modPath}
+    grants: [http.route, facts.define]
 `);
 
     const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -870,6 +965,7 @@ describe('watchLocalPlugins', () => {
 plugins:
   - id: watchhot
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -932,6 +1028,7 @@ plugins:
 plugins:
   - id: watchstop
     name: ${modPath}
+    grants: [harnesses.register]
 `);
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
 

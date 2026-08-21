@@ -1,14 +1,21 @@
 /**
- * The plugin unmount sequence (SHR-254). Reverses, in reverse registration
- * order, everything a plugin's `apply()` put into the live registries, then
- * runs its `ctx.effect()` teardown stack.
+ * The plugin unmount sequence (SHR-254, extended for SHR-259's policy hooks).
+ * Reverses, in reverse registration order, everything a plugin's `apply()`
+ * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> ui -> the four registries (workflow kinds,
- * harnesses, compute providers, integration providers) -> `ctx.effect()`
- * callbacks. Each step is isolated —
- * one failing step is logged and skipped, never thrown, so a bad teardown
- * can't strand the rest of the sequence (matches the loader's own
+ * Order: routes -> facts -> ui -> policy -> the four registries (workflow
+ * kinds, harnesses, compute providers, providers) -> ctx.effect() disposers
  * per-plugin isolation policy).
+ *
+ * Capability grants are NOT released as an explicit step here — that already
+ * happens inside `disposePluginContext()` (`server/plugins/context.ts`,
+ * pinned/DO NOT EDIT for this task), which clears a plugin's grants as the
+ * very last of its own `ctx.effect()` teardown. So "grants released before
+ * `ctx.effect()` disposal" already holds by construction: the grant-clearing
+ * callback is registered before any plugin-supplied effect, and effects run
+ * in REVERSE registration order, so it fires last of all — after every
+ * plugin-supplied effect has already run, with nothing left afterward that
+ * could re-register through `ctx`.
  */
 import { childLogger } from '../logger.js';
 import { broadcast } from '../events.js';
@@ -16,6 +23,7 @@ import { disposePluginContext } from './context.js';
 import { unregisterPluginRoutes } from './http-registry.js';
 import { unregisterPluginFacts } from './facts.js';
 import { unregisterPluginUi } from './ui-registry.js';
+import { unregisterPluginPolicy } from './policy.js';
 import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
 import { unregisterHarness } from '../harnesses/registry.js';
@@ -34,6 +42,8 @@ export interface UnmountFailure {
 export interface UnmountReleased {
   routes: number;
   uiContributions: number;
+  /** `ctx.policy.intercept()` hooks removed (`unregisterPluginPolicy`'s return). */
+  policyHooks: number;
   workflowKinds: string[];
   harnessIds: string[];
   computeKinds: string[];
@@ -136,6 +146,9 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
 
   await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
 
+  const policyHooks =
+    (await step(pluginId, failures, 'policy', () => unregisterPluginPolicy(pluginId))) ?? 0;
+
   const workflowKinds =
     (await step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId))) ?? [];
 
@@ -160,6 +173,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   const released: UnmountReleased = {
     routes: registered.routes.length,
     uiContributions: registered.uiSlots.length,
+    policyHooks,
     workflowKinds,
     harnessIds: registered.harnessIds,
     computeKinds: registered.computeKinds,

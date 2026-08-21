@@ -7,12 +7,14 @@ const KIND_ICON: Record<TaskUpdate['kind'], string> = {
   transition: '→',
   summary: '📝',
   note: '💬',
+  policy: '⛔',
 };
 
 const KIND_LABEL: Record<TaskUpdate['kind'], string> = {
   transition: 'Moved',
   summary: 'Summary',
   note: 'Note',
+  policy: 'Policy',
 };
 
 interface TaskActivityPanelProps {
@@ -50,7 +52,11 @@ export function TaskActivityPanel({ taskId }: TaskActivityPanelProps) {
 function ActivityRow({ update }: { update: TaskUpdate }) {
   const icon = KIND_ICON[update.kind];
   const label = KIND_LABEL[update.kind];
-  const author = update.agent_id ? `agent: ${update.agent_id}` : 'human';
+  const author = update.agent_id
+    ? `agent: ${update.agent_id}`
+    : update.kind === 'policy'
+      ? 'policy'
+      : 'human';
 
   return (
     <div className="flex items-start gap-2 rounded-lg border border-glass-edge bg-glass-l1 px-3 py-2">

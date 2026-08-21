@@ -289,7 +289,7 @@ tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built b
 `createPluginContext()` in `server/plugins/context.ts`) exposes seven registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above),
-`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()` — plus
+`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
 `ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
 (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
@@ -321,6 +321,27 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `logger.warn`, persisted to `~/.octomux/plugin-load-report.json` for `octomux doctor` to read
   without a running server. `octomux start --safe-mode` (`OCTOMUX_SAFE_MODE=1`) skips every
   plugin row; core harnesses/integrations still register.
+- **Capability grants.** A manifest row declares the `ctx` surface its plugin uses:
+  `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
+  `workflows.register`, `integrations.register`, `harnesses.register`, `http.route`,
+  `facts.define`, `facts.put`, `ui.panel`, `policy.intercept`. Reads (`facts.read`,
+  `facts.watch`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are ungated. A row with no
+  `grants` key gets nothing — the registrar throws, and the row lands in the load report
+  as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
+  row's grants is withheld until acknowledged: the granted set is tracked per row in
+  `plugin-grants.json` next to the manifest (first sight of a row grants everything it
+  declares; narrowing is free; adding a grant sits pending until `octomux plugins approve
+<id>`). `LoadReport.grants`/`pendingGrants` (per plugin id) is what `octomux doctor` prints.
+- **`ctx.policy.intercept(point, hook)`** — the one registrar that can refuse, not just add.
+  Four points: `task.launch`, `harness.resume`, `review.publish`, `integration.send`. A hook
+  returns `{ deny: reason }`, `{ patch: {...} }` (merged into `intent.data`, visible to later
+  hooks), or nothing. Hooks for a point run in registration order; first deny short-circuits.
+  A hook that throws or exceeds `POLICY_HOOK_TIMEOUT_MS` (5s) is logged and treated as no
+  opinion — **fails open**, so a crashing plugin can't wedge every launch. A deny or patch on
+  a task-scoped intent is recorded twice: a `core:policy.decision` fact and a `task_updates`
+  row of kind `policy` (shows in the task's Activity panel). There is deliberately no
+  `task.merge` point — core never merges a PR (`server/poller/merged-pr.ts` only observes
+  merges that already happened on GitHub), so there's no call site to gate.
 - `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required.
   `octomux plugins reload <id>` is different — it goes over the API and needs a running server,
   because it re-imports and re-runs the plugin's `apply()` in the live process. A plugin that
@@ -336,6 +357,11 @@ no host `node_modules` tree to import a runtime value from even by accident.
   (`server/hook-dispatcher.ts` calls `resolveEnvVars` before invoking it — there's no broker
   yet). Trust model: a plugin runs in-process with the DB handle, every credential, and
   `process.env` — no sandbox, none planned. State that plainly wherever plugins are documented.
+  Capability grants (above) and `ctx.policy` denies do not change this: grants govern only the
+  `ctx` surface, a plugin can do everything core can do without ever calling `ctx`, and a
+  `policy` deny is not containment — it's a coordination/audit mechanism, nothing stops a
+  plugin from bypassing its own hook. `octomux plugins approve` (the grant-widening ack) is
+  the operator confirming intent, not a security check on the code.
   Two things the plugin runtime added to that blast radius, neither a new class of exposure but
   both worth knowing: a `ctx.http.route()` handler receives the raw request headers, including
   the remote-mode auth token of whoever called it; and `POST /api/plugins/:id/reload` re-imports

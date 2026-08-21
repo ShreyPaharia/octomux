@@ -219,6 +219,11 @@ router.post('/api/tasks/:id/publish-review', async (req: Request, res: Response)
     if (msg.includes('No accepted comments')) {
       throw badRequest(msg);
     }
+    if (msg.startsWith('policy denied')) {
+      // A policy refusal is not a server error — surface it as a client-facing
+      // 403 with the reason as the message.
+      throw new ServiceError(msg, 403);
+    }
     throw err;
   }
 });

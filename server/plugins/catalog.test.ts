@@ -12,6 +12,9 @@ import {
 } from './catalog.js';
 import { resetPluginRoutes } from './http-registry.js';
 import { resetPluginUi } from './ui-registry.js';
+// SHR-259: every gated registrar denies a plugin with no recorded grants.
+// These tests exercise the catalog, not the grant model, so grant everything.
+import { setPluginGrants, PLUGIN_CAPABILITIES } from './grants.js';
 import { resetFacts } from './facts.js';
 import { resetHarnesses, registerHarness } from '../harnesses/registry.js';
 import { resetProviders } from '../integrations/registry.js';
@@ -38,7 +41,8 @@ describe('pluginRegistrations', () => {
   it("picks up only the target plugin's qualified entries, ignoring core and a sibling plugin", () => {
     registerHarness(claudeCodeHarness); // core, bare id — must never leak in
 
-    const mine = createPluginContext('cat-mine');
+    const mine =
+      (setPluginGrants('cat-mine', PLUGIN_CAPABILITIES), createPluginContext('cat-mine'));
     mine.http.route('GET', '/thing', async (_req, res) => res.json({}));
     mine.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
     mine.harnesses.register({
@@ -62,7 +66,8 @@ describe('pluginRegistrations', () => {
     mine.facts.define({ type: 'observed', schema: { type: 'object' } });
     mine.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
 
-    const sibling = createPluginContext('cat-sibling');
+    const sibling =
+      (setPluginGrants('cat-sibling', PLUGIN_CAPABILITIES), createPluginContext('cat-sibling'));
     sibling.http.route('GET', '/other', async (_req, res) => res.json({}));
     sibling.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
     sibling.harnesses.register({
@@ -90,7 +95,8 @@ describe('pluginRegistrations', () => {
 
 describe('pluginProvides', () => {
   it('flattens in order: workflows, harnesses, integrations, routes, ui, facts', () => {
-    const ctx = createPluginContext('cat-order');
+    const ctx =
+      (setPluginGrants('cat-order', PLUGIN_CAPABILITIES), createPluginContext('cat-order'));
     ctx.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
     ctx.harnesses.register({
       id: 'h',
@@ -128,7 +134,8 @@ describe('pluginProvides', () => {
 describe('coreCatalogEntry', () => {
   it('lists core harnesses (claude-code) and NOT a qualified plugin harness', () => {
     registerHarness(claudeCodeHarness);
-    const ctx = createPluginContext('cat-attacker');
+    const ctx =
+      (setPluginGrants('cat-attacker', PLUGIN_CAPABILITIES), createPluginContext('cat-attacker'));
     ctx.harnesses.register({
       id: 'foo',
       displayName: 'Foo',
@@ -177,7 +184,7 @@ describe('listCatalog', () => {
     const manifestPath = path.join(tmpDir, 'octomux.yml');
     fs.writeFileSync(
       manifestPath,
-      `plugins:\n  - id: cat-demo\n    name: ${modPath}\n    version: 1.2.3\n`,
+      `plugins:\n  - id: cat-demo\n    name: ${modPath}\n    version: 1.2.3\n    grants: [workflows.register]\n`,
       'utf-8',
     );
 

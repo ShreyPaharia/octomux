@@ -112,6 +112,18 @@ describe('plugins/facts', () => {
     }
   });
 
+  it('putCoreFact accepts core:policy.decision, written by policy.ts on a deny/patch', async () => {
+    expect(CORE_FACT_TYPES).toContain('core:policy.decision');
+    await expect(
+      putCoreFact('task-1', 'core:policy.decision', {
+        point: 'task.launch',
+        pluginId: 'spend-cap',
+        decision: 'deny',
+        reason: 'over budget',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   // Finding 5 (SHR-255 review): CORE_FACT_TYPES had no producer at all —
   // narrowed to just `core:review.published`, now wired from
   // `server/workflows/reviewer/publish-review.ts`. This is the ticket's own

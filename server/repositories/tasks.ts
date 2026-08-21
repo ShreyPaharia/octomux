@@ -1090,7 +1090,8 @@ export interface AddTaskUpdateInput {
   id?: string;
   task_id: string;
   agent_id?: string | null;
-  kind: 'transition' | 'summary' | 'note';
+  // 'policy' is written by core when a plugin policy hook denies or patches an intent.
+  kind: 'transition' | 'summary' | 'note' | 'policy';
   from_status?: string | null;
   to_status?: string | null;
   body?: string | null;

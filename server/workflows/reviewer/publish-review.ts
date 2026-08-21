@@ -9,12 +9,15 @@ import { postPullRequestReview } from '../../github-client.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
 import { putCoreFact } from '../../plugins/facts.js';
+import { enforcePolicy } from '../../plugins/policy.js';
 import { getTask, inTransaction } from '../../repositories/index.js';
 import type { PublishedReviewVerdict } from '../../types.js';
 import type { InlineCommentRow } from '../../repositories/inline-comments.js';
 import type { PullRequestReviewComment } from '../../github-client.js';
 
 const logger = childLogger('publish-review');
+
+const VALID_VERDICTS: PublishedReviewVerdict[] = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'];
 
 export interface PublishReviewResult {
   published_review_id: string;
@@ -41,6 +44,22 @@ export async function publishReview(
   verdict: PublishedReviewVerdict,
   reviewBody: string,
 ): Promise<PublishReviewResult> {
+  const decided = await enforcePolicy('review.publish', {
+    taskId,
+    data: { verdict, bodyLength: reviewBody.length },
+  });
+  if (
+    typeof decided.verdict === 'string' &&
+    VALID_VERDICTS.includes(decided.verdict as PublishedReviewVerdict)
+  ) {
+    verdict = decided.verdict as PublishedReviewVerdict;
+  } else if (decided.verdict !== undefined && decided.verdict !== verdict) {
+    logger.warn(
+      { task_id: taskId, patched_verdict: decided.verdict },
+      'publishReview: ignoring invalid patched verdict from policy hook',
+    );
+  }
+
   const task = getTask(taskId);
 
   if (!task) throw new Error(`Task not found: ${taskId}`);
