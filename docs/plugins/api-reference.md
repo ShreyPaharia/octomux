@@ -77,6 +77,7 @@ member:
 | [`ctx.ui`](#ctxui)                                                 | declarative panel bindings, never components                       |
 | [`ctx.policy`](#ctxpolicy)                                         | the one member that can deny a core action                         |
 | [`ctx.surfaces`](#ctxsurfaces)                                     | registers a place octomux presents itself to a human               |
+| [`ctx.attention`](#ctxattention)                                   | asks a human a question across every prompt-capable surface        |
 | [`ctx.fanout`](#ctxfanout)                                         | runs a step per item, with retries and a host-enforced cap         |
 | [`ctx.catalog`](#ctxcatalog)                                       | reads what's installed — every plugin's registrations, plus core   |
 | [`ctx.secrets`](#ctxsecrets)                                       | resolves a credential by name — the value never reaches the caller |
@@ -1018,6 +1019,7 @@ interface SurfacePrompt {
   taskId?: string; // present when the question is about a specific task
   question: string;
   choices?: string[]; // offered answers; absent means free text
+  signal?: AbortSignal; // aborted when another surface answered first, or the ask timed out — withdraw the prompt
 }
 ```
 
@@ -1026,7 +1028,89 @@ Slack, plain text for CLI/Telegram, Discord-flavoured markdown for a Discord
 surface. Returning `undefined` means "nothing to show for this panel" and it
 is omitted, not rendered as an empty block.
 
-### `ctx.effect()`
+## `ctx.attention`
+
+```ts
+interface AttentionApi {
+  ask(ask: AttentionAsk): Promise<AttentionAnswer>; // requires the `attention.ask` grant
+}
+
+interface AttentionAsk {
+  taskId?: string; // present when the question is about a specific task
+  question: string;
+  choices?: string[]; // offered answers; absent means free text
+  timeoutMs?: number; // default 300_000 (5 min)
+  defaultAnswer?: string; // what `answer` holds when no human answers
+}
+
+interface AttentionAnswer {
+  status: 'answered' | 'timeout' | 'unanswerable';
+  answer?: string; // the human's answer, or `defaultAnswer` otherwise
+  surface?: string; // qualified kind of the answering surface — set only for 'answered'
+}
+```
+
+The one verb that makes a plugin STOP and ask a person. `ctx.surfaces` gave
+octomux a way to reach a human on more than its four compiled-in surfaces;
+`ctx.attention.ask()` is what a plugin calls to use that — one question,
+fanned out to **every registered surface that declares `prompt`**, resolved
+by whichever human answers first.
+
+```js
+const { status, answer } = await ctx.attention.ask({
+  taskId,
+  question: 'Ship this to prod?',
+  choices: ['ship', 'hold'],
+  defaultAnswer: 'hold',
+});
+```
+
+| Field           | Type                                        | Notes                                                            |
+| --------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| `taskId`        | `string?`                                   | passed through to every surface as `SurfacePrompt.taskId`        |
+| `question`      | `string`                                    | required                                                         |
+| `choices`       | `string[]?`                                 | absent means free text                                           |
+| `timeoutMs`     | `number?`                                   | default `DEFAULT_ATTENTION_TIMEOUT_MS` = 300,000 (5 min)         |
+| `defaultAnswer` | `string?`                                   | `answer` on `'timeout'`/`'unanswerable'`; `undefined` by default |
+| `status`        | `'answered' \| 'timeout' \| 'unanswerable'` | see below                                                        |
+| `answer`        | `string?`                                   | the human's text on `'answered'`, else `defaultAnswer`           |
+| `surface`       | `string?`                                   | qualified kind that answered — only set for `'answered'`         |
+
+### First answer wins, the rest are withdrawn
+
+The losing surfaces get their `SurfacePrompt.signal` aborted, so a Slack
+message can be deleted and a modal closed rather than left sitting there
+collecting an answer nobody will read. A surface that ignores the signal
+isn't broken — its late answer is simply discarded.
+
+### Bounded, always
+
+`timeoutMs` (default 5 minutes — `DEFAULT_ATTENTION_TIMEOUT_MS` in
+`server/attention/index.ts`) bounds the wait. On timeout, and when there is
+no prompt-capable surface to ask at all, the call **resolves** with
+`defaultAnswer` — it never rejects and never hangs. Read `status` before
+acting on `answer`: `'answered'` is a human, anything else is your own
+default coming back to you.
+
+### `unanswerable` is the out-of-the-box default
+
+`unanswerable` means nobody could be asked: no registered surface declares
+`prompt`, or every one of them declined or threw. **All four core surfaces
+(`web`, `cli`, `slack`, `telegram`) are read-only today** (see
+[Read-only surfaces](#read-only-surfaces) above) — so out of the box,
+`ctx.attention.ask()` returns `unanswerable` unless a plugin surface that
+implements `prompt` is installed.
+
+### Does not survive a restart
+
+In-memory only. A pending ask, and the surface's live `prompt()` call
+awaiting it, both die with the process — there is no DB row for it to resume
+from. Restart the server mid-ask and the question is gone; nothing is
+re-asked and nothing is answered. Don't build an approval gate that must not
+be lost on top of this — core's DB-backed one is `server/orchestrator/gate.ts`
+and was not rewired onto `ctx.attention`.
+
+## `ctx.effect()`
 
 ```ts
 effect(dispose: () => void | Promise<void>): void;
@@ -1130,26 +1214,28 @@ decision.
 
 ### Every capability
 
-All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
+All 17 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 `PluginCapability` in `@octomux/plugin-api`):
 
-| Capability              | Gates                         | Undone on unmount?                                      |
-| ----------------------- | ----------------------------- | ------------------------------------------------------- |
-| `workflows.register`    | `ctx.workflows.register()`    | yes                                                     |
-| `integrations.register` | `ctx.integrations.register()` | yes                                                     |
-| `harnesses.register`    | `ctx.harnesses.register()`    | yes                                                     |
-| `compute.register`      | `ctx.compute.register()`      | yes                                                     |
-| `http.route`            | `ctx.http.route()`            | yes                                                     |
-| `facts.define`          | `ctx.facts.define()`          | yes — the type definition; facts written survive        |
-| `facts.put`             | `ctx.facts.put()`             | n/a — a write, not a registration                       |
-| `collections.define`    | `ctx.collections.define()`    | yes — the definition; records survive                   |
-| `collections.write`     | `ctx.collections.put()`       | n/a — a write, not a registration                       |
-| `ui.panel`              | `ctx.ui.panel()`              | yes                                                     |
-| `artifacts.write`       | `ctx.artifacts.write()`       | n/a — files land in the worktree and outlive the plugin |
-| `policy.intercept`      | `ctx.policy.intercept()`      | yes                                                     |
-| `agents.run`            | `ctx.agents.run()`            | n/a — an in-flight run settles on its own               |
-| `fanout.run`            | `ctx.fanout.run()`            | n/a — an in-flight run is aborted, not "undone"         |
-| `surfaces.register`     | `ctx.surfaces.register()`     | yes                                                     |
+| Capability              | Gates                         | Undone on unmount?                                         |
+| ----------------------- | ----------------------------- | ---------------------------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`    | yes                                                        |
+| `integrations.register` | `ctx.integrations.register()` | yes                                                        |
+| `harnesses.register`    | `ctx.harnesses.register()`    | yes                                                        |
+| `compute.register`      | `ctx.compute.register()`      | yes                                                        |
+| `http.route`            | `ctx.http.route()`            | yes                                                        |
+| `facts.define`          | `ctx.facts.define()`          | yes — the type definition; facts written survive           |
+| `facts.put`             | `ctx.facts.put()`             | n/a — a write, not a registration                          |
+| `collections.define`    | `ctx.collections.define()`    | yes — the definition; records survive                      |
+| `collections.write`     | `ctx.collections.put()`       | n/a — a write, not a registration                          |
+| `ui.panel`              | `ctx.ui.panel()`              | yes                                                        |
+| `artifacts.write`       | `ctx.artifacts.write()`       | n/a — files land in the worktree and outlive the plugin    |
+| `policy.intercept`      | `ctx.policy.intercept()`      | yes                                                        |
+| `agents.run`            | `ctx.agents.run()`            | n/a — an in-flight run settles on its own                  |
+| `fanout.run`            | `ctx.fanout.run()`            | n/a — an in-flight run is aborted, not "undone"            |
+| `surfaces.register`     | `ctx.surfaces.register()`     | yes                                                        |
+| `attention.ask`         | `ctx.attention.ask()`         | n/a — a pending ask dies with the process, nothing to undo |
+| `secrets.read`          | `ctx.secrets.resolve()`       | n/a — a read, not a registration                           |
 
 ### What's ungated, and why
 

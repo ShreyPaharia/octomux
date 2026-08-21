@@ -30,8 +30,11 @@ import { registerPolicyHook } from './policy.js';
 import { runAgentSession } from '../agent-session/session.js';
 import { ptySubstrate } from '../agent-session/substrate-pty.js';
 import { createFanOutApi, abortPluginFanOuts } from './fanout.js';
+import { askHumans } from '../attention/index.js';
 import type {
   PluginContext,
+  AttentionApi,
+  AttentionAsk,
   PluginSettingsScope,
   PluginKv,
   WorkflowRegistrar,
@@ -490,6 +493,29 @@ export function createPluginContext(
     },
   };
 
+  // `ctx.attention` — ask a human a question and wait for an answer. Not a
+  // registrar, same as `agents`/`artifacts`: nobody needs a different
+  // attention implementation, they need to ask one question. Gated on
+  // `assertLive`, like `agents.run` and UNLIKE `facts.put`/`artifacts.write`:
+  // `ask` interrupts a HUMAN, so a plugin that has already been unmounted
+  // must not be able to start a new one. Nothing is pushed onto `effects`
+  // here: `ask` doesn't REGISTER anything, so there's nothing to deregister
+  // on unmount — an in-flight ask settles on its own, bounded by its own
+  // timeout, the same precedent `agents.run` documents above for an
+  // in-flight agent session.
+  const attention: AttentionApi = {
+    // `async` (rather than returning `askHumans(ask)` directly, like the
+    // synchronous registrars above) so a synchronous `assertLive`/
+    // `assertGranted` throw surfaces as a rejected promise, matching
+    // `AttentionApi.ask`'s `Promise<AttentionAnswer>` signature and
+    // `ctx.secrets.list`/`resolve`'s equivalent guard pattern above.
+    async ask(ask: AttentionAsk) {
+      assertLive('attention.ask');
+      assertGranted(id, 'attention.ask');
+      return askHumans(ask);
+    },
+  };
+
   const ui: UiRegistrar = {
     panel(binding: UiPanelBinding) {
       assertLive('ui.panel');
@@ -565,6 +591,7 @@ export function createPluginContext(
     artifacts,
     secrets,
     agents,
+    attention,
     ui,
     catalog,
     policy,
