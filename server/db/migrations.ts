@@ -1250,6 +1250,18 @@ export function runMigrations(instance: Database): void {
        ON tasks(depends_on) WHERE depends_on IS NOT NULL`,
   );
 
+  // ── Re-review trigger tracking (2026-08-19) ────────────────────────────────
+  // Latest GitHub REVIEW_REQUESTED_EVENT timestamp seen for the owner on this
+  // PR, so the reviewer poller can fire a re-review when review is re-requested
+  // without a push (head SHA unchanged).
+  const taskColsForReReview = columnsOf(instance, 'tasks');
+  addColumn(
+    instance,
+    'tasks',
+    'pr_review_requested_at',
+    'pr_review_requested_at TEXT',
+    taskColsForReReview,
+  );
   // ── ctx.facts — plugin fact log (2026-08-20, SHR-255) ───────────────────────
   // Deliberately its OWN table, not the `events` table — that one is the
   // orchestrator's control bus (repositories/orchestrator.ts, drained via
