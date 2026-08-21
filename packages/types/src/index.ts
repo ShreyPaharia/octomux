@@ -154,6 +154,11 @@ export interface Task {
   /** Summary text set by agent or user. */
   current_summary: string | null;
   current_summary_updated_at: string | null;
+  /** Last tool call, machine-derived (not authored) — distinct from Summary
+   *  above; keeps a running task looking alive on the board before anyone
+   *  has written a real summary. Optional so nothing constructing a Task breaks. */
+  current_activity?: string | null;
+  current_activity_updated_at?: string | null;
   created_at: string;
   updated_at: string;
   workers?: Worker[];

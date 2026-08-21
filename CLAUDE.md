@@ -78,9 +78,11 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
   they can't drift from server-side validation; everything else is one file per subcommand in
   `cli/src/commands/` (close-task, resume-task, add-agent, send-message, stop-agent, init,
   emit, loop-start, loop-start-group, learn/recall/unlearn, post-review, task-updates,
-  task-ref-add/rm, list-skills/get-skill, files, plugins, doctor, …). `task-move`/`task-note`/
-  `task-summary` were retired with the `/note` and `/summary` routes — narrative now lives in
-  the task's `.octomux/artifact.md`, no CLI write surface for it.
+  task-ref-add/rm, list-skills/get-skill, files, plugins, doctor, …). `task-move`/`task-note`
+  were retired with the `/note` route — narrative now lives in the task's
+  `.octomux/artifact.md`, no CLI write surface for `task-move`/`task-note`. `task-summary` is
+  back as the generated `task summary` capability command (alias `task-summary`), writing the
+  artifact's Summary section.
 - `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
   the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
 - `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)

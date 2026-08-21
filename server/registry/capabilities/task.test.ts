@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from '../../bun-test.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 import type Database from '../../sqlite.js';
 import type { CapabilityContext } from '../types.js';
 
@@ -55,7 +58,7 @@ afterEach(() => {
 // ─── Registration + shape ──────────────────────────────────────────────────────
 
 describe('registerTaskCapabilities', () => {
-  it('registers all eight capabilities without throwing', () => {
+  it('registers all nine capabilities without throwing', () => {
     resetRegistry();
     expect(() => registerTaskCapabilities()).not.toThrow();
     for (const id of [
@@ -65,6 +68,7 @@ describe('registerTaskCapabilities', () => {
       'task.start',
       'task.move',
       'task.rename',
+      'task.summary',
       'task.close',
       'task.delete',
     ]) {
@@ -79,6 +83,7 @@ describe('registerTaskCapabilities', () => {
     ['task.start', 'post', '/api/tasks/:id/start', 'task start', undefined, 'ask'],
     ['task.move', 'post', '/api/tasks/:id/move', 'task move', 'set_task_status', 'ask'],
     ['task.rename', 'post', '/api/tasks/:id/rename', 'task rename', 'rename_task', 'auto'],
+    ['task.summary', 'post', '/api/tasks/:id/summary', 'task summary', 'set_task_summary', 'auto'],
     ['task.delete', 'delete', '/api/tasks/:id', 'task delete', 'delete_task', 'ask'],
   ] as const)('%s has the expected http/cli/mcp/tier shape', (id, method, path, cli, mcp, tier) => {
     const cap = getCapability(id)!;
@@ -99,6 +104,7 @@ describe('registerTaskCapabilities', () => {
     ['task.start', undefined],
     ['task.move', undefined],
     ['task.rename', undefined],
+    ['task.summary', undefined],
   ] as const)('%s declares success status %s', (id, status) => {
     expect(getCapability(id)!.http?.status).toBe(status);
   });
@@ -137,6 +143,7 @@ describe('registerTaskCapabilities', () => {
     ['task.get', ['get-task']],
     ['task.create', ['create-task']],
     ['task.move', ['task-move']],
+    ['task.summary', ['task-summary']],
     ['task.delete', ['delete-task']],
   ] as const)('%s carries the legacy alias %s', (id, aliases) => {
     expect(getCapability(id)!.cliAliases).toEqual(aliases);
@@ -551,6 +558,78 @@ describe('task.move', () => {
     await cap.handler({ id: 'dep', workflow_status: 'done' }, ctx);
     // 'blocked' carries the default fixture's worktree, so it resumes rather than starts fresh.
     expect(resumeTask).toHaveBeenCalledWith(expect.objectContaining({ id: 'blocked' }));
+  });
+});
+
+describe('task.summary', () => {
+  // Real temp directory, genuinely written and read back through
+  // getArtifactSummary/setArtifactSummary — the round-trip is the whole point
+  // (the retired route reported success while writing nothing; a status-code
+  // assertion would not have caught that).
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-task-summary-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const summary = (input: Record<string, unknown>) =>
+    getCapability('task.summary')!.handler(input, ctx);
+  const get = (input: Record<string, unknown>) => getCapability('task.get')!.handler(input, ctx);
+
+  it('round-trips through task.get', async () => {
+    insertTestTask({ id: 't1', worktree: tmpDir });
+
+    await summary({ id: 't1', summary: 'Implemented the retry logic.' });
+    const result = (await get({ id: 't1' })) as Record<string, unknown>;
+
+    expect(result.current_summary).toBe('Implemented the retry logic.');
+    expect(result.current_summary_updated_at).toEqual(expect.any(String));
+  });
+
+  it('replaces the previous summary rather than appending', async () => {
+    insertTestTask({ id: 't1', worktree: tmpDir });
+
+    await summary({ id: 't1', summary: 'First pass done.' });
+    await summary({ id: 't1', summary: 'Second pass done.' });
+    const result = (await get({ id: 't1' })) as Record<string, unknown>;
+
+    expect(result.current_summary).toBe('Second pass done.');
+    expect((result.current_summary as string).includes('First pass')).toBe(false);
+    // Exactly one '## Summary' heading — no duplicate section.
+    const raw = fs.readFileSync(path.join(tmpDir, '.octomux', 'artifact.md'), 'utf8');
+    expect(raw.match(/^## Summary$/gm)).toHaveLength(1);
+  });
+
+  it('409s on a task with no worktree yet — does not report success', async () => {
+    insertTestTask({ id: 't1', worktree: null });
+
+    await expect(summary({ id: 't1', summary: 'x' })).rejects.toThrow(/no worktree/);
+    const result = (await get({ id: 't1' })) as Record<string, unknown>;
+    expect(result.current_summary).toBeNull();
+  });
+
+  it('404s on an unknown id', async () => {
+    await expect(summary({ id: 'nope', summary: 'x' })).rejects.toThrow(/Task not found/);
+  });
+
+  it('a multi-line summary with blank lines and a bullet list survives the round-trip', async () => {
+    insertTestTask({ id: 't1', worktree: tmpDir });
+    const text = [
+      'Fixed the race.',
+      '',
+      'Remaining work:',
+      '- add a regression test',
+      '- doc it',
+    ].join('\n');
+
+    await summary({ id: 't1', summary: text });
+    const result = (await get({ id: 't1' })) as Record<string, unknown>;
+
+    expect(result.current_summary).toBe(text);
   });
 });
 

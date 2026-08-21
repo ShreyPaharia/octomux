@@ -23,7 +23,7 @@ import {
   setGlobalMonitor,
 } from './repositories/orchestrator.js';
 import { advancePhaseForLabel, resolveGateCardConversationId } from './hooks.js';
-import { getArtifactSummary } from './artifact.js';
+import { getArtifactSummary, getArtifactActivity } from './artifact.js';
 
 describe('Hook endpoints', () => {
   let db: Database;
@@ -158,7 +158,7 @@ describe('Hook endpoints', () => {
       expect(getAgentActivity(db, 'a1').hook_activity).toBe('idle');
     });
 
-    const summaryCases = [
+    const activityCases = [
       {
         name: 'Bash → command',
         body: { tool_name: 'Bash', tool_input: { command: 'npm test' } },
@@ -230,15 +230,15 @@ describe('Hook endpoints', () => {
       },
     ];
 
-    it.each([...summaryCases])('populates current_summary: $name', async ({ body, expected }) => {
+    it.each([...activityCases])('populates current_activity: $name', async ({ body, expected }) => {
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', ...body })
         .expect(200);
 
-      const result = getArtifactSummary(worktreeDir);
-      expect(result.current_summary).toBe(expected);
-      expect(result.current_summary_updated_at).not.toBeNull();
+      const result = getArtifactActivity(worktreeDir);
+      expect(result.current_activity).toBe(expected);
+      expect(result.current_activity_updated_at).not.toBeNull();
     });
 
     it('truncates very long tool details to ≤ 100 chars with ellipsis', async () => {
@@ -248,20 +248,48 @@ describe('Hook endpoints', () => {
         .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: long } })
         .expect(200);
 
-      const { current_summary } = getArtifactSummary(worktreeDir);
-      expect(current_summary).not.toBeNull();
-      expect(current_summary!.length).toBeLessThanOrEqual(100);
-      expect(current_summary!.startsWith('Bash: ')).toBe(true);
-      expect(current_summary!.endsWith('…')).toBe(true);
+      const { current_activity } = getArtifactActivity(worktreeDir);
+      expect(current_activity).not.toBeNull();
+      expect(current_activity!.length).toBeLessThanOrEqual(100);
+      expect(current_activity!.startsWith('Bash: ')).toBe(true);
+      expect(current_activity!.endsWith('…')).toBe(true);
     });
 
-    it('leaves current_summary unchanged when tool_name is missing', async () => {
+    it('leaves current_activity unchanged when tool_name is missing', async () => {
       await request(app)
         .post('/api/hooks/post-tool-use?token=tok-test')
         .send({ session_id: 'sess-123', tool_input: { command: 'noop' } })
         .expect(200);
 
-      expect(getArtifactSummary(worktreeDir).current_summary).toBeNull();
+      expect(getArtifactActivity(worktreeDir).current_activity).toBeNull();
+    });
+
+    it('writes to Activity and leaves an existing Summary byte-identical (regression: Defect A clobber)', async () => {
+      // A Summary an agent/human deliberately wrote must survive a tool-use
+      // hook untouched — this used to get overwritten within seconds by the
+      // next tool call's derived text.
+      const artifactPath = path.join(worktreeDir, '.octomux', 'artifact.md');
+      fs.mkdirSync(path.dirname(artifactPath), { recursive: true });
+      fs.writeFileSync(
+        artifactPath,
+        '## Summary\n\n_Updated 2020-01-01 00:00:00_\n\nAuthored by a human.\n',
+      );
+
+      await request(app)
+        .post('/api/hooks/post-tool-use?token=tok-test')
+        .send({ session_id: 'sess-123', tool_name: 'Bash', tool_input: { command: 'npm test' } })
+        .expect(200);
+
+      const after = fs.readFileSync(artifactPath, 'utf8');
+      expect(after).toContain(
+        '## Summary\n\n_Updated 2020-01-01 00:00:00_\n\nAuthored by a human.',
+      );
+      expect(after).toContain('## Activity');
+      expect(getArtifactSummary(worktreeDir)).toEqual({
+        current_summary: 'Authored by a human.',
+        current_summary_updated_at: '2020-01-01 00:00:00',
+      });
+      expect(getArtifactActivity(worktreeDir).current_activity).toBe('Bash: npm test');
     });
   });
 

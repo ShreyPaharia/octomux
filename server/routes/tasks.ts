@@ -107,6 +107,11 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     }
     await resumeTask(task);
   } else if (body.runtime_state === 'idle') {
+    // Check BEFORE calling closeTask so a 409 here is honest about having
+    // changed nothing — an already-idle task has no tmux session to kill.
+    if (task.runtime_state === 'idle') {
+      throw conflict('task is already closed (runtime_state=idle) — nothing to close');
+    }
     await closeTask(task);
   } else if (body.workflow_status) {
     // One implementation of "change a task's status", not two. This used to do
@@ -117,6 +122,17 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
     throw badRequest(
       'workflow_status cannot be set via PATCH — use POST /api/tasks/:id/move, ' +
         'which records the transition and fires workflow_status_changed',
+    );
+  } else {
+    // SHR-278: a stale/wrong client body (e.g. the pre-rename `{ status: 'closed' }`)
+    // used to fall through every branch above and hit fetchTaskBundle unchanged,
+    // returning 200 with nothing done — four tasks silently failed to close and
+    // nobody could tell from the response. Reject instead of pretending success.
+    const gotKeys = Object.keys(body ?? {});
+    throw badRequest(
+      `PATCH body had no actionable field (got: ${gotKeys.length ? gotKeys.join(', ') : 'none'}). ` +
+        'Expected one of: runtime_state, title, description, repo_path, branch, base_branch, ' +
+        'initial_prompt, run_mode, worktree_path. To change workflow_status use POST /api/tasks/:id/move.',
     );
   }
 

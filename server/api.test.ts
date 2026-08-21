@@ -725,7 +725,9 @@ describe('PATCH /api/tasks/:id', () => {
   });
 
   it('updates updated_at timestamp', async () => {
-    insertTask(db, { updated_at: '2020-01-01 00:00:00' });
+    // Must start `running`: PATCH runtime_state=idle on an already-idle task is
+    // now a 409, and an error body has no `updated_at` to assert on (SHR-278).
+    insertTask(db, { ...DEFAULTS.runningTask, updated_at: '2020-01-01 00:00:00' });
 
     const res = await request(http_.server)
       .patch(`/api/tasks/${DEFAULTS.task.id}`)
@@ -752,11 +754,15 @@ describe('PATCH /api/tasks/:id', () => {
     expect(closeTask).not.toHaveBeenCalled();
   });
 
-  it('handles PATCH with empty body gracefully', async () => {
+  // SHR-278: a PATCH the handler cannot act on used to fall through the if/else
+  // chain and return 200 with the untouched task. A stale CLI sending the
+  // pre-rename `{ status: 'closed' }` read that as four successfully closed
+  // tasks. Unactionable bodies are now a loud 400.
+  it('rejects a PATCH with an empty body', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     const res = await request(http_.server).patch(`/api/tasks/${DEFAULTS.task.id}`).send({});
-    expect(res.status).toBe(200);
-    expect(res.body.runtime_state).toBe('running'); // unchanged
+    expect(res.status).toBe(400);
+    expect(getTask(db, DEFAULTS.task.id)!.runtime_state).toBe('running'); // unchanged
     expect(closeTask).not.toHaveBeenCalled();
   });
 

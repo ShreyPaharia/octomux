@@ -73,10 +73,23 @@ export const BoardCard = memo(function BoardCard({
   graceHours = 6,
 }: BoardCardProps) {
   const navigate = useNavigate();
+
+  // Prefer the authored summary; fall back to the machine-derived activity
+  // breadcrumb so a running task with no summary yet still reads as alive
+  // instead of rendering '—' and looking permanently stale.
+  const displayText = task.current_summary ?? task.current_activity ?? null;
+
+  // Staleness is driven by whichever of the two timestamps is more recent —
+  // a fresh tool-use Activity update should keep a card looking alive even
+  // if its authored Summary is old, and vice versa.
+  const latestUpdateAt = [task.current_summary_updated_at, task.current_activity_updated_at]
+    .filter((ts): ts is string => Boolean(ts))
+    .sort()
+    .pop();
+
   const isStale =
     task.runtime_state === 'running' &&
-    (!task.current_summary_updated_at ||
-      Date.now() - new Date(task.current_summary_updated_at + 'Z').getTime() > 3_600_000);
+    (!latestUpdateAt || Date.now() - new Date(latestUpdateAt + 'Z').getTime() > 3_600_000);
 
   const isTrashed = task.deleted_at !== null;
 
@@ -131,14 +144,14 @@ export const BoardCard = memo(function BoardCard({
           {task.title}
         </h3>
 
-        {/* Line 2: current_summary */}
+        {/* Line 2: authored summary, else machine-derived activity, else '—' */}
         <p
           className={cn(
             'mt-0.5 truncate text-[11px] italic leading-tight',
             isStale ? 'text-muted-soft' : 'text-muted-foreground',
           )}
         >
-          {task.current_summary ?? '—'}
+          {displayText ?? '—'}
         </p>
 
         {/* Line 3: chips */}
