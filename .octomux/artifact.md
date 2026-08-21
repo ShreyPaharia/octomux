@@ -91,6 +91,6 @@ hit the same thing.
 
 ## Summary
 
-_Updated 2026-08-21 16:16:43_
+_Updated 2026-08-21 16:16:56_
 
-Write: /Users/shreypaharia/Documents/Projects/octomux-agents/.worktrees/shr-276-fan-out-run-a-step-…
+Bash: octomux get-task 8yJgFaq5IxFv --json 2>/dev/null | python3 -c "import json,sys; t=json.load(s…
