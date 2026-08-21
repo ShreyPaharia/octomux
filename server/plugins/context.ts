@@ -7,12 +7,15 @@
  * state across plugins except the underlying registries, which already
  * namespace by qualified id.
  */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { childLogger } from '../logger.js';
 import { getPluginSettings, updatePluginSettings } from '../settings.js';
 import { qualify } from './qualify.js';
 import { registerPluginWorkflow } from '../workflows/registry.js';
 import { registerProvider } from '../integrations/registry.js';
-import { registerHarness } from '../harnesses/registry.js';
+import { registerHarness, getHarness } from '../harnesses/registry.js';
 import { registerCompute } from '../compute/registry.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
@@ -21,6 +24,8 @@ import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
 import { setPluginGrants, clearPluginGrants, assertGranted } from './grants.js';
 import { registerPolicyHook } from './policy.js';
+import { runAgentSession } from '../agent-session/session.js';
+import { ptySubstrate } from '../agent-session/substrate-pty.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -32,6 +37,8 @@ import type {
   HttpRegistrar,
   FactsRegistrar,
   ArtifactsApi,
+  AgentRunner,
+  AgentRunOptions,
   UiRegistrar,
   PolicyRegistrar,
   PluginCapability,
@@ -352,6 +359,54 @@ export function createPluginContext(
     },
   };
 
+  // `ctx.agents` — a headless, structured-output agent run. Same primitive
+  // as `services/session-vertical-service.ts`, minus the schedule bookkeeping:
+  // this deliberately passes no `run:` option to `runAgentSession`, so the
+  // call stays DB-free — a plugin's agent run is not a schedule run and does
+  // not get a `runs` row.
+  const agents: AgentRunner = {
+    async run<T = unknown>(opts: AgentRunOptions): Promise<T> {
+      // Gated on `assertLive`, unlike `facts.put`/`artifacts.write` above:
+      // those flush output the plugin already earned, but this SPAWNS A NEW
+      // SUBPROCESS. A context is revoked both when `apply()` overruns its
+      // timeout and — via `disposePluginContext`, which revokes last — on
+      // unmount, so this one guard covers "no new agent runs after the
+      // plugin is gone" with no extra bookkeeping.
+      assertLive('agents.run');
+      assertGranted(id, 'agents.run');
+      const ephemeral = opts.workspaceDir === undefined;
+      const workspaceDir =
+        opts.workspaceDir ??
+        (await fs.promises.mkdtemp(path.join(os.tmpdir(), `octomux-plugin-${id}-`)));
+      try {
+        const { result } = await runAgentSession<T>({
+          workspaceDir,
+          harness: getHarness(null),
+          substrate: ptySubstrate,
+          input: opts.input,
+          outputSchema: opts.outputSchema,
+          model: opts.model ?? null,
+          timeoutMs: opts.timeoutMs,
+        });
+        return result;
+      } finally {
+        // Disposal does not strand an in-flight session and does not block on
+        // one either: an in-flight run() keeps going after unmount and
+        // settles on its own — `runAgentSession` disposes the process handle
+        // and the capture in its own `finally`, and its `timeoutMs` (default
+        // 300s) bounds the wait, so nothing leaks and this promise always
+        // settles. Unmount only stops NEW runs (via assertLive above); no
+        // effect is pushed here, and nothing awaits an in-flight session.
+        //
+        // Only a dir WE made gets removed; a caller-supplied workspaceDir is
+        // the caller's to clean up.
+        if (ephemeral) {
+          await fs.promises.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    },
+  };
+
   const ui: UiRegistrar = {
     panel(binding: UiPanelBinding) {
       assertLive('ui.panel');
@@ -399,6 +454,7 @@ export function createPluginContext(
     http,
     facts,
     artifacts,
+    agents,
     ui,
     catalog,
     policy,

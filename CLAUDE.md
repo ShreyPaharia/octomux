@@ -290,8 +290,8 @@ tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built b
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above),
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
-`ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
-(async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
+`ctx.artifacts` (`write`/`list`), `ctx.agents.run()`, `ctx.effect(fn)` for teardown, `ctx.logger`,
+`ctx.settings` (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
 artifact implementation, they need to write one. `write(taskId, {name, mime, body})` drops a file
 at `<worktree>/.octomux/artifacts/<pluginId>/<name>` (metadata in a sibling `index.json`, since
@@ -300,6 +300,13 @@ artifacts on that task, unscoped, exactly like `facts.read`. `server/services/ru
 surfaces them on `GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
 further core change. Files land in the task's git worktree — they diff, and they outlive both
 the plugin and a DB wipe.
+`ctx.agents` is likewise a method, not a registrar: `run({ input, outputSchema, model?,
+timeoutMs? })` launches a headless, git-free agent session (default harness, pty substrate —
+the same `runAgentSession()` primitive `session-vertical-service.ts` uses for scheduled kinds)
+and resolves with the structured result submitted via `submit_result`. It defaults to a fresh
+ephemeral scratch dir — no worktree, no tmux, no CLAUDE.md/repo bleed — pass `workspaceDir` for
+a real checkout; `timeoutMs` (default 5 min) bounds the wait. There's no host concurrency cap
+and no `runs` row; a fan-out plugin owns its own limiter.
 Types are pinned in `@octomux/plugin-api` (`packages/plugin-api/src/index.ts`) — **types only**,
 nothing runtime crosses that package boundary, because under `bun build --compile` a plugin has
 no host `node_modules` tree to import a runtime value from even by accident.
@@ -325,7 +332,7 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
   `http.route`, `facts.define`, `facts.put`, `ui.panel`, `artifacts.write`,
-  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
+  `policy.intercept`, `agents.run`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
   `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing

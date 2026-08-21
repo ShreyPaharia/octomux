@@ -47,6 +47,7 @@ export interface PluginContext {
   readonly catalog: CatalogReader;
   effect(dispose: () => void | Promise<void>): void;
   readonly compute: ComputeRegistrar;
+  readonly agents: AgentRunner;
 }
 ```
 
@@ -339,6 +340,65 @@ providers exist to uphold — `docs/plugins/examples/ssh-compute`'s test file
 asserts it directly (register the provider with a recognizable secret, drive
 `create()` and a few `exec()`s, assert the secret string appears only in the
 transport argv).
+
+## `ctx.agents`
+
+```ts
+interface AgentRunOptions {
+  input: string;
+  outputSchema: object; // JSON Schema the structured result must conform to
+  model?: string | null;
+  timeoutMs?: number; // default 300_000
+  /** Defaults to a fresh ephemeral scratch dir. No git, no worktree. */
+  workspaceDir?: string;
+}
+interface AgentRunner {
+  run<T = unknown>(opts: AgentRunOptions): Promise<T>;
+}
+```
+
+Runs a headless agent and hands you back structured JSON — for a plugin that
+needs an LLM to read something and answer, not write code. `run()` wires
+straight to the host's `runAgentSession()` primitive
+(`server/agent-session/session.ts`) with the default harness and the **pty** substrate, the same
+primitive `server/services/session-vertical-service.ts` already uses to run
+scheduled workflow kinds. The agent is told to call the `submit_result` MCP
+tool with a result matching `outputSchema`; `run()` resolves with that
+result.
+
+```js
+async function classify(ctx, ticketBody) {
+  return ctx.agents.run({
+    input: `Classify this support ticket:\n\n${ticketBody}`,
+    outputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['bug', 'feature', 'question'] },
+        confidence: { type: 'number' },
+      },
+      required: ['category', 'confidence'],
+    },
+    timeoutMs: 60_000,
+  });
+}
+```
+
+- **Gated.** Your manifest row needs `grants: [agents.run]` or the call
+  throws — see "Capability grants" in the root `CLAUDE.md`.
+- **Explicitly git-free.** No worktree, no branch, no tmux session — that's
+  the _task_ lifecycle, for agents that write code. `run()` defaults to a
+  fresh empty scratch dir, which is also a clean room: no CLAUDE.md, no repo
+  checkout, no project skills bleeding into the prompt. Pass `workspaceDir`
+  if the agent genuinely needs to see a checkout.
+- **pty only** — not reattachable, doesn't survive a host restart, no tmux
+  window a human can attach to.
+- **No concurrency cap in the host.** A plugin that fans out owns its own
+  limiter.
+- **DB-free.** A plugin run is not a schedule run and gets no `runs` row.
+- `timeoutMs` (default 5 min) bounds the wait — a session that never submits
+  a result rejects rather than hanging.
+- Unmounting the plugin stops _new_ runs; an already in-flight run settles
+  on its own and is not awaited by teardown.
 
 ## Manifest (`octomux.yml`)
 
