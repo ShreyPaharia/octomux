@@ -13,12 +13,28 @@
  *
  * SIGNATURES ARE PINNED (plans/2026-08-20-plugin-runtime-p0.md STEP-0).
  * Task D fills in the bodies; nothing here may change shape.
+ *
+ * SHR-257 adds the write half: `ctx.ui.action()`. An action is a NAME the
+ * host invokes — `def.run` is stored here and NEVER served over
+ * `listUiActions()`; only its label/slot/schema/command/confirm reach the
+ * client (`UiActionContribution`). Invocation goes through `invokeUiAction()`,
+ * which runs `run` in this process and hands back only its JSON-serializable
+ * result. That is the same "no plugin JavaScript in the browser" ceiling the
+ * panel side holds to, extended to writes: a plugin can make the host do
+ * something, but it can never ship code that runs on someone else's machine.
  */
-import type { UiPanelBinding, UiSlot } from '@octomux/plugin-api';
+import type {
+  UiActionContribution,
+  UiActionDefinition,
+  UiActionResult,
+  UiPanelBinding,
+  UiSlot,
+} from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
 import { qualify } from './qualify.js';
 import { isFactTypeDefined } from './facts.js';
 import { isCollectionDefined } from './collections.js';
+import { forgetCompiledSchema, validateAgainstSchema } from '../services/output-contract.js';
 
 const logger = childLogger('plugins/ui-registry');
 
@@ -154,17 +170,188 @@ export function listUiContributions(): UiContribution[] {
   return all;
 }
 
-/** Drops a plugin's contributions. Called on unmount — the panel must vanish
- *  with no restart. Safe to call for a plugin that registered none. */
+/** One registered action: the client-facing contribution plus the host-only
+ *  `run` function. Never destructure this into anything that leaves the
+ *  module — `run` crossing a boundary is exactly what this table exists to
+ *  prevent. */
+interface UiActionRegistration {
+  contribution: UiActionContribution;
+  run: UiActionDefinition['run'];
+}
+
+/** pluginId -> its actions, insertion order preserved (mirrors `contributions`). */
+const actionsByPlugin = new Map<string, UiActionRegistration[]>();
+
+/** Qualified actionId -> registration, for O(1) invoke. */
+const actionsById = new Map<string, UiActionRegistration>();
+
+/**
+ * Registers an action. `def.id` is BARE; this qualifies it to
+ * `<pluginId>:<id>` the same way `registerPluginUiPanel` qualifies
+ * `binding.fact`/`binding.collection`.
+ *
+ * Validates `id`/`label`/`run`/`slot` at registration time (unlike the panel
+ * side's fact-type typo check, which waits until read time) — there is no
+ * legitimate ordering dependency here the way there is between
+ * `facts.define()` and `ui.panel()`, so a bad declaration is a load-time
+ * failure, not a permanently-broken button nobody is told about.
+ */
+export function registerPluginUiAction(pluginId: string, def: UiActionDefinition): void {
+  if (typeof def.id !== 'string' || def.id.length === 0) {
+    throw new Error(`plugin "${pluginId}": ui.action requires a non-empty string "id"`);
+  }
+  if (typeof def.label !== 'string' || def.label.length === 0) {
+    throw new Error(
+      `plugin "${pluginId}": ui.action "${def.id}" requires a non-empty string "label"`,
+    );
+  }
+  if (typeof def.run !== 'function') {
+    throw new Error(`plugin "${pluginId}": ui.action "${def.id}" requires a "run" function`);
+  }
+  if (def.slot !== undefined && !UI_SLOTS.includes(def.slot)) {
+    throw new Error(
+      `plugin "${pluginId}": ui.action "${def.id}" "slot" must be one of ${UI_SLOTS.join(', ')} ` +
+        `(got "${def.slot}")`,
+    );
+  }
+
+  const actionId = qualify(pluginId, def.id);
+  if (actionsById.has(actionId)) {
+    throw new Error(`plugin "${pluginId}": ui action "${actionId}" is already defined`);
+  }
+
+  const contribution: UiActionContribution = {
+    pluginId,
+    actionId,
+    id: def.id,
+    label: def.label,
+    slot: def.slot,
+    schema: def.schema,
+    command: def.command,
+    confirm: def.confirm,
+  };
+  const registration: UiActionRegistration = { contribution, run: def.run };
+
+  let pluginActions = actionsByPlugin.get(pluginId);
+  if (!pluginActions) {
+    pluginActions = [];
+    actionsByPlugin.set(pluginId, pluginActions);
+  }
+  pluginActions.push(registration);
+  actionsById.set(actionId, registration);
+
+  logger.info(
+    {
+      plugin_id: pluginId,
+      action_id: actionId,
+      slot: def.slot,
+      has_schema: def.schema !== undefined,
+      command: def.command === true,
+    },
+    'plugin ui action registered',
+  );
+}
+
+/** Every action contribution — `run` never appears in this shape — for
+ *  `GET /api/plugin-ui/actions`, optionally filtered by slot. Insertion
+ *  order, same as `listUiContributions()`. */
+export function listUiActions(slot?: UiSlot | string): UiActionContribution[] {
+  const all = Array.from(actionsByPlugin.values())
+    .flat()
+    .map((r) => r.contribution);
+  return slot === undefined ? all : all.filter((c) => c.slot === slot);
+}
+
+/** Qualified action ids owned by one plugin — for `ctx.catalog` / unmount
+ *  accounting, same role as `listPluginFactTypes`. */
+export function listPluginUiActionIds(pluginId: string): string[] {
+  return (actionsByPlugin.get(pluginId) ?? []).map((r) => r.contribution.actionId);
+}
+
+/**
+ * Runs a registered action. `actionId` is QUALIFIED.
+ *
+ * Input handling: `invocation.input` defaults to `{}` when absent. When the
+ * action declared a `schema`, the input is validated against it (same
+ * `validateAgainstSchema` call `putFact` makes) and a violation throws with a
+ * message starting `invalid input for ui action ` — the route
+ * (`server/routes/plugin-ui.ts`) maps that prefix to 400. With no schema, the
+ * input must be a plain object (or absent) — anything else is the same
+ * "invalid input" error, since there is no schema to say what shape is
+ * expected instead.
+ *
+ * An unknown `actionId` throws a message starting `unknown ui action ` —
+ * the route maps that prefix to 404.
+ */
+export async function invokeUiAction(
+  actionId: string,
+  invocation: { taskId?: string; input?: unknown },
+): Promise<UiActionResult | undefined> {
+  const registration = actionsById.get(actionId);
+  if (!registration) {
+    throw new Error(`unknown ui action "${actionId}"`);
+  }
+  const { contribution } = registration;
+  const { pluginId } = contribution;
+
+  const rawInput = invocation.input ?? {};
+  let input: Record<string, unknown>;
+  if (contribution.schema) {
+    const result = validateAgainstSchema(actionId, contribution.schema, rawInput);
+    if (!result.valid) {
+      const detail = (result.errors ?? []).join('; ') || 'invalid payload';
+      throw new Error(`invalid input for ui action "${actionId}": ${detail}`);
+    }
+    input = rawInput as Record<string, unknown>;
+  } else {
+    if (typeof rawInput !== 'object' || rawInput === null || Array.isArray(rawInput)) {
+      throw new Error(`invalid input for ui action "${actionId}": expected an object`);
+    }
+    input = rawInput as Record<string, unknown>;
+  }
+
+  logger.info(
+    { plugin_id: pluginId, action_id: actionId, task_id: invocation.taskId },
+    'invoking plugin ui action',
+  );
+  try {
+    const result = await registration.run({ taskId: invocation.taskId, input });
+    return result ?? undefined;
+  } catch (err) {
+    childLogger(`plugin:${pluginId}`).warn(
+      { task_id: invocation.taskId, action_id: actionId, err },
+      'ui action run() threw',
+    );
+    throw err;
+  }
+}
+
+/** Drops a plugin's contributions (panels AND actions). Called on unmount —
+ *  everything must vanish with no restart. Safe to call for a plugin that
+ *  registered none, or registered only one of the two kinds. */
 export function unregisterPluginUi(pluginId: string): void {
-  if (!contributions.delete(pluginId)) return;
+  const hadPanels = contributions.delete(pluginId);
+
+  const pluginActions = actionsByPlugin.get(pluginId);
+  const hadActions = pluginActions !== undefined;
+  if (pluginActions) {
+    for (const reg of pluginActions) {
+      actionsById.delete(reg.contribution.actionId);
+      forgetCompiledSchema(reg.contribution.actionId);
+    }
+    actionsByPlugin.delete(pluginId);
+  }
+
+  if (!hadPanels && !hadActions) return;
   logger.info({ plugin_id: pluginId }, 'plugin ui contributions unregistered');
 }
 
-/** Test-only: clears all contributions and the missing-fact-type /
+/** Test-only: clears all contributions/actions and the missing-fact-type /
  *  missing-collection warn dedupes. */
 export function resetPluginUi(): void {
   contributions.clear();
+  actionsByPlugin.clear();
+  actionsById.clear();
   warnedMissingFactType.clear();
   warnedMissingCollection.clear();
 }

@@ -125,6 +125,7 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 | `agents.run`            | `ctx.agents.run()`                       |
 | `fanout.run`            | `ctx.fanout.run()`                       |
 | `surfaces.register`     | `ctx.surfaces.register()`                |
+| `ui.action`             | `ctx.ui.action()`                        |
 
 Reads and logging are ungated — no grant needed for `ctx.logger`,
 `ctx.settings`, `ctx.catalog.list()`, `ctx.facts.read()`/`ctx.facts.watch()`,
@@ -230,12 +231,13 @@ object.
 | `ctx.kv`                                           | durable, plugin-private blobs + crash-recovery checkpoints | §below         | [api-reference.md](./api-reference.md#ctxkv)                                       |
 | `ctx.logger`                                       | structured logging, scoped `plugin:<id>`                   | —              | [api-reference.md](./api-reference.md#ctxlogger)                                   |
 | `ctx.effect()`                                     | register a teardown callback, run in reverse on unmount    | reference only | [api-reference.md](./api-reference.md#plugincontext)                               |
+| `ctx.ui.panel()` / `ctx.ui.action()`               | bind a declarative panel, or declare a host-run action     | §below         | [api-reference.md](./api-reference.md#ctxui)                                       |
 
 "Reference only" rows aren't walked through step by step in this guide — the
 full shape lives in `api-reference.md`. This file stays a guide: it covers
-`workflows`/`integrations`/`harnesses`/`compute`/`surfaces` (the registrars
-that need the most explaining), plus `catalog`/`settings`/`kv`, in depth
-below.
+`workflows`/`integrations`/`harnesses`/`compute`/`surfaces`/`ui.action` (the
+registrars that need the most explaining), plus `catalog`/`settings`/`kv`, in
+depth below.
 
 Every registrar payload is typed as `Record<string, unknown>` at the type
 level (the plan keeps `@octomux/plugin-api` free of a dependency on the
@@ -452,6 +454,55 @@ See [`examples/discord-surface`](./examples/discord-surface) for a complete
 surface — renders panels to Discord markdown and implements `prompt`, with
 its README stating plainly what would need a real Discord token/webhook to
 actually post.
+
+### `ctx.ui.action(def)`
+
+`ctx.ui.panel()` shows something; `ctx.ui.action()` does something. It's the
+write half of `ctx.ui`: you declare a named handler, the host holds it, and
+the client only ever sees the declaration minus the handler — a label, an
+optional slot, an optional JSON Schema, an optional confirm string. Your
+`run` function never leaves the process it was registered in.
+
+```yaml
+plugins:
+  - id: coverage-bot
+    name: '@acme/octomux-coverage-bot'
+    grants: [facts.define, facts.put, ui.panel, ui.action]
+```
+
+```js
+ctx.ui.action({
+  id: 'retry',
+  label: 'Retry failed check',
+  slot: 'task.panel', // omit for a command-palette-only action
+  command: true, // also surface it in the command palette
+  confirm: 'Re-run the coverage check for this task?',
+  schema: { type: 'object', properties: { reason: { type: 'string' } } },
+  async run({ taskId, input }) {
+    await rerunCoverageCheck(taskId, input.reason);
+    return { message: 'Coverage check re-queued.' };
+  },
+});
+```
+
+A `schema`, if you give it one, is what makes this more than a bare button:
+the client renders a form from it — the same schema-driven form the
+schedules UI builds from a workflow's `config` schema — and the host
+validates the submission against it before `run` ever sees `input`. Skip
+`schema` and the action takes no input at all.
+
+Invocation is over REST, not a direct call from the client into your code:
+`GET /api/plugin-ui/actions[?slot=]` lists what's contributed (ungated, like
+listing panels), and `POST /api/plugin-ui/actions/:actionId` with
+`{ taskId?, input? }` runs it (404 unknown id, 400 bad input). Requires the
+`ui.action` grant — see [§Capability grants](#capability-grants). Unmount
+removes an action the same way it removes a panel: gone with no restart.
+
+**Stated plainly:** all four core surfaces (`web`, `cli`, `slack`,
+`telegram`) are still read-only for prompting, and today only the web client
+actually draws an action trigger. A CLI or Slack action button is not a
+thing yet — don't build a plugin assuming one exists. Full shape:
+[`api-reference.md` §`ctx.ui`](./api-reference.md#ctxui).
 
 ## Kind presets (`kinds/*.json`)
 

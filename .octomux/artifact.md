@@ -61,6 +61,6 @@ Bash: bun run lint 2>&1 | tail -5; echo "=== typecheck ==="; bun run typecheck 2
 
 ## Activity
 
-_Updated 2026-08-21 20:05:27_
+_Updated 2026-08-21 20:04:09_
 
-Bash: cd "/Users/shreypaharia/Documents/Projects/octomux-agents/.worktrees/shr-263-durable-plugin-s…
+Bash: grep -n "it(\|describe(" server/plugins/ui-registry.test.ts | tail -25

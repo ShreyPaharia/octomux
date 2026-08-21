@@ -18,7 +18,7 @@ import { listProviders } from '../integrations/registry.js';
 import { listCompute } from '../compute/registry.js';
 import { listSurfaces } from '../surfaces/index.js';
 import { listPluginRoutes, RESERVED_ROUTE_PLUGIN_IDS } from './http-registry.js';
-import { listUiContributions } from './ui-registry.js';
+import { listUiContributions, listPluginUiActionIds } from './ui-registry.js';
 import { listPluginFactTypes, CORE_FACT_TYPES } from './facts.js';
 import { listPluginCollections } from './collections.js';
 import { listPluginServices } from './services.js';
@@ -46,6 +46,8 @@ export interface PluginRegistrations {
   /** `"METHOD /path"` entries, from `listPluginRoutes()`. */
   routes: string[];
   uiSlots: string[];
+  /** `ctx.ui.action()` qualified ids owned by this plugin (SHR-257). */
+  uiActionIds: string[];
   factTypes: string[];
   /** `ctx.collections.define()` names owned by this plugin (SHR-275). */
   collectionNames: string[];
@@ -83,6 +85,7 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
     uiSlots: listUiContributions()
       .filter((c) => c.pluginId === pluginId)
       .map((c) => c.slot),
+    uiActionIds: listPluginUiActionIds(pluginId),
     factTypes: listPluginFactTypes(pluginId),
     collectionNames: listPluginCollections(pluginId),
     // Deliberately NOT filtered through `belongsTo()` like every field above —
@@ -94,7 +97,7 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
 }
 
 /** Flattened `provides[]` form of `pluginRegistrations()`. Order: workflows,
- *  harnesses, integrations, surfaces, routes, ui, facts, collections, services. */
+ *  harnesses, integrations, surfaces, routes, ui, ui-action, facts, collections, services. */
 function provides(reg: PluginRegistrations): string[] {
   return [
     ...reg.workflowKinds.map((k) => `workflow:${k}`),
@@ -103,6 +106,7 @@ function provides(reg: PluginRegistrations): string[] {
     ...reg.surfaceKinds.map((s) => `surface:${s}`),
     ...reg.routes.map((r) => `route:${r}`),
     ...reg.uiSlots.map((s) => `ui:${s}`),
+    ...reg.uiActionIds.map((a) => `ui-action:${a}`),
     ...reg.factTypes.map((f) => `fact:${f}`),
     ...reg.collectionNames.map((c) => `collection:${c}`),
     ...reg.serviceNames.map((n) => `service:${n}`),
@@ -140,6 +144,8 @@ function coreRegistrations(): PluginRegistrations {
     // Core never calls ctx.ui.panel() — there is no core producer of ui
     // contributions today, so this is always empty, not filtered.
     uiSlots: [],
+    // Core never calls ctx.ui.action() either — same reasoning as uiSlots.
+    uiActionIds: [],
     factTypes: [...CORE_FACT_TYPES],
     // Core never calls ctx.collections.define() — nothing in server/ defines
     // a collection today, so this is always empty, not filtered.

@@ -1,9 +1,12 @@
 /**
- * Serves the `ctx.ui` contribution table, the surface catalogue, and
- * rendered panels — per task, and per durable collection — to any surface
- * (SPA, CLI, chat gateways). Bindings and rendered text only — no plugin code
- * crosses this boundary, which is the whole point of the declarative model
- * (see `server/plugins/ui-registry.ts` and `server/surfaces/render.ts`).
+ * Serves the `ctx.ui` contribution table, the surface catalogue, rendered
+ * panels — per task, and per durable collection — and, since SHR-257, the
+ * action table plus the invoke path. Bindings, rendered text, and (for
+ * actions) whatever JSON `run()` hands back only — no plugin code ever
+ * crosses this boundary. `POST /api/plugin-ui/actions/:actionId` runs the
+ * plugin's `run` function IN THE HOST process (`invokeUiAction`,
+ * `server/plugins/ui-registry.ts`); the client only ever sends a qualified
+ * id and a JSON payload and gets a JSON payload back.
  *
  * Live-read on every request rather than cached: contributions appear and
  * vanish as plugins mount and unmount (SHR-254), and a cache here would be a
@@ -11,7 +14,7 @@
  */
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import { listUiContributions } from '../plugins/ui-registry.js';
+import { listUiContributions, listUiActions, invokeUiAction } from '../plugins/ui-registry.js';
 import {
   CORE_SURFACE_KINDS,
   listSurfaces,
@@ -22,14 +25,15 @@ import {
 import { ServiceError } from '../services/errors.js';
 import { loadTaskOrFail } from './_shared.js';
 import { parseCollectionQuery } from './plugin-collections.js';
+import { getTask } from '../repositories/index.js';
 
 export const router: Router = Router();
 
 /**
- * `server/surfaces/render.ts` throws plain `Error`s with fixed messages —
- * there's no error class to switch on, so map by message prefix. Keeping
- * this in one place is what keeps all four endpoints below agreeing on the
- * mapping.
+ * `server/surfaces/render.ts` and `invokeUiAction` (`ui-registry.ts`) both
+ * throw plain `Error`s with fixed message prefixes — there's no error class
+ * to switch on, so map by prefix. Keeping this in one place is what keeps
+ * every endpoint below agreeing on the mapping.
  */
 function surfaceServiceError(err: unknown): ServiceError {
   const message = err instanceof Error ? err.message : String(err);
@@ -38,6 +42,9 @@ function surfaceServiceError(err: unknown): ServiceError {
   // `queryRecords` rejects an orderBy field name it can't splice into a JSON
   // path — that's a bad query string, not a server fault.
   if (message.startsWith('invalid field name')) return new ServiceError(message, 400);
+  // `invokeUiAction` (SHR-257): unknown action id -> 404, schema violation -> 400.
+  if (message.startsWith('unknown ui action ')) return new ServiceError(message, 404);
+  if (message.startsWith('invalid input for ui action ')) return new ServiceError(message, 400);
   return new ServiceError(message, 500);
 }
 
@@ -114,4 +121,41 @@ router.get('/api/plugin-collections/:name/panels', async (req: Request, res: Res
     throw surfaceServiceError(err);
   }
   res.json({ panels });
+});
+
+/**
+ * The action table (SHR-257). Ungated read, same as `/contributions` above —
+ * `run` never appears in `listUiActions()`'s output, so there is nothing
+ * here worth a second look.
+ */
+router.get('/api/plugin-ui/actions', (req: Request, res: Response) => {
+  const slot = typeof req.query.slot === 'string' ? req.query.slot : undefined;
+  res.json({ actions: listUiActions(slot) });
+});
+
+/**
+ * Invokes one action. `:actionId` is the QUALIFIED id (`<pluginId>:<id>`);
+ * express already URL-decodes route params, so a caller sends the id exactly
+ * as `GET /api/plugin-ui/actions` printed it.
+ *
+ * `taskId`, when present, is checked against the task table — the smallest
+ * correct validation, reusing the same `getTask` lookup `loadTaskOrFail`
+ * wraps, rather than inventing a second helper for a body-carried id
+ * `loadTaskOrFail` (params-only) can't read directly.
+ */
+router.post('/api/plugin-ui/actions/:actionId', async (req: Request, res: Response) => {
+  const { actionId } = req.params as Record<string, string>;
+  const body = (req.body ?? {}) as { taskId?: string; input?: Record<string, unknown> };
+
+  if (body.taskId !== undefined && !getTask(body.taskId)) {
+    throw new ServiceError('Task not found', 404);
+  }
+
+  let result;
+  try {
+    result = await invokeUiAction(actionId, { taskId: body.taskId, input: body.input });
+  } catch (err) {
+    throw surfaceServiceError(err);
+  }
+  res.json({ ok: true, message: result?.message });
 });

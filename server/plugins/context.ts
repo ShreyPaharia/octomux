@@ -25,7 +25,7 @@ import { defineCollection, putRecord, queryCollection, watchCollection } from '.
 import { registerService, requireService, getService } from './services.js';
 import { kvGet, kvSet, kvDel, kvList, kvBegin, kvEnd, kvInterrupted } from './kv.js';
 import { listSecrets, resolveSecrets } from '../secrets/store.js';
-import { registerPluginUiPanel } from './ui-registry.js';
+import { registerPluginUiPanel, registerPluginUiAction } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
 import { setPluginGrants, clearPluginGrants, assertGranted } from './grants.js';
@@ -72,6 +72,7 @@ import type {
   HttpMethod,
   PluginRouteHandler,
   UiPanelBinding,
+  UiActionDefinition,
   PolicyPoint,
   PolicyHook,
 } from '@octomux/plugin-api';
@@ -602,6 +603,13 @@ export function createPluginContext(
       // exactly-one rule so there is one place that decides it, and it has
       // the slot/renderer validation next to it already.
       registerPluginUiPanel(id, binding);
+    },
+    action(def: UiActionDefinition) {
+      assertLive('ui.action');
+      assertGranted(id, 'ui.action');
+      const payload = def as unknown as Record<string, unknown>;
+      requireLocalId(payload, 'id', 'ui.action');
+      registerPluginUiAction(id, def);
     },
   };
 

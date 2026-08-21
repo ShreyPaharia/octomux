@@ -37,11 +37,16 @@ const neitherBoundContributionFixture = [
 const usePluginUiContributionsMock = vi.fn();
 const usePluginFactsMock = vi.fn();
 const usePluginCollectionMock = vi.fn();
+// PluginPanels now also mounts <PluginActions> (SHR-257) above the panels —
+// stubbed to "no actions" here since these tests are only about the
+// read-only panel rendering; PluginActions.test.tsx covers actions.
+const usePluginUiActionsMock = vi.fn(() => ({ actions: [], loading: false, error: null }));
 
 vi.mock('@/lib/plugin-ui', () => ({
   usePluginUiContributions: usePluginUiContributionsMock,
   usePluginFacts: usePluginFactsMock,
   usePluginCollection: usePluginCollectionMock,
+  usePluginUiActions: usePluginUiActionsMock,
 }));
 
 const { PluginPanels } = await import('./PluginPanels');

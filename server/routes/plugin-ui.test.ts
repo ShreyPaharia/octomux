@@ -1,8 +1,10 @@
 /**
- * `GET /api/plugin-ui/contributions`, `GET /api/surfaces`, and
- * `GET /api/tasks/:id/panels` — the HTTP surface for `ctx.surfaces` and the
- * `ctx.ui` contribution table it renders. Exercises the full `createApp()`
- * stack (DB + error middleware), same shape as `task-artifacts.test.ts`.
+ * `GET /api/plugin-ui/contributions`, `GET /api/surfaces`,
+ * `GET /api/tasks/:id/panels`, and (SHR-257) `GET /api/plugin-ui/actions` +
+ * `POST /api/plugin-ui/actions/:actionId` — the HTTP surface for
+ * `ctx.surfaces` and the `ctx.ui` contribution/action tables. Exercises the
+ * full `createApp()` stack (DB + error middleware), same shape as
+ * `task-artifacts.test.ts`.
  */
 import { describe, it, expect, beforeEach, afterEach } from '../bun-test.js';
 
@@ -10,7 +12,8 @@ const { default: request } = await import('supertest');
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
 const { createApp } = await import('../app.js');
-const { registerPluginUiPanel, resetPluginUi } = await import('../plugins/ui-registry.js');
+const { registerPluginUiPanel, resetPluginUi, registerPluginUiAction } =
+  await import('../plugins/ui-registry.js');
 const { defineFactType, putFact, resetFacts } = await import('../plugins/facts.js');
 const { defineCollection, putRecord, resetCollections } = await import('../plugins/collections.js');
 const { registerSurface, unregisterSurface } = await import('../surfaces/index.js');
@@ -293,5 +296,126 @@ describe('plugin collection panels route', () => {
     const name = encodeURIComponent(`${PLUGIN_ID}:deals`);
     await request(app).get(`/api/plugin-collections/${name}/panels`).expect(400);
     await request(app).get(`/api/plugin-collections/${name}/panels?surface=nope`).expect(404);
+  });
+});
+
+/**
+ * `GET /api/plugin-ui/actions` + `POST /api/plugin-ui/actions/:actionId`
+ * (SHR-257). The invoke route runs `run` IN THE HOST process — these tests
+ * assert only the JSON contract, never anything plugin-authored crossing
+ * into the response beyond what `run` itself returned.
+ */
+describe('plugin-ui actions route', () => {
+  beforeEach(() => {
+    createTestDb();
+    resetPluginUi();
+  });
+
+  afterEach(() => {
+    resetPluginUi();
+  });
+
+  it('GET /api/plugin-ui/actions lists registered actions with no "run"', async () => {
+    registerPluginUiAction(PLUGIN_ID, {
+      id: 'rerun',
+      label: 'Re-run',
+      slot: 'task.panel',
+      run: async () => ({ message: 'ok' }),
+    });
+
+    const app = createApp();
+    const res = await request(app).get('/api/plugin-ui/actions').expect(200);
+
+    expect(res.body.actions).toHaveLength(1);
+    expect(res.body.actions[0]).toMatchObject({
+      pluginId: PLUGIN_ID,
+      actionId: `${PLUGIN_ID}:rerun`,
+      id: 'rerun',
+      label: 'Re-run',
+      slot: 'task.panel',
+    });
+    expect(res.body.actions[0].run).toBeUndefined();
+  });
+
+  it('GET /api/plugin-ui/actions?slot= filters', async () => {
+    registerPluginUiAction(PLUGIN_ID, {
+      id: 'rerun',
+      label: 'Re-run',
+      slot: 'task.panel',
+      run: async () => {},
+    });
+    registerPluginUiAction(PLUGIN_ID, {
+      id: 'purge',
+      label: 'Purge',
+      slot: 'settings.card',
+      run: async () => {},
+    });
+
+    const app = createApp();
+    const res = await request(app).get('/api/plugin-ui/actions?slot=settings.card').expect(200);
+
+    expect(res.body.actions.map((a: { id: string }) => a.id)).toEqual(['purge']);
+  });
+
+  it('POST invokes the action and returns its message', async () => {
+    let seenTaskId: string | undefined;
+    registerPluginUiAction(PLUGIN_ID, {
+      id: 'rerun',
+      label: 'Re-run',
+      run: async ({ taskId }) => {
+        seenTaskId = taskId;
+        return { message: 'rerun triggered' };
+      },
+    });
+    const db = getDb();
+    insertTask(db, { id: 'action-task-1' });
+
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/plugin-ui/actions/${encodeURIComponent(`${PLUGIN_ID}:rerun`)}`)
+      .send({ taskId: 'action-task-1' })
+      .expect(200);
+
+    expect(res.body).toEqual({ ok: true, message: 'rerun triggered' });
+    expect(seenTaskId).toBe('action-task-1');
+  });
+
+  it('POST 404s for an unknown action id', async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/plugin-ui/actions/${encodeURIComponent(`${PLUGIN_ID}:nope`)}`)
+      .send({})
+      .expect(404);
+    expect(res.body.error).toMatch(/unknown ui action/);
+  });
+
+  it('POST 404s when taskId names a task that does not exist', async () => {
+    registerPluginUiAction(PLUGIN_ID, { id: 'rerun', label: 'Re-run', run: async () => {} });
+
+    const app = createApp();
+    await request(app)
+      .post(`/api/plugin-ui/actions/${encodeURIComponent(`${PLUGIN_ID}:rerun`)}`)
+      .send({ taskId: 'does-not-exist' })
+      .expect(404);
+  });
+
+  it('POST 400s on a schema violation', async () => {
+    registerPluginUiAction(PLUGIN_ID, {
+      id: 'rerun',
+      label: 'Re-run',
+      schema: {
+        type: 'object',
+        properties: { branch: { type: 'string' } },
+        required: ['branch'],
+      },
+      run: async () => {},
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/plugin-ui/actions/${encodeURIComponent(`${PLUGIN_ID}:rerun`)}`)
+      .send({ input: {} })
+      .expect(400);
+    expect(res.body.error).toMatch(/invalid input for ui action/);
   });
 });

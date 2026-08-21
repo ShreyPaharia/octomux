@@ -45,6 +45,10 @@ export interface UnmountFailure {
 export interface UnmountReleased {
   routes: number;
   uiContributions: number;
+  /** `ctx.ui.action()` registrations dropped (SHR-257). The `ui` step below
+   *  already drops these — `unregisterPluginUi` covers both tables — so
+   *  there is no separate unmount step, just this count alongside it. */
+  uiActions: number;
   /** `ctx.policy.intercept()` hooks removed (`unregisterPluginPolicy`'s return). */
   policyHooks: number;
   workflowKinds: string[];
@@ -198,6 +202,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   const released: UnmountReleased = {
     routes: registered.routes.length,
     uiContributions: registered.uiSlots.length,
+    uiActions: registered.uiActionIds.length,
     policyHooks,
     workflowKinds,
     harnessIds: registered.harnessIds,
