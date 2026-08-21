@@ -27,6 +27,7 @@ import { useTerminalCache } from '@/hooks/useTerminalCache';
 import { useDiffState } from '@/hooks/useDiffState';
 import { useTaskDetailComments } from '@/hooks/useTaskDetailComments';
 import { _resetPerTaskUiState } from '@/hooks/perTaskUiState';
+import { PluginPanels } from '@/components/PluginPanels';
 import type { RunMode } from '@octomux/types';
 
 /** Re-export for tests that import from TaskDetail. */
@@ -311,6 +312,10 @@ export default function TaskDetail() {
           className={hasTerminal && mode === 'agents' ? 'hidden md:flex' : undefined}
         />
       )}
+
+      {/* Plugin-contributed panels (SHR-256). Renders nothing when no plugin
+          declares a `task.panel` binding, which is the default. */}
+      {!isScratch && <PluginPanels slot="task.panel" taskId={task.id} />}
 
       {task.runtime_state === 'setting_up' && !hasTerminal && mode === 'agents' && (
         <TaskSettingUpView task={task} />

@@ -239,16 +239,21 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes exactly three registrars —
-`ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()` — plus
-`ctx.logger`, `ctx.settings` (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
+`createPluginContext()` in `server/plugins/context.ts`) exposes six registrars —
+`ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
+`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()` — plus
+`ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings` (async get/update, scoped to
+`settings.plugins[id]`), and `ctx.kv`.
 Types are pinned in `@octomux/plugin-api` (`packages/plugin-api/src/index.ts`) — **types only**,
 nothing runtime crosses that package boundary, because under `bun build --compile` a plugin has
 no host `node_modules` tree to import a runtime value from even by accident.
 
 - **Boot order is the correctness property.** `await loadPlugins(...)` runs in `server/index.ts`
   between `acquireInstanceLock()` and the synchronous `createApp()` — `createApp()` snapshots
-  the workflow/capability registries, so any registration after it is a silent no-op. Core
+  the workflow/capability registries, so a workflow or capability registered after it is a
+  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.facts` and `ctx.ui` are lookup
+  tables rather than express mounts: those three CAN be registered and unregistered at any
+  time, which is what makes hot reload possible at all. Core
   harnesses/integrations register and freeze (`freezeCoreHarnesses()` etc.) before any plugin
   row loads; a plugin can never redefine `claude-code`, `cursor`, `jira`, or `linear`.
   `reconcile?(ctx)` is in `OctomuxPlugin` but **no wave calls it yet** — don't describe it as
@@ -260,9 +265,13 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `logger.warn`, persisted to `~/.octomux/plugin-load-report.json` for `octomux doctor` to read
   without a running server. `octomux start --safe-mode` (`OCTOMUX_SAFE_MODE=1`) skips every
   plugin row; core harnesses/integrations still register.
-- `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required. There
-  is no `plugins add`/install command — getting a package onto disk (`npm install --prefix
-~/.octomux <pkg>`) is on the user today.
+- `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required.
+  `octomux plugins reload <id>` is different — it goes over the API and needs a running server,
+  because it re-imports and re-runs the plugin's `apply()` in the live process. A plugin that
+  declares `WorkflowType.apiRouter` reports `unloadable: false` and still needs a restart, since
+  express 5 cannot unmount a Router. In dev only, local-path manifest rows are watched and
+  reloaded on save. There is no `plugins add`/install command — getting a package onto disk
+  (`npm install --prefix ~/.octomux <pkg>`) is on the user today.
 - **Known gaps — do not describe as working:** `ctx.kv` throws on every call (`plugin_kv`
   storage hasn't landed); `PluginRow.integrity` is parsed and typechecked but never verified
   against the resolved tarball; harness command builders still return a shell **string**, not
@@ -271,6 +280,10 @@ no host `node_modules` tree to import a runtime value from even by accident.
   (`server/hook-dispatcher.ts` calls `resolveEnvVars` before invoking it — there's no broker
   yet). Trust model: a plugin runs in-process with the DB handle, every credential, and
   `process.env` — no sandbox, none planned. State that plainly wherever plugins are documented.
+  Two things the plugin runtime added to that blast radius, neither a new class of exposure but
+  both worth knowing: a `ctx.http.route()` handler receives the raw request headers, including
+  the remote-mode auth token of whoever called it; and `POST /api/plugins/:id/reload` re-imports
+  and re-executes on-disk plugin code on request. Both sit behind `remoteAuthMiddleware`.
 - Plan + status: `plans/2026-08-16-plugin-ecosystem.md` (design, "Trust model" section has the
   full threat writeup) and `plans/2026-08-16-plugin-ecosystem-tasks.md` (execution log — STEP-0
   through STEP-2 shipped on `next`; WAVE-3's integration outbound broker, WAVE-4's harness leaks,

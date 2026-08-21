@@ -35,7 +35,7 @@ import { builtInKindsDir, homeKindsDir } from '../octomux-paths.js';
 import { pluginKindsDir, manifestPath } from '../plugins/paths.js';
 import { readManifest } from '../plugins/manifest.js';
 import { qualify, KIND_NAME_RE } from '../plugins/qualify.js';
-import { registerWorkflow, getWorkflow } from './registry.js';
+import { registerWorkflow, getWorkflow, listWorkflows, unregisterWorkflow } from './registry.js';
 import { isValidJsonSchema } from './config.js';
 import { isValidCronExpression } from '../schedules/cron.js';
 import { runSession } from './session-runner.js';
@@ -345,4 +345,45 @@ export function mergePresetsIntoRegistry(): void {
 export function reloadPresets(): void {
   loadPresets();
   mergePresetsIntoRegistry();
+}
+
+/**
+ * Drops every kind a plugin owns — this is R3's fifth registry ("kind
+ * presets"), distinct from the plain workflow registry cleanup
+ * `unregisterWorkflow()` does one kind at a time. Called on plugin unmount.
+ *
+ * Targets `listWorkflows()`, not just this module's `presets` cache: a
+ * plugin's kind can reach the workflow registry two ways — a `kinds/*.json`
+ * preset file (goes through `presets` here) OR a direct `ctx.workflows.register()`
+ * call in `apply()` (never touches `presets` at all). Filtering the live
+ * registry by `<pluginId>:` prefix is the only way to catch both.
+ *
+ * Safe by construction against ruling R4 ("must not race `reloadPresets()`
+ * into deleting a kind the UI still needs"): every kind this touches is
+ * qualified under `pluginId`, and a qualified kind can never be a bare
+ * home/built-in kind (`KIND_NAME_RE` forbids `:` in a preset's own `kind`
+ * field) — there is no bare kind this function is capable of deleting.
+ *
+ * One known, accepted gap: if `reloadPresets()` fires (e.g. an unrelated
+ * home-kind edit) in the window between this unmount step and the plugin's
+ * manifest row actually being marked disabled, and the row is still enabled
+ * on disk, `loadPresets()` will re-scan that plugin's own `kinds/*.json` and
+ * `mergePresetsIntoRegistry()` will re-register those same kinds — as a
+ * generic session-runner workflow, harmless and self-healed by the next
+ * successful mount. That is a `reload` transient, not "a kind the UI still
+ * needs" vanishing, which is what R4 actually warns about.
+ */
+export function unregisterPluginKinds(pluginId: string): string[] {
+  const prefix = `${pluginId}:`;
+  const kinds = listWorkflows()
+    .map((w) => w.kind)
+    .filter((kind) => kind.startsWith(prefix));
+  for (const kind of kinds) {
+    presets.delete(kind);
+    unregisterWorkflow(kind);
+  }
+  if (kinds.length > 0) {
+    logger.info({ plugin_id: pluginId, kinds }, 'plugin kind presets unregistered');
+  }
+  return kinds;
 }

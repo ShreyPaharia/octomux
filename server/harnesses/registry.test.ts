@@ -10,6 +10,9 @@ import {
   claudeCodeHarness,
   cursorHarness,
 } from './index.js';
+// `unregisterHarness` isn't re-exported from the barrel (`./index.js`) — this
+// task owns `registry.ts` only, not `index.ts`'s export list.
+import { unregisterHarness } from './registry.js';
 import { getLogger, setLogger } from '../logger.js';
 import pino from 'pino';
 import type { Harness } from './types.js';
@@ -184,6 +187,34 @@ describe('registry guards', () => {
     expect(() => getHarness('claude-code')).toThrow(/Unknown harness/);
     registerHarness(claudeCodeHarness);
     expect(getHarness('claude-code')).toBe(claudeCodeHarness);
+  });
+
+  it('unregisterHarness removes a plugin-registered harness', () => {
+    resetHarnesses();
+    registerHarness(claudeCodeHarness);
+    registerHarness(fakeHarness('plugin:demo'));
+    expect(unregisterHarness('plugin:demo')).toBe(true);
+    expect(() => getHarness('plugin:demo')).toThrow(/Unknown harness/);
+  });
+
+  it('unregisterHarness returns false for an id that was never registered', () => {
+    resetHarnesses();
+    expect(unregisterHarness('plugin:never-existed')).toBe(false);
+  });
+
+  it('unregisterHarness refuses a core id, even after freeze has not run', () => {
+    resetHarnesses();
+    registerHarness(claudeCodeHarness);
+    registerHarness(cursorHarness);
+
+    const lines = withCapturedLogs(() => {
+      expect(unregisterHarness('claude-code')).toBe(false);
+    });
+
+    expect(getHarness('claude-code')).toBe(claudeCodeHarness);
+    const warnLine = lines.find((l) => l.msg === 'refusing to unregister core harness');
+    expect(warnLine).toBeDefined();
+    expect(warnLine!.harness_id).toBe('claude-code');
   });
 
   it('freeze is idempotent', () => {

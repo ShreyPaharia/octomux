@@ -40,6 +40,16 @@ export function registerProvider(p: IntegrationProvider): void {
   providers.set(p.kind, p);
 }
 
+/** Removes one plugin-registered provider. Refuses (logs a warn, no-op) on any
+ *  `CORE_PROVIDER_KINDS` member — core provider kinds are un-unregisterable. */
+export function unregisterProvider(kind: string): boolean {
+  if ((CORE_PROVIDER_KINDS as readonly string[]).includes(kind)) {
+    logger.warn({ kind }, 'refusing to unregister core provider kind');
+    return false;
+  }
+  return providers.delete(kind);
+}
+
 export function getProvider(kind: string): IntegrationProvider | undefined {
   return providers.get(kind);
 }

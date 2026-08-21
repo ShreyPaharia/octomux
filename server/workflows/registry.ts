@@ -19,7 +19,10 @@
  * stays warn-free because it's the trusted, expected-duplicate case.
  */
 import { QUALIFIED_KIND_RE } from '../plugins/qualify.js';
+import { childLogger } from '../logger.js';
 import type { WorkflowType } from './types.js';
+
+const logger = childLogger('workflows/registry');
 
 const workflows = new Map<string, WorkflowType>();
 
@@ -45,6 +48,23 @@ export function registerPluginWorkflow(qualifiedKind: string, wf: WorkflowType):
     );
   }
   workflows.set(qualifiedKind, { ...wf, kind: qualifiedKind });
+}
+
+/**
+ * Removes one workflow kind. Refuses (logs a warn, no-op) on anything that
+ * isn't a qualified `<pkg>:<kind>` id — every core, home, and built-in kind is
+ * always bare, so this guard alone makes it structurally impossible for a
+ * plugin unmount to delete a kind the UI still needs (ruling R4, plan
+ * `2026-08-20-plugin-runtime-p0.md`). No duplicate-registration guard is
+ * added here to match — see the module doc for why one would break kind
+ * editing.
+ */
+export function unregisterWorkflow(kind: string): boolean {
+  if (!QUALIFIED_KIND_RE.test(kind)) {
+    logger.warn({ kind }, 'refusing to unregister a bare (core/home/built-in) workflow kind');
+    return false;
+  }
+  return workflows.delete(kind);
 }
 
 export function getWorkflow(kind: string): WorkflowType | undefined {

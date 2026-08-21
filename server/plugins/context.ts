@@ -13,6 +13,9 @@ import { qualify } from './qualify.js';
 import { registerPluginWorkflow } from '../workflows/registry.js';
 import { registerProvider } from '../integrations/registry.js';
 import { registerHarness } from '../harnesses/registry.js';
+import { registerPluginRoute } from './http-registry.js';
+import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
+import { registerPluginUiPanel } from './ui-registry.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -20,9 +23,18 @@ import type {
   WorkflowRegistrar,
   IntegrationRegistrar,
   HarnessRegistrar,
+  HttpRegistrar,
+  FactsRegistrar,
+  UiRegistrar,
   PluginWorkflow,
   PluginIntegrationProvider,
   PluginHarness,
+  Fact,
+  FactQuery,
+  FactTypeDefinition,
+  HttpMethod,
+  PluginRouteHandler,
+  UiPanelBinding,
 } from '@octomux/plugin-api';
 import type { WorkflowType } from '../workflows/types.js';
 import type { IntegrationProvider } from '../integrations/types.js';
@@ -135,6 +147,18 @@ function createKv(id: string): PluginKv {
  */
 const revokers = new WeakMap<PluginContext, () => void>();
 
+/**
+ * Teardown callbacks a plugin registered via `ctx.effect()`, in registration
+ * order. `disposePluginContext()` runs them in REVERSE — the Cordis model,
+ * where a plugin's registrations are undone in the opposite order they were
+ * made, so a later effect never observes an earlier one already gone.
+ *
+ * Keyed by the context object for the same reason as `revokers`: a caller
+ * can't dispose a context it was never handed, and the entry dies with the
+ * context rather than leaking a slot per plugin load for process lifetime.
+ */
+const effectStacks = new WeakMap<PluginContext, Array<() => void | Promise<void>>>();
+
 export function createPluginContext(id: string): PluginContext {
   const logger = childLogger(`plugin:${id}`);
 
@@ -198,6 +222,62 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  const http: HttpRegistrar = {
+    route(method: HttpMethod, path: string, handler: PluginRouteHandler) {
+      assertLive('http.route');
+      if (typeof handler !== 'function') {
+        throw new Error('plugin registrar: "http.route" requires a function handler');
+      }
+      registerPluginRoute(id, method, path, handler);
+    },
+  };
+
+  // Declared before the registrars that push onto it (facts.watch) — see the
+  // auto-dispose note there.
+  const effects: Array<() => void | Promise<void>> = [];
+
+  const facts: FactsRegistrar = {
+    define(def: FactTypeDefinition) {
+      assertLive('facts.define');
+      requireLocalId(def as unknown as Record<string, unknown>, 'type', 'facts.define');
+      defineFactType(id, def);
+    },
+    put(taskId: string, localType: string, payload: unknown) {
+      // Deliberately NOT gated on `assertLive`: `put` is a write a plugin makes
+      // during normal operation, long after apply() returned. The revoke guard
+      // exists to stop a timed-out apply() from mutating the REGISTRIES, not to
+      // stop a healthy plugin from logging a fact.
+      return putFact(id, taskId, localType, payload);
+    },
+    read(taskId: string, opts?: FactQuery) {
+      return readFacts(taskId, opts);
+    },
+    watch(qualifiedType: string, onFact: (fact: Fact) => void) {
+      assertLive('facts.watch');
+      const unsubscribe = watchFacts(qualifiedType, onFact);
+      // Auto-disposed on unmount, as the plugin-api doc promises. This is the
+      // ONLY thing that unsubscribes a watcher on a type the plugin does not
+      // own: `unregisterPluginFacts(pluginId)` can only reach watchers on types
+      // that plugin DEFINED, so a plugin watching `core:diff` or a sibling
+      // plugin's type would otherwise keep firing forever after it unmounts.
+      // Idempotent — a plugin that also calls the returned unsubscribe itself
+      // is fine, `watchFacts` tolerates a double unsubscribe.
+      effects.push(unsubscribe);
+      return unsubscribe;
+    },
+  };
+
+  const ui: UiRegistrar = {
+    panel(binding: UiPanelBinding) {
+      assertLive('ui.panel');
+      const payload = binding as unknown as Record<string, unknown>;
+      requireLocalId(payload, 'slot', 'ui.panel');
+      requireLocalId(payload, 'fact', 'ui.panel');
+      requireLocalId(payload, 'as', 'ui.panel');
+      registerPluginUiPanel(id, binding);
+    },
+  };
+
   const ctx: PluginContext = {
     id,
     logger,
@@ -206,11 +286,53 @@ export function createPluginContext(id: string): PluginContext {
     workflows,
     integrations,
     harnesses,
+    http,
+    facts,
+    ui,
+    effect(dispose: () => void | Promise<void>) {
+      assertLive('effect');
+      if (typeof dispose !== 'function') {
+        throw new Error('plugin registrar: "effect" requires a function');
+      }
+      effects.push(dispose);
+    },
   };
   revokers.set(ctx, () => {
     live = false;
   });
+  effectStacks.set(ctx, effects);
   return ctx;
+}
+
+/**
+ * Runs a context's `ctx.effect()` callbacks in reverse registration order and
+ * revokes the context so nothing it holds can register again.
+ *
+ * This covers only what the PLUGIN owns — timers, watchers, sockets. Undoing
+ * the host-side registrations (routes, kinds, providers, harnesses, UI
+ * contributions) is `server/plugins/lifecycle.ts`'s job, which calls this
+ * last. Anything the plugin did NOT route through `ctx` cannot be tracked and
+ * will not be released; that is a real limit of the model, not an oversight.
+ *
+ * One effect throwing must not strand the rest: every callback runs, and the
+ * failures are returned for the caller to log against the plugin.
+ */
+export async function disposePluginContext(ctx: PluginContext): Promise<Error[]> {
+  const effects = effectStacks.get(ctx);
+  if (!effects) {
+    throw new Error('disposePluginContext: context was not created by createPluginContext');
+  }
+  const failures: Error[] = [];
+  for (let i = effects.length - 1; i >= 0; i--) {
+    try {
+      await effects[i]();
+    } catch (err) {
+      failures.push(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  effects.length = 0;
+  revokers.get(ctx)?.();
+  return failures;
 }
 
 /**

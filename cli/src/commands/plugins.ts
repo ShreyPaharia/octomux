@@ -166,4 +166,50 @@ export function registerPlugins(program: Command): void {
     .command('enable <id>')
     .description('Enable a plugin by id')
     .action((id: string) => setDisabled(id, false));
+
+  plugins
+    .command('reload <id>')
+    .description(
+      'Unmount and remount a running plugin (dev hot-reload) — requires a running server, ' +
+        'unlike list/disable/enable',
+    )
+    .action(async (id: string, _opts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals();
+      const json = Boolean(globals.json);
+      const serverUrl = String(
+        globals.serverUrl || process.env.OCTOMUX_URL || 'http://localhost:7777',
+      ).replace(/\/$/, '');
+
+      let res: Response;
+      try {
+        res = await fetch(`${serverUrl}/api/plugins/${encodeURIComponent(id)}/reload`, {
+          method: 'POST',
+        });
+      } catch {
+        errorMessage(
+          `Cannot connect to octomux server at ${serverUrl}\nStart it with: octomux start`,
+        );
+        process.exit(1);
+        return;
+      }
+
+      const body: unknown = await res.json().catch(() => ({}));
+
+      if (!res.ok || (body as { ok?: boolean }).ok !== true) {
+        if (json) {
+          outputJson(body);
+        } else {
+          const reason = (body as { reason?: string }).reason ?? `HTTP ${res.status}`;
+          errorMessage(`Reload failed for plugin "${id}": ${reason}`);
+        }
+        process.exit(1);
+        return;
+      }
+
+      if (json) {
+        outputJson(body);
+        return;
+      }
+      success(`Reloaded plugin "${id}"`);
+    });
 }

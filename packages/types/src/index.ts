@@ -361,6 +361,15 @@ export type ServerEvent =
   | {
       type: 'loop_group:judging' | 'loop_group:judged';
       payload: { groupId: string; runId: string };
+    }
+  | {
+      // A plugin mounted or unmounted, so its ctx.ui contributions changed and
+      // the client must refetch /api/plugin-ui/contributions. Carries no
+      // contributions itself: the point of hot reload (SHR-254) is that a
+      // panel appears or vanishes with no page refresh, and the client already
+      // has a fetch path for the table.
+      type: 'plugin:ui-updated';
+      payload: { pluginId: string };
     };
 
 export type ServerEventType = ServerEvent['type'];

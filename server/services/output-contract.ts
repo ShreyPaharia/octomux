@@ -42,3 +42,19 @@ export function validateAgainstSchema(
   logger.debug({ schema_key: key, errors }, 'output contract validation failed');
   return { valid: false, errors };
 }
+
+/**
+ * Drops a cached validator so the next `validateAgainstSchema(key, ...)` call
+ * recompiles.
+ *
+ * The cache is keyed on `key` alone and never notices that `schema` changed, on
+ * the assumption that a key identifies one fixed schema for process lifetime.
+ * That assumption breaks the moment anything can be redefined at runtime: a
+ * plugin reload (SHR-254) unregisters its fact types and re-runs `apply()`,
+ * which may redefine the same qualified type with a DIFFERENT schema — and
+ * without this, every later write would be validated against the old one,
+ * silently, with no error and no log.
+ */
+export function forgetCompiledSchema(key: string): void {
+  compiled.delete(key);
+}
