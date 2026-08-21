@@ -1,78 +1,96 @@
-## What shipped
+## What shipped (commit `4e9c2cb`)
 
-- **`server/compute/`** — `ComputeProvider {kind, create, resume?}` +
-  `ComputeSession {kind, taskId, repoPath, exec, tmux, spawn, files, dispose}`.
-  Registry mirrors `harnesses/registry.ts` (`DEFAULT_COMPUTE_KIND='local'`, core
-  frozen before plugins load). `sessionFor(task)` is the single entry point,
-  cached per `task.id` — which is why nothing up the call stack needed a new
-  parameter threaded through it.
-- **Full task-engine migration**: `git.ts`, `setup/*`, `launch.ts`, `lifecycle/*`,
-  `cleanup`, `sessions`, `reconcile`, `terminals`, `loop/*`, `poller/status`,
-  `poller/terminal-activity`, `terminal.ts` (pty attach), `tmux-input`.
-  Verified: **zero `execTmux()` and zero `fs.*Sync` remain** in `server/task-engine`,
-  `server/poller`, or `server/terminal.ts`.
-- **Per-task selection**: `tasks.compute TEXT` (NULL → local, no backfill),
-  `POST /api/tasks {compute}`, `octomux create-task --compute <kind>` (generated
-  from the zod schema — no CLI file touched), `settings.defaultComputeKind` /
-  `settings.compute[kind]`.
-- **Credential brokering**: `computeConfigFor(kind)` splits `settings.compute[kind]`
-  into `config` + `secrets`, expands `${env:VAR}` in both (reusing the existing
-  integrations convention), and hands the result to `provider.create()` only.
-- **`ctx.compute.register()`** on `PluginContext`, qualified `<pluginId>:<kind>`,
-  unregistered on unmount alongside harnesses/providers.
-- **Out-of-core proof**: `docs/plugins/examples/ssh-compute/` — a real SSH provider,
-  ~320 lines, zero deps, zero host imports. Providers get `ctx.host.{exec,spawnPty}`
-  and `ctx.execBackedFiles(exec)`, the only runtime crossing the types-only
-  `@octomux/plugin-api` boundary.
-- **`server/compute/plugin-seam.test.ts`** is the done-when test: a provider
-  registered through `ctx.compute` is selected by `tasks.compute`, and real
-  task-engine helpers (tmux window launch, worktree file writes) land on _that_
-  provider rather than the local machine.
+`ctx.fanout` — a plugin maps a handler over an item source and gets back per-item
+status, bounded retry, dead-lettering, and a redrive path.
 
-## Not done — please challenge
+```ts
+run(spec): Promise<FanOutRunSummary>   // gated: new capability 'fanout.run'
+status(runId), list(name?)             // ungated reads, matching facts.read
+source: { items } | { collection, query } | { resume: runId }
+```
 
-1. **"Runs a task to completion on a different machine" is NOT verified.** There is
-   no sshd on this box (`ssh localhost` refused), so the SSH provider is proven only
-   against a fake transport: argv/quoting, clone-vs-fetch, dispose, and the
-   credential invariant (the `identityFile` secret appears only in the `ssh -i` pair,
-   never in a remote command or env). Real OpenSSH, real remote `tmux attach` into
-   xterm.js, and real auth are untested. This is the one DoD bullet I cannot claim.
-2. **`resume()`** is registered and called, but the host can't yet distinguish
-   "reattach after restart" from "first create", so it falls back to `create()`.
-   Needs the restart-reconcile path.
-3. **`hop-agent` now refuses** to move an agent between tasks on different compute
-   kinds rather than silently launching a blank session that looks like a resume.
-   No-op today (only `local` exists). Challenge if you'd rather it degrade than throw.
-4. **`localExec` uses `promisify(execFile)` on its no-stdin path** and the raw
-   callback form only when `opts.input` is set. Not stylistic: a mocked `vi.fn()`
-   loses execFile's `promisify.custom`, so going all-raw-3-arg would have silently
-   broken every still-promisify-based consumer sharing the same mocks. Documented in
-   the function — worth a second opinion.
-5. **`chats.ts` and `orchestrator/**`are deliberately outside the seam** (no`Task`
-   — task-free by design) and always run local. Conductor conversations on remote
-   compute is separate work.
+| File | What |
+| --- | --- |
+| `packages/plugin-api/src/index.ts` | `FanOutApi`/`FanOutSpec`/`FanOutSource`/summary+item shapes, `ctx.fanout`, `'fanout.run'` capability |
+| `server/plugins/grants.ts` | `'fanout.run'` in `PLUGIN_CAPABILITIES` (both places, per the ticket) |
+| `server/plugins/fanout.ts` | engine: scheduler, global semaphore, retry/backoff, dead-letter, abort |
+| `server/repositories/fanout.ts` + `db/migrations.ts` | `fanout_runs` / `fanout_items` |
+| `server/routes/fanout.ts` | `GET /api/fanout/runs`, `GET /api/fanout/runs/:id` |
+| `server/plugins/context.ts` | grant gate on `run`, ungated reads, abort-on-unmount effect |
+| `server/settings.ts` | `settings.fanout.maxConcurrency` (default 4) |
+| CLAUDE.md, `docs/plugins/api-reference.md`, create-plugin SKILL.md | docs |
 
-## Changed without being asked
+### The cross-ticket decision, honoured
 
-- `ComputeFiles` gained `chmod()` and `mkdirp(mode)`. Without it the cursor harness's
-  `.octomux-hooks` dir silently dropped from 0700 to umask, and mode stopped being
-  enforced when rewriting an existing secret-bearing file. Regression test added.
-- Fixed a pre-existing bug found en route: `pollAgentWindows` sent the notify-target
-  message via the **finishing worker's** compute rather than the notify target's own
-  — different tasks.
-- Moved `computeConfigFor` from `settings.ts` to `server/compute/config.ts` (it's
-  compute's concern, and `settings.ts` is partially mocked in ~14 suites).
-- This worktree had no `node_modules`, so `@octomux/*` resolved up to the main
-  checkout's stale `dist/`. Added gitignored symlinks under `node_modules/@octomux/`.
+**The concurrency cap lives here and it is GLOBAL.** One module-level semaphore
+shared by every plugin's every run, sized by `settings.fanout.maxConcurrency`. A
+per-run `concurrency` is clamped *down* to it, never up — three plugins asking
+for 4 each get 4 total, not 12. `ctx.agents.run()` (SHR-272) needs no cap of its
+own and stays a thin accessor.
 
-## Housekeeping
+Tested directly: two simultaneous runs from two different plugins, each
+requesting `concurrency: 5`, against a host limit of 2 — observed peak in-flight
+handlers never exceeds 2.
 
-A stale `stash@{0}` on this branch is a mid-run snapshot an agent took; the working
-tree supersedes it. Left it rather than dropping someone else's stash —
-`git stash drop stash@{0}` is safe.
+### SHR-275 dependency
+
+Not implemented here. The engine exposes `setCollectionResolver(fn)`; until
+`ctx.collections` injects one, a `{ collection }` source throws a message naming
+SHR-275 and telling you to pass `{ items }`. One line to wire when it lands.
+
+### Verification
+
+`typecheck` clean · `format:check` clean · `lint` 0 errors · `test:server`
+3627 pass / 0 fail (32 new: 13 repository, 12 engine, 5 routes, 7 context-wiring)
+· `test:client` 1294 pass · `test:units` 223 pass.
+
+## Left out, deliberately
+
+- **Step composition / DAG** — out of scope per the ticket. Chain via a collection.
+- **The declarative tier.** The ticket lists "a home-tier kind preset that can say
+  *for each record matching this query, run this prompt*" as motivation, not under
+  Build. Nothing here is reachable from `~/.octomux/kinds/*.json` — fan-out is
+  still a TypeScript-plugin-only capability. This is the gap between "a plugin can
+  build a pipeline" and "a non-programmer can".
+- **No HTTP redrive route.** A redrive needs the plugin's live `each` closure,
+  which cannot be persisted, so redrive is
+  `ctx.fanout.run({ source: { resume } })` from inside the plugin. A plugin can
+  expose a button in three lines via `ctx.http.route`.
+- **No pruning of `fanout_runs`.** A daily 60-item cron adds ~61 rows/day. Fine
+  for years, unbounded in principle.
+- **No UI.** The two GET routes make a run legible; nothing renders it.
+
+## What I want challenged
+
+1. **`run()` resolves on abort** with `status: 'canceled'` rather than rejecting,
+   and does not await in-flight handlers (a handler may be a five-minute agent
+   session, and unmount must not block on it). Late handler results are silently
+   dropped via `signal.aborted` guards. Is silent-drop right, or should an aborted
+   run reject?
+2. **Every `{ items }` run creates a NEW run row.** Re-running the same
+   name + items does not resume, it redoes the work; resume is explicit via
+   `{ resume }`. Is implicit resume-by-name the more useful default?
+3. **Item identity defaults to a sha1** of a key-sorted stringify, which silently
+   collapses duplicate items into one row. Should an unkeyed duplicate be an
+   error instead?
+4. **`setLimit()` is called per run** from freshly-read settings, so a settings
+   change affects runs already in flight. Shrinking throttles gradually rather
+   than evicting holders. Reasonable, or surprising?
+5. **`assertGranted` sits in `context.ts`**, matching `facts.put` /
+   `artifacts.write`, not in the engine — so the engine's functions are callable
+   ungated by core. Consistent, or a footgun?
+
+## Environment note (not part of the diff)
+
+This worktree had no `node_modules`, so Node/tsc walked up and resolved
+`@octomux/plugin-api` to the **main checkout's** stale `dist/index.d.ts` — every
+`FanOut*` type looked missing and it read like a code bug. Fixed by symlinking
+`<worktree>/node_modules/@octomux/*` at this worktree's own `packages/*`.
+Gitignored, so it is not in the commit. Any parallel worktree on this repo will
+hit the same thing.
 
 ## Summary
 
-_Updated 2026-08-21 16:15:29_
+_Updated 2026-08-21 16:16:43_
 
-Bash: bun run lint 2>&1 | grep -i "fanout" | head
+Write: /Users/shreypaharia/Documents/Projects/octomux-agents/.worktrees/shr-276-fan-out-run-a-step-…
