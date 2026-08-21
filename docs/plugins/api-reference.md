@@ -45,6 +45,7 @@ export interface PluginContext {
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
   readonly collections: CollectionsRegistrar;
+  readonly services: ServicesRegistrar;
   readonly artifacts: ArtifactsApi;
   readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
@@ -72,6 +73,7 @@ member:
 | [`ctx.http`](#ctxhttp)                                             | registers a route at `/api/p/<pluginId>/...`                       |
 | [`ctx.facts`](#ctxfacts)                                           | task-scoped, append-only observation log                           |
 | [`ctx.collections`](#ctxcollections)                               | durable, keyed, schema-validated records                           |
+| [`ctx.services`](#ctxservices)                                     | depend on a capability by name, not on a plugin package            |
 | [`ctx.artifacts`](#ctxartifacts)                                   | files written into a task's worktree                               |
 | [`ctx.agents`](#ctxagents)                                         | runs a headless, structured-output agent session                   |
 | [`ctx.ui`](#ctxui)                                                 | declarative panel bindings, never components                       |
@@ -495,6 +497,78 @@ ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
 A fact-bound panel renders that task's facts; a collection-bound panel renders
 the collection's records, with no task involved. Records reach the SPA over
 `GET /api/plugin-collections/<qualified-name>`.
+
+### `ctx.services`
+
+```ts
+interface ServicesRegistrar {
+  provide(name: string, impl: unknown): void;
+  require<T = unknown>(name: string): ServiceHandle<T>;
+}
+interface ServiceHandle<T = unknown> {
+  readonly name: string;
+  get(): T; // resolves live — throws if nothing provides `name`
+}
+```
+
+Dependency by CAPABILITY, not by package name. A plugin says "I need
+something that can send chat messages" (`ctx.services.require('chat.send')`)
+instead of importing `octomux-plugin-slack`; a provider says "I am that"
+(`ctx.services.provide('chat.send', impl)`). Neither one names the other.
+
+**Service names are the one thing in this API that is NOT qualified.**
+Everything else a plugin registers is prefixed `<pluginId>:` so two plugins
+can't collide; a service name is the opposite on purpose — `chat.send` has to
+mean the same string on both sides of the contract, or the whole idea
+collapses back into naming packages.
+
+**First provider wins.** Two plugins may `provide` the same name — the one
+that appears EARLIER in `octomux.yml` is live, the other queues behind it and
+takes over if the first one unmounts. There is deliberately no `prefer:` key;
+reordering the two manifest rows is how you choose.
+
+**Resolution is at mount, not at call.** `require()` just records the
+dependency. `server/plugins/loader.ts` checks every requirement only after the
+whole manifest has been applied, so a consumer may be listed before its
+provider. A name nothing provides fails only that plugin (and anything that
+transitively depended on it) as a `phase: 'apply'` load-report entry naming
+the plugin and the service — the same shape an ungranted capability produces.
+It never fails the boot.
+
+```js
+// provider
+export default {
+  apply(ctx) {
+    ctx.services.provide('chat.send', {
+      async send(text) {
+        /* ... */
+      },
+    });
+  },
+};
+
+// consumer — may load before or after the provider's row
+export default {
+  apply(ctx) {
+    const chat = ctx.services.require('chat.send');
+    ctx.http.route('post', '/notify', async (req, res) => {
+      await chat.get().send(req.body.text); // resolves live, on every call
+      res.sendStatus(204);
+    });
+  },
+};
+```
+
+Gate: `services.provide`. `require` is ungated — declaring a dependency is a
+statement about your own plugin, not a reach into anyone else's, same
+reasoning as `facts.read`/`catalog.list`.
+
+Providing plugins show up in `ctx.catalog.list()` as `service:<name>` entries.
+
+**Known limitation.** The mount-time check is boot-only: `octomux plugins
+reload <id>` does not re-run it. A hot-reloaded plugin with an unmet
+requirement mounts anyway and throws at its first `handle.get()` instead of
+failing at load time.
 
 ### `ctx.artifacts`
 
@@ -1130,7 +1204,7 @@ decision.
 
 ### Every capability
 
-All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
+All 17 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 `PluginCapability` in `@octomux/plugin-api`):
 
 | Capability              | Gates                         | Undone on unmount?                                      |
@@ -1144,9 +1218,11 @@ All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 | `facts.put`             | `ctx.facts.put()`             | n/a — a write, not a registration                       |
 | `collections.define`    | `ctx.collections.define()`    | yes — the definition; records survive                   |
 | `collections.write`     | `ctx.collections.put()`       | n/a — a write, not a registration                       |
+| `services.provide`      | `ctx.services.provide()`      | yes — queued provider (if any) is promoted              |
 | `ui.panel`              | `ctx.ui.panel()`              | yes                                                     |
 | `artifacts.write`       | `ctx.artifacts.write()`       | n/a — files land in the worktree and outlive the plugin |
 | `policy.intercept`      | `ctx.policy.intercept()`      | yes                                                     |
+| `secrets.read`          | `ctx.secrets.resolve()`       | n/a — a read, not a registration                        |
 | `agents.run`            | `ctx.agents.run()`            | n/a — an in-flight run settles on its own               |
 | `fanout.run`            | `ctx.fanout.run()`            | n/a — an in-flight run is aborted, not "undone"         |
 | `surfaces.register`     | `ctx.surfaces.register()`     | yes                                                     |

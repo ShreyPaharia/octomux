@@ -18,6 +18,7 @@ import { resetSurfaces, registerCoreSurfaces } from '../surfaces/index.js';
 import { setPluginGrants, PLUGIN_CAPABILITIES } from './grants.js';
 import { resetFacts } from './facts.js';
 import { resetCollections } from './collections.js';
+import { resetServices } from './services.js';
 import { resetHarnesses, registerHarness } from '../harnesses/registry.js';
 import { resetProviders } from '../integrations/registry.js';
 import { loadPlugins, resetMountedPlugins } from './loader.js';
@@ -35,6 +36,7 @@ beforeEach(() => {
   resetPluginUi();
   resetFacts();
   resetCollections();
+  resetServices();
   resetHarnesses();
   resetProviders();
   resetMountedPlugins();
@@ -76,6 +78,8 @@ describe('pluginRegistrations', () => {
     mine.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
     mine.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
     mine.surfaces.register({ kind: 's', renderers: [], render: () => undefined });
+    mine.services.provide('chat.send', () => {});
+    mine.services.provide('ticket.create', () => {});
 
     const sibling =
       (setPluginGrants('cat-sibling', PLUGIN_CAPABILITIES), createPluginContext('cat-sibling'));
@@ -103,11 +107,14 @@ describe('pluginRegistrations', () => {
     expect(reg.factTypes).toEqual(['cat-mine:observed']);
     expect(reg.surfaceKinds).toEqual(['cat-mine:s']);
     expect(reg.collectionNames).toEqual(['cat-mine:baselines']);
+    // Unqualified, unlike every field above — a service name is a shared
+    // contract, not something a plugin id prefixes (see services.ts).
+    expect(reg.serviceNames).toEqual(['chat.send', 'ticket.create']);
   });
 });
 
 describe('pluginProvides', () => {
-  it('flattens in order: workflows, harnesses, integrations, surfaces, routes, ui, facts, collections', () => {
+  it('flattens in order: workflows, harnesses, integrations, surfaces, routes, ui, facts, collections, services', () => {
     const ctx =
       (setPluginGrants('cat-order', PLUGIN_CAPABILITIES), createPluginContext('cat-order'));
     ctx.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
@@ -134,6 +141,7 @@ describe('pluginProvides', () => {
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
     ctx.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
+    ctx.services.provide('chat.send', () => {});
 
     expect(pluginProvides('cat-order')).toEqual([
       'workflow:cat-order:k',
@@ -144,6 +152,7 @@ describe('pluginProvides', () => {
       'ui:task.panel',
       'fact:cat-order:observed',
       'collection:cat-order:baselines',
+      'service:chat.send',
     ]);
   });
 });
@@ -177,6 +186,8 @@ describe('coreCatalogEntry', () => {
     expect(entry.provides).toContain('surface:cli');
     expect(entry.provides).toContain('surface:slack');
     expect(entry.provides).toContain('surface:telegram');
+    // Core never calls ctx.services.provide() — no `service:` entries.
+    expect(entry.provides.some((p) => p.startsWith('service:'))).toBe(false);
   });
 });
 

@@ -21,6 +21,7 @@ import { listPluginRoutes, RESERVED_ROUTE_PLUGIN_IDS } from './http-registry.js'
 import { listUiContributions } from './ui-registry.js';
 import { listPluginFactTypes, CORE_FACT_TYPES } from './facts.js';
 import { listPluginCollections } from './collections.js';
+import { listPluginServices } from './services.js';
 import type { CatalogEntry, LoadReport } from '@octomux/plugin-api';
 
 // getMountedPlugin/listMountedPluginIds come from loader.js, which itself
@@ -48,6 +49,9 @@ export interface PluginRegistrations {
   factTypes: string[];
   /** `ctx.collections.define()` names owned by this plugin (SHR-275). */
   collectionNames: string[];
+  /** `ctx.services.provide()` names owned by this plugin (SHR-260).
+   *  Unqualified — a service name is a shared contract, see services.ts. */
+  serviceNames: string[];
 }
 
 function belongsTo(pluginId: string, id: string): boolean {
@@ -81,11 +85,16 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
       .map((c) => c.slot),
     factTypes: listPluginFactTypes(pluginId),
     collectionNames: listPluginCollections(pluginId),
+    // Deliberately NOT filtered through `belongsTo()` like every field above —
+    // service names are unqualified by design (see services.ts's module doc),
+    // so ownership comes from the registry itself, not a `<pluginId>:` prefix.
+    // Do not "fix" this to match the other fields.
+    serviceNames: listPluginServices(pluginId),
   };
 }
 
 /** Flattened `provides[]` form of `pluginRegistrations()`. Order: workflows,
- *  harnesses, integrations, surfaces, routes, ui, facts, collections. */
+ *  harnesses, integrations, surfaces, routes, ui, facts, collections, services. */
 function provides(reg: PluginRegistrations): string[] {
   return [
     ...reg.workflowKinds.map((k) => `workflow:${k}`),
@@ -96,6 +105,7 @@ function provides(reg: PluginRegistrations): string[] {
     ...reg.uiSlots.map((s) => `ui:${s}`),
     ...reg.factTypes.map((f) => `fact:${f}`),
     ...reg.collectionNames.map((c) => `collection:${c}`),
+    ...reg.serviceNames.map((n) => `service:${n}`),
   ];
 }
 
@@ -134,6 +144,9 @@ function coreRegistrations(): PluginRegistrations {
     // Core never calls ctx.collections.define() — nothing in server/ defines
     // a collection today, so this is always empty, not filtered.
     collectionNames: [],
+    // Core never calls ctx.services.provide() — nothing in server/ provides a
+    // service today, so this is always empty, not filtered.
+    serviceNames: [],
   };
 }
 

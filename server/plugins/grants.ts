@@ -52,6 +52,7 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'facts.put',
   'collections.define',
   'collections.write',
+  'services.provide',
   'ui.panel',
   'artifacts.write',
   'policy.intercept',

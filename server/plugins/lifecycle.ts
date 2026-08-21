@@ -3,9 +3,9 @@
  * Reverses, in reverse registration order, everything a plugin's `apply()`
  * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> collections -> ui -> policy -> the five registries
- * (workflow kinds, harnesses, compute providers, surfaces, providers) ->
- * ctx.effect() disposers
+ * Order: routes -> facts -> collections -> ui -> policy -> services -> the
+ * five registries (workflow kinds, harnesses, compute providers, surfaces,
+ * providers) -> ctx.effect() disposers
  *
  * Capability grants are NOT released as an explicit step here — that already
  * happens inside `disposePluginContext()` (`server/plugins/context.ts`,
@@ -25,6 +25,7 @@ import { unregisterPluginFacts } from './facts.js';
 import { unregisterPluginCollections } from './collections.js';
 import { unregisterPluginUi } from './ui-registry.js';
 import { unregisterPluginPolicy } from './policy.js';
+import { unregisterPluginServices } from './services.js';
 import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
 import { unregisterHarness } from '../harnesses/registry.js';
@@ -55,6 +56,10 @@ export interface UnmountReleased {
   /** `ctx.collections.define()` names dropped (SHR-275). Records survive —
    *  see the `collections` step below. */
   collectionNames: string[];
+  /** `ctx.services.provide()` names dropped (SHR-260). A queued second
+   *  provider of the same name is promoted implicitly when this one goes —
+   *  see the tie-break doc in `services.ts`. */
+  serviceNames: string[];
   /** `ctx.effect()` callbacks that ran (successfully or not). */
   effects: number;
 }
@@ -162,6 +167,9 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   const policyHooks =
     (await step(pluginId, failures, 'policy', () => unregisterPluginPolicy(pluginId))) ?? 0;
 
+  const serviceNames =
+    (await step(pluginId, failures, 'services', () => unregisterPluginServices(pluginId))) ?? [];
+
   const workflowKinds =
     (await step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId))) ?? [];
 
@@ -198,6 +206,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     providerKinds: registered.providerKinds,
     factTypes: registered.factTypes,
     collectionNames: registered.collectionNames,
+    serviceNames,
     effects: effectFailures.length,
   };
 

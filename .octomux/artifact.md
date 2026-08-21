@@ -58,3 +58,9 @@ check finished.
 _Updated 2026-08-21 18:26:55_
 
 Bash: bun run lint 2>&1 | tail -5; echo "=== typecheck ==="; bun run typecheck 2>&1 | tail -3; echo…
+
+## Activity
+
+_Updated 2026-08-21 20:01:25_
+
+Bash: git diff docs/plugins/README.md | head -80

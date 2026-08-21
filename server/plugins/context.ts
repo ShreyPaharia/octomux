@@ -21,6 +21,7 @@ import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { defineCollection, putRecord, queryCollection, watchCollection } from './collections.js';
+import { registerService, requireService, getService } from './services.js';
 import { listSecrets, resolveSecrets } from '../secrets/store.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
@@ -44,6 +45,8 @@ import type {
   CollectionsRegistrar,
   CollectionDefinition,
   QuerySpec,
+  ServicesRegistrar,
+  ServiceHandle,
   ArtifactsApi,
   SecretsApi,
   AgentRunner,
@@ -396,6 +399,41 @@ export function createPluginContext(
     },
   };
 
+  // `ctx.services` — dependency by CAPABILITY, not by package name (see
+  // services.ts's header comment for the full design). `provide` puts an
+  // implementation into a namespace every other plugin can read, so it's
+  // gated like any other registration; `require` only records that THIS
+  // plugin needs a name — a statement about itself, not a reach into
+  // anyone else's — so it's ungated, same call as facts.read/catalog.list.
+  // Unregistration on unmount happens in `lifecycle.ts` (calling
+  // `unregisterPluginServices`), same as every other registry here — not
+  // via `ctx.effect`, because that's plugin-owned teardown, not core's.
+  const services: ServicesRegistrar = {
+    provide(name: string, impl: unknown) {
+      assertLive('services.provide');
+      assertGranted(id, 'services.provide');
+      registerService(id, name, impl);
+    },
+    require<T = unknown>(name: string): ServiceHandle<T> {
+      assertLive('services.require');
+      requireService(id, name);
+      // Resolved live on every get(), never captured here: the provider may
+      // not have mounted yet when apply() runs (the loader checks
+      // requirements once the whole manifest is applied), and a provider
+      // that hot-reloads must be picked up without the consumer knowing.
+      return {
+        name,
+        get: () => {
+          const impl = getService(name);
+          if (impl === undefined) {
+            throw new Error(`plugin "${id}": no plugin provides service "${name}"`);
+          }
+          return impl as T;
+        },
+      };
+    },
+  };
+
   // Not a registrar, same as artifacts/agents — nobody needs a different
   // secret store, they need to read one. There is no write path here: a
   // secret is written by a human (UI/CLI/API), never by a plugin, so nothing
@@ -562,6 +600,7 @@ export function createPluginContext(
     http,
     facts,
     collections,
+    services,
     artifacts,
     secrets,
     agents,

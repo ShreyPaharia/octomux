@@ -345,11 +345,12 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes eight registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes nine registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above), `ctx.surfaces.register()` (below),
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`),
-`ctx.collections` (`define`/`put`/`query`/`watch`), `ctx.ui.panel()`,
+`ctx.collections` (`define`/`put`/`query`/`watch`),
+`ctx.services` (`provide()`/`require()`, below), `ctx.ui.panel()`,
 `ctx.policy.intercept()`, `ctx.agents.run()`, `ctx.fanout.run()` and
 `ctx.catalog.list()` — plus
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
@@ -392,8 +393,8 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
   `http.route`, `facts.define`, `facts.put`, `collections.define`, `collections.write`,
-  `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`,
-  `surfaces.register`.
+  `services.provide`, `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`,
+  `fanout.run`, `surfaces.register`.
   `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
@@ -418,6 +419,19 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   something that outlives a task. Records reach the SPA via
   `GET /api/plugin-collections/:qualifiedName`.
   Not `ctx.kv` (SHR-263) — kv is opaque blobs, this is queryable records.
+- **`ctx.services`** — dependency by CAPABILITY, not by package name (SHR-260). A plugin
+  provides a name (`ctx.services.provide('chat.send', impl)`); another requires it
+  (`ctx.services.require('chat.send')`) and gets back `{ name, get() }` that resolves live on
+  every call. The one unqualified name in the whole API — `chat.send` has to be the same
+  string on both sides, so it isn't prefixed `<pluginId>:` like everything else. **First
+  provider wins**: if two plugins provide the same name, the one earlier in `octomux.yml` is
+  live and the other queues behind it, promoted only if the first unmounts — there's no
+  `prefer:` key, reordering the two rows is the whole mechanism. Resolution happens once, in
+  `loader.ts`, after the whole manifest has applied (a fixpoint pass, since unmounting one
+  unmet plugin can strand another) — so a consumer may be listed before its provider. An unmet
+  `require()` fails only that plugin (and anything transitively depending on it) as a
+  `phase: 'apply'` load-report entry, never the boot. Providers show up in `ctx.catalog.list()`
+  as `service:<name>`. Requires `services.provide`; `require` is ungated.
 - **`ctx.fanout`** — run a step **per item**, not per schedule fire. `run({ name, source, each })`
   maps a handler over an item source: `{ items }` (a plain array), `{ collection, query }` (a
   `ctx.collections` query — SHR-275; the resolver is injected via `setCollectionResolver()`, and
@@ -466,7 +480,10 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   argv (the injection-safety burden the plan assigns to argv conversion hasn't landed); a
   plugin integration provider's `handler` receives the **resolved** secret in cleartext
   (`server/hook-dispatcher.ts` calls `resolveEnvVars` before invoking it — there's no broker
-  yet). Trust model: a plugin runs in-process with the DB handle, every credential, and
+  yet); `ctx.services`' unmet-requirement check is boot-only — `octomux plugins reload <id>`
+  does not re-run it, so a hot-reloaded plugin with an unmet requirement mounts anyway and
+  throws at its first `handle.get()` instead of failing at load time. Trust model: a plugin
+  runs in-process with the DB handle, every credential, and
   `process.env` — no sandbox, none planned. State that plainly wherever plugins are documented.
   Capability grants (above) and `ctx.policy` denies do not change this: grants govern only the
   `ctx` surface, a plugin can do everything core can do without ever calling `ctx`, and a
