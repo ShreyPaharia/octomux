@@ -24,5 +24,11 @@ export {
 } from './registry.js';
 export { registerCoreSurfaces, WEB_RENDERERS } from './core.js';
 export { renderPanelText } from './text.js';
-export { resolveRenderer, contributionsForSurface, panelsForSurface, promptOn } from './render.js';
+export {
+  resolveRenderer,
+  contributionsForSurface,
+  panelsForSurface,
+  renderCollectionPanels,
+  promptOn,
+} from './render.js';
 export type { RenderedPanel } from './render.js';

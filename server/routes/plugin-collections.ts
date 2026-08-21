@@ -17,36 +17,42 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
 import { queryRecords } from '../repositories/plugin-collections.js';
+import type { QuerySpec } from '@octomux/plugin-api';
 import { badRequest } from '../services/errors.js';
 
 export const router: Router = Router();
 
+/**
+ * Reads a `QuerySpec` out of a request's query string. Shared with the
+ * rendered-panel route in `plugin-ui.ts`, which windows the same collections
+ * for a server-rendered surface.
+ *
+ * `Number('abc')` is NaN and NaN never compares true, so an unparseable
+ * limit/offset would silently misbehave rather than being rejected. Treat
+ * anything non-finite as absent — same reasoning as `sinceSeq` in
+ * `plugin-facts.ts`.
+ */
+export function parseCollectionQuery(query: Request['query']): QuerySpec {
+  const { limit, offset, orderBy, order } = query;
+  const parsedLimit = typeof limit === 'string' && limit.length > 0 ? Number(limit) : undefined;
+  const parsedOffset = typeof offset === 'string' && offset.length > 0 ? Number(offset) : undefined;
+  return {
+    limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
+    offset: Number.isFinite(parsedOffset) ? parsedOffset : undefined,
+    orderBy: typeof orderBy === 'string' ? orderBy : undefined,
+    order: order === 'asc' || order === 'desc' ? order : undefined,
+  };
+}
+
 router.get(
   '/api/plugin-collections/:name',
   async (req: Request, res: Response, next: NextFunction) => {
-    const { limit, offset, orderBy, order } = req.query;
-
-    // Number('abc') is NaN and NaN never compares true, so an unparseable
-    // limit/offset would silently misbehave rather than being rejected. Treat
-    // anything non-finite as absent — same reasoning as `sinceSeq` in
-    // `plugin-facts.ts`.
-    const parsedLimit = typeof limit === 'string' && limit.length > 0 ? Number(limit) : undefined;
-    const parsedOffset =
-      typeof offset === 'string' && offset.length > 0 ? Number(offset) : undefined;
-
-    const order_ = order === 'asc' || order === 'desc' ? order : undefined;
-
     // Express 5's `req.params` is loosely typed (see CLAUDE.md "Gotchas") —
     // this route has a single required `:name`, so it is always a string.
     const { name } = req.params as Record<string, string>;
 
     try {
-      const records = queryRecords(name, {
-        limit: Number.isFinite(parsedLimit) ? parsedLimit : undefined,
-        offset: Number.isFinite(parsedOffset) ? parsedOffset : undefined,
-        orderBy: typeof orderBy === 'string' ? orderBy : undefined,
-        order: order_,
-      });
+      const records = queryRecords(name, parseCollectionQuery(req.query));
       res.json({ records });
     } catch (err) {
       // queryRecords throws on an invalid orderBy field name — a bad field

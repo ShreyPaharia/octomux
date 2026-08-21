@@ -155,4 +155,99 @@ describe('PluginPanels', () => {
     render(<PluginPanels slot="task.panel" taskId="t1" />);
     expect(screen.getByText('boom')).toBeTruthy();
   });
+
+  describe('task-free mode (no taskId)', () => {
+    it('renders a collection-bound contribution with no taskId prop', () => {
+      usePluginUiContributionsMock.mockReturnValue({
+        contributions: collectionContributionFixture,
+        loading: false,
+        error: null,
+      });
+      usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+      usePluginCollectionMock.mockReturnValue({
+        records: [
+          {
+            collection: 'coverage-bot:baselines',
+            key: 'main',
+            record: { pct: 77 },
+            createdAt: 'c',
+            updatedAt: 'u',
+          },
+        ],
+        loading: false,
+        error: null,
+      });
+
+      render(<PluginPanels slot="settings.card" />);
+      expect(screen.getByText('Baselines')).toBeTruthy();
+      expect(screen.getByText('77')).toBeTruthy();
+    });
+
+    it('skips a fact-bound contribution without crashing', () => {
+      usePluginUiContributionsMock.mockReturnValue({
+        contributions: factContributionFixture,
+        loading: false,
+        error: null,
+      });
+      usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+      usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
+
+      const { container } = render(<PluginPanels slot="settings.card" />);
+      expect(container.querySelector('[data-testid="plugin-panels"]')).toBeNull();
+      expect(screen.queryByText('Coverage')).toBeNull();
+    });
+
+    it('renders nothing when the only contribution is fact-bound', () => {
+      usePluginUiContributionsMock.mockReturnValue({
+        contributions: factContributionFixture,
+        loading: false,
+        error: null,
+      });
+      usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+      usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
+
+      const { container } = render(<PluginPanels slot="settings.card" />);
+      expect(container.firstChild).toBeNull();
+    });
+
+    it('with taskId present, both fact-bound and collection-bound contributions still render (no regression)', () => {
+      usePluginUiContributionsMock.mockReturnValue({
+        contributions: [...factContributionFixture, ...collectionContributionFixture],
+        loading: false,
+        error: null,
+      });
+      usePluginFactsMock.mockReturnValue({
+        facts: [
+          {
+            seq: 1,
+            taskId: 't1',
+            type: 'coverage-bot:coverage',
+            payload: { pct: 91 },
+            createdAt: 'x',
+          },
+        ],
+        loading: false,
+        error: null,
+      });
+      usePluginCollectionMock.mockReturnValue({
+        records: [
+          {
+            collection: 'coverage-bot:baselines',
+            key: 'main',
+            record: { pct: 77 },
+            createdAt: 'c',
+            updatedAt: 'u',
+          },
+        ],
+        loading: false,
+        error: null,
+      });
+
+      render(<PluginPanels slot="task.panel" taskId="t1" />);
+      expect(screen.getByText('Coverage')).toBeTruthy();
+      expect(screen.getByText('91')).toBeTruthy();
+      expect(screen.getByText('Baselines')).toBeTruthy();
+      expect(screen.getByText('77')).toBeTruthy();
+    });
+  });
 });

@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
-import { resolveRenderer, contributionsForSurface, panelsForSurface, promptOn } from './render.js';
+import {
+  resolveRenderer,
+  contributionsForSurface,
+  panelsForSurface,
+  renderCollectionPanels,
+  promptOn,
+} from './render.js';
 import { registerSurface, resetSurfaces, freezeCoreSurfaces } from './registry.js';
 import { registerCoreSurfaces } from './core.js';
 import { defineFactType, putFact, resetFacts } from '../plugins/facts.js';
+import { defineCollection, putRecord, resetCollections } from '../plugins/collections.js';
 import { registerPluginUiPanel, resetPluginUi } from '../plugins/ui-registry.js';
 import type { SurfaceDefinition, SurfacePanel } from '@octomux/plugin-api';
 
@@ -12,6 +19,7 @@ describe('surfaces/render', () => {
     const db = createTestDb();
     insertTask(db, { id: 'task-1' });
     resetFacts();
+    resetCollections();
     resetPluginUi();
     resetSurfaces();
     registerCoreSurfaces();
@@ -105,6 +113,171 @@ describe('surfaces/render', () => {
       // No fact written — cli's renderPanelText returns undefined for empty facts.
       const panels = await panelsForSurface('cli', 'task-1');
       expect(panels).toHaveLength(0);
+    });
+
+    it('skips a collection-bound contribution rather than rendering it empty or crashing', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'table',
+      });
+      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 87 });
+
+      const panels = await panelsForSurface('cli', 'task-1');
+      expect(panels).toHaveLength(0);
+    });
+  });
+
+  describe('renderCollectionPanels', () => {
+    it('throws on an unknown surface kind', async () => {
+      await expect(renderCollectionPanels('nope', 'coverage-bot:baselines')).rejects.toThrow(
+        /unknown surface "nope"/,
+      );
+    });
+
+    it('throws on web — the client renders it, not the host', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'table',
+      });
+      await expect(renderCollectionPanels('web', 'coverage-bot:baselines')).rejects.toThrow(
+        /surface "web" has no render — the client renders it/,
+      );
+    });
+
+    it('renders a collection-bound panel on cli with real record data', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'stat',
+        value: 'pct',
+      });
+      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
+
+      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      expect(panels).toHaveLength(1);
+      expect(panels[0].pluginId).toBe('coverage-bot');
+      expect(panels[0].text).toContain('91');
+    });
+
+    it('ignores fact-bound contributions and contributions bound to a different collection', async () => {
+      defineFactType('status-bot', { type: 'status', schema: { type: 'object' } });
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      defineCollection('coverage-bot', {
+        name: 'other',
+        schema: { type: 'object' },
+        key: 'id',
+      });
+      registerPluginUiPanel('status-bot', { slot: 'task.badge', fact: 'status', as: 'badge' });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'other',
+        as: 'table',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'stat',
+        value: 'pct',
+      });
+      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
+      await putRecord('coverage-bot', 'other', { id: 1 });
+
+      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      expect(panels).toHaveLength(1);
+      expect(panels[0].text).toContain('91');
+    });
+
+    it('returns [] when the collection has no records', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'stat',
+        value: 'pct',
+      });
+
+      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      expect(panels).toHaveLength(0);
+    });
+
+    it('a throwing render skips only that panel, leaving siblings intact', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'stat',
+        value: 'pct',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'badge',
+        value: 'pct',
+      });
+      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
+
+      registerSurface({
+        kind: 'demo:flaky',
+        renderers: ['stat', 'badge'],
+        render(panel: SurfacePanel) {
+          if (panel.as === 'stat') throw new Error('boom');
+          return `[${panel.as}]`;
+        },
+      });
+
+      const panels = await renderCollectionPanels('demo:flaky', 'coverage-bot:baselines');
+      expect(panels).toHaveLength(1);
+      expect(panels[0].as).toBe('badge');
+    });
+
+    it('honours q — limit narrows which records reach render', async () => {
+      defineCollection('coverage-bot', {
+        name: 'baselines',
+        schema: { type: 'object' },
+        key: 'branch',
+      });
+      registerPluginUiPanel('coverage-bot', {
+        slot: 'settings.card',
+        collection: 'baselines',
+        as: 'timeline',
+      });
+      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
+      await putRecord('coverage-bot', 'baselines', { branch: 'dev', pct: 42 });
+
+      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines', { limit: 1 });
+      expect(panels).toHaveLength(1);
+      // timeline renders every fact it's handed — with limit:1 only one record shows.
+      const lines = panels[0].text.split('\n').filter((l) => l.trim().length > 0);
+      expect(lines).toHaveLength(1);
     });
   });
 

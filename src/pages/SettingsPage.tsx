@@ -27,6 +27,7 @@ import { FormSelect } from '@/components/ui/form-select';
 import { Switch } from '@/components/ui/switch';
 import { ROW_DIVIDER } from '@/lib/design-tokens';
 import { getNotificationsEnabled, setNotificationsEnabled } from '@/lib/notification-settings';
+import { PluginPanels } from '@/components/PluginPanels';
 
 function RepoRow({ config, onEditClick }: { config: RepoConfig; onEditClick: () => void }) {
   const [showMenu, setShowMenu] = useState(false);
@@ -866,6 +867,9 @@ export default function SettingsPage() {
       <ClaudeLaunchFlagsSection scrollRef={setRef('agent-launch')} />
       <KindsSection scrollRef={setRef('kinds')} />
       <AdvancedSection scrollRef={setRef('advanced')} />
+      {/* settings.card: where task-independent (collection-bound) plugin
+          panels land — no scroll anchor, renders null when nothing contributes. */}
+      <PluginPanels slot="settings.card" />
     </SettingsLayout>
   );
 }

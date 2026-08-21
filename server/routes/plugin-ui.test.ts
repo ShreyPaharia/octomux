@@ -12,6 +12,7 @@ const { getDb } = await import('../db.js');
 const { createApp } = await import('../app.js');
 const { registerPluginUiPanel, resetPluginUi } = await import('../plugins/ui-registry.js');
 const { defineFactType, putFact, resetFacts } = await import('../plugins/facts.js');
+const { defineCollection, putRecord, resetCollections } = await import('../plugins/collections.js');
 const { registerSurface, unregisterSurface } = await import('../surfaces/index.js');
 const { renderPanelText } = await import('../surfaces/text.js');
 
@@ -167,5 +168,130 @@ describe('plugin-ui routes', () => {
   it('404s for an unknown task', async () => {
     const app = createApp();
     await request(app).get('/api/tasks/does-not-exist/panels?surface=cli').expect(404);
+  });
+});
+
+/**
+ * `GET /api/plugin-collections/:name/panels` (SHR-279) — the collection-bound
+ * counterpart to `/api/tasks/:id/panels`. No task anywhere in these tests:
+ * that is the point of the route.
+ */
+describe('plugin collection panels route', () => {
+  beforeEach(() => {
+    createTestDb();
+    resetPluginUi();
+    resetFacts();
+    resetCollections();
+  });
+
+  afterEach(() => {
+    resetPluginUi();
+    resetFacts();
+    resetCollections();
+    unregisterSurface('test-narrow');
+  });
+
+  async function seedCollectionPanel(as = 'table') {
+    defineCollection(PLUGIN_ID, { name: 'deals', schema: {}, key: 'id' });
+    registerPluginUiPanel(PLUGIN_ID, {
+      slot: 'settings.card',
+      collection: 'deals',
+      as: as as never,
+      title: 'Pipeline',
+    });
+    await putRecord(PLUGIN_ID, 'deals', { id: 'd-1', stage: 'won' });
+    await putRecord(PLUGIN_ID, 'deals', { id: 'd-2', stage: 'lost' });
+  }
+
+  it('renders a collection-bound panel on cli, with no task involved', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const res = await request(app)
+      .get(`/api/plugin-collections/${encodeURIComponent(`${PLUGIN_ID}:deals`)}/panels?surface=cli`)
+      .expect(200);
+
+    expect(res.body.panels).toHaveLength(1);
+    expect(res.body.panels[0].pluginId).toBe(PLUGIN_ID);
+    expect(res.body.panels[0].slot).toBe('settings.card');
+    expect(res.body.panels[0].renderer).toBe('table');
+    expect(res.body.panels[0].text).toContain('d-1');
+    expect(res.body.panels[0].text).toContain('d-2');
+  });
+
+  it('degrades to a surface fallback the same way the task route does', async () => {
+    registerSurface({
+      kind: 'test-narrow',
+      renderers: ['badge'],
+      fallback: 'json',
+      render: renderPanelText,
+    });
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const res = await request(app)
+      .get(
+        `/api/plugin-collections/${encodeURIComponent(`${PLUGIN_ID}:deals`)}/panels?surface=test-narrow`,
+      )
+      .expect(200);
+
+    expect(res.body.panels[0].as).toBe('table');
+    expect(res.body.panels[0].renderer).toBe('json');
+  });
+
+  it('windows the collection with limit/orderBy', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const res = await request(app)
+      .get(
+        `/api/plugin-collections/${encodeURIComponent(`${PLUGIN_ID}:deals`)}/panels?surface=cli&orderBy=id&order=desc&limit=1`,
+      )
+      .expect(200);
+
+    expect(res.body.panels[0].text).toContain('d-2');
+    expect(res.body.panels[0].text).not.toContain('d-1');
+  });
+
+  it('an unusable orderBy field is a 400, not a 500', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    await request(app)
+      .get(
+        `/api/plugin-collections/${encodeURIComponent(`${PLUGIN_ID}:deals`)}/panels?surface=cli&orderBy=not%20a%20field`,
+      )
+      .expect(400);
+  });
+
+  it('a collection nothing binds to renders no panels rather than 404ing', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const res = await request(app)
+      .get(`/api/plugin-collections/${PLUGIN_ID}%3Aother/panels?surface=cli`)
+      .expect(200);
+    expect(res.body.panels).toEqual([]);
+  });
+
+  it('surface=web 400s — the browser draws collection panels itself', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const res = await request(app)
+      .get(`/api/plugin-collections/${encodeURIComponent(`${PLUGIN_ID}:deals`)}/panels?surface=web`)
+      .expect(400);
+    expect(res.body).toEqual({
+      error: 'surface "web" has no render — the client renders it',
+    });
+  });
+
+  it('missing surface query param 400s; an unknown surface 404s', async () => {
+    await seedCollectionPanel();
+
+    const app = createApp();
+    const name = encodeURIComponent(`${PLUGIN_ID}:deals`);
+    await request(app).get(`/api/plugin-collections/${name}/panels`).expect(400);
+    await request(app).get(`/api/plugin-collections/${name}/panels?surface=nope`).expect(404);
   });
 });

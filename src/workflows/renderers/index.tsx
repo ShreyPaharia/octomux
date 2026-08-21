@@ -69,7 +69,16 @@ function tableRows(facts: PluginFact[]): Array<Record<string, unknown>> {
   const payload = latestPayload(facts);
   if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>;
   const rows = payloadField(payload, 'rows');
-  return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+  if (Array.isArray(rows)) return rows as Array<Record<string, unknown>>;
+  // Neither shape matched, so fall back to one row PER entry. This is what a
+  // collection-bound panel wants (SHR-279): its records arrive here as facts,
+  // one record each, and reading only the last one would show a 2,000-record
+  // board as a single row. For a fact-bound panel this only fires where the
+  // old code rendered nothing at all, so it never changes an existing table.
+  // Mirrors `tableRows` in `server/surfaces/text.ts` — keep the two in step.
+  return facts.every((f) => typeof f.payload === 'object' && f.payload !== null)
+    ? facts.map((f) => f.payload as Record<string, unknown>)
+    : [];
 }
 
 function TableRenderer({ facts }: RendererProps) {

@@ -10,6 +10,13 @@
  * surfaces without `prompt` records the capability (a plugin surface CAN
  * declare one, and the host refuses cleanly on a surface that can't) — it is
  * not a claim that core prompting works today. Don't describe it as wired.
+ *
+ * Collection-bound panels (SHR-279): `cli`, `slack` and `telegram` draw them
+ * with zero change to `render` — a collection's records reach it adapted
+ * into the same `Fact` shape (see `renderCollectionPanels` in `render.ts`).
+ * `web` has no `render` at all and so declares it cannot render
+ * server-side — the browser draws collection panels itself
+ * (`src/components/PluginPanels.tsx`), mounted at the `settings.card` slot.
  */
 import type { SurfaceDefinition } from '@octomux/plugin-api';
 import { registerSurface } from './registry.js';
