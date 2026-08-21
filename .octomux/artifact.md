@@ -1,73 +1,60 @@
 ## What shipped
 
-A named secret store. Encrypted at rest, **never returned by any read API**, referenced
-by name from config, resolved only at egress, scrubbed from logs and run results.
+Three doc files plus one drift guard.
 
-| Piece               | Where                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------- |
-| Table + repository  | `server/db/schema.ts` (`secrets`), `server/repositories/secrets.ts`                                     |
-| AES-256-GCM at rest | `server/secrets/crypto.ts` — key at `<octomuxRoot()>/secret.key` (0600), `OCTOMUX_SECRET_KEY` overrides |
-| Store / resolution  | `server/secrets/store.ts` — `${secret:NAME}` walk, mirrors `${env:VAR}`                                 |
-| Redaction           | `server/secrets/redact.ts` (zero imports, so `logger.ts` can use it)                                    |
-| HTTP                | `server/routes/secrets.ts` — `GET /api/secrets` (metadata), `PUT`/`DELETE /api/secrets/:name`           |
-| CLI                 | `octomux secrets list\|set\|rm` (`set --stdin`)                                                         |
-| Plugin API          | `ctx.secrets.list()` ungated, `ctx.secrets.resolve()` gated on `secrets.read`                           |
-| Form picker         | `secretRef: true` on a config schema property → `SchemaConfigForm.tsx` renders a picker                 |
+### 1. Capability grants, documented for the first time
 
-## The invariants, and where they're enforced
+`grants` appeared **zero times** in `docs/plugins/`. Grants are deny-by-default, so a
+reader who followed `README.md` exactly got a load failure on their first boot. Now:
 
-1. **No value ever leaves over HTTP.** There is no `GET /api/secrets/:name`.
-   `listSecretRows()` doesn't even `SELECT value_enc`, so the metadata path cannot leak
-   a ciphertext through a careless spread. `getSecretValue()` is the single decrypt
-   path — not on a route, not on `ctx`.
-2. **Reference by name, resolve at the call that uses it.** `${secret:NAME}` is a
-   literal in config. An unknown name **throws** (where `${env:}` degrades to `''`):
-   sending an empty credential is a 401 three layers away.
-3. **Two core egress points only** — `hook-dispatcher.ts` (integration config) and
-   `compute/config.ts` (the `secrets` sub-object; `config` stays env-only because
-   `config` is the half that can reach the agent).
-4. **Deliberately NOT `prompt-interpolate.ts` / `resolveWorkflowConfig`.** Schedule
-   config feeds the agent's prompt via `{{configKey}}`. Resolving there hands the
-   credential to the agent — the exact failure this ticket exists to prevent.
-5. **Redaction at one choke point per egress.** `logger.ts` wraps its destination
-   streams with `withRedaction()`, so every `logger.*` line in the codebase is scrubbed
-   without call sites knowing; `finishRun()` does the same for `result_json`.
+- `docs/plugins/README.md` §Capability grants (right after Quickstart, because it's the
+  first thing that breaks) — the 15-name table, how to derive the grants you need from
+  your `ctx.*` calls, the widen/approve flow, "not a sandbox".
+- `docs/plugins/api-reference.md` §Capability grants — the same model at reference depth,
+  plus `grants?` on the `PluginRow` snippet and `grants?`/`pendingGrants?`/`loadedAt?`/
+  `manifestError?` on `LoadReport`.
+- Every manifest row shown to a reader now declares `grants:` — Quickstart, both
+  in-guide registrar examples, and both broken example plugins.
 
-## Judgement calls worth challenging
+### 2. Six missing `ctx` sections
 
-- **Encryption at rest with a local key file.** Out-of-scope said no KMS/envelope. A
-  32-byte key next to the DB is ~40 lines of stdlib `crypto` and stops a copied
-  `tasks.db` or a backup from being a credential dump. An attacker with the filesystem
-  has both. Called that a fair trade for the ticket's title; disagree and it's one file
-  to delete.
-- **`${secret:NAME}` string wrapper over a schema-driven bare name.** Uniform
-  substitution works at every use site with no schema in hand. Cost: the placeholder
-  can reach a prompt as a literal (harmless — it's a name).
-- **`hook-dispatcher` now fails closed.** The agent's first pass fell back to the
-  unresolved config on a resolution error, i.e. posted the literal `${secret:X}` as a
-  credential. Changed to log + skip the send. That is a behaviour change to the
-  pre-existing catch, which previously also swallowed `${env:}` resolution failures.
-- **`REDACT_MIN_LENGTH = 8`.** Below that, scrubbing every occurrence would wreck the
-  logs. A 4-char secret that leaks was already a bad secret.
+`ctx.http`, `ctx.facts`, `ctx.ui`, `ctx.artifacts`, `ctx.policy`, `ctx.effect()` — each
+with its interface, the capability that gates it, what deregisters on unmount, and an
+example. `## PluginContext` now carries an 18-row member table.
 
-## Left out on purpose
+`README.md` §"The three registrars" was renamed — there are ten registrars, four methods
+on `ctx`, and four plain members.
 
-- **No Settings UI for creating a secret** — the picker is populated by whatever the
-  CLI or API wrote. CLI + picker was the tight scope; a Settings card is the obvious
-  next increment.
-- **No repository test for `server/repositories/secrets.ts`** — every one of its
-  functions is exercised through `server/secrets/store.test.ts`. A second suite would
-  restate the same assertions one layer down.
-- Per-user scoping, rotation automation, an audit log of resolutions, and a broker so a
-  plugin integration handler stops receiving cleartext (the pre-existing WAVE-3 gap).
+### 3. `## Not seams` rewritten
 
-## Verification
+From one paragraph about `ctx.catalog` to the eight-item list matching the public site:
+skills/agent roles, MCP, models, history, artifacts, catalog, isolation, storage.
 
-`bun run typecheck`, `bun run format:check`, `bun run lint` all clean.
-`bun run test` — 3809 + 1308 + 231 pass, 0 fail.
+### 4. `server/plugins/docs.test.ts`
+
+Derives its expectations from source rather than restating them: parses `PluginContext`
+out of `@octomux/plugin-api`, reads `PLUGIN_CAPABILITIES`, and calls the real
+`assertGranted` to get its current error wording. Asserts every member has a section,
+every capability name appears in both docs, the docs quote the live error text, and every
+manifest row shown to a reader declares `grants:`. Example READMEs are discovered, not
+listed — a new example can't opt out.
+
+## Found while working
+
+**`resume()` shadows `create()`.** `sessionFor()` (`server/compute/index.ts:78`) is
+`provider.resume ?? provider.create`. A provider defining both — like the `ssh-compute`
+example — gets `resume()` on a brand-new task's first session, so its clone/fetch path is
+unreachable via `startTask` and `resume()` throws "found no clone". The root `CLAUDE.md`
+says the host "falls back to `create`", which reads the opposite way. Documented as a
+trap in the example's README; the example's runtime behaviour was left alone (fixing it
+means deciding resume semantics, which belongs with the restart-reconcile wave).
+
+**`.octomux/artifact.md` added to `.prettierignore`.** It's rewritten by the harness on
+every tool call, so it failed `format:check` on a timestamp that was stale before the
+check finished.
 
 ## Summary
 
-_Updated 2026-08-21 18:30:46_
+_Updated 2026-08-21 18:26:55_
 
-Bash: cat > .octomux/artifact.md <<'MD' # SHR-277 — secrets: a store that is not a plaintext config…
+Bash: bun run lint 2>&1 | tail -5; echo "=== typecheck ==="; bun run typecheck 2>&1 | tail -3; echo…

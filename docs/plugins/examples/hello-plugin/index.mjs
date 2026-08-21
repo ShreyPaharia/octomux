@@ -8,6 +8,10 @@
 // The `kinds/hello.json` file next to this one adds a second capability —
 // a schedulable "hello" session kind — with zero code: presets are read
 // straight off disk, not through apply().
+//
+// Requires the `integrations.register` grant in this plugin's octomux.yml
+// row (`ctx.integrations.register` below) — see README.md. `kinds/hello.json`
+// needs no grant; it isn't read through ctx.
 
 /** @param {import('@octomux/plugin-api').PluginContext} ctx */
 export async function apply(ctx) {

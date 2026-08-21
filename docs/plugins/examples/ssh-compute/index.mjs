@@ -11,6 +11,9 @@
 // owns process spawning — that's what keeps every process this provider
 // starts observable and disposable by the same machinery as everything else
 // octomux runs, instead of a second untracked spawn path.
+//
+// Requires the `compute.register` grant in this plugin's octomux.yml row
+// (`ctx.compute.register` in apply() below) — see README.md.
 
 /**
  * The shape `ComputeCreateContext` takes in `server/compute/types.ts`. Not

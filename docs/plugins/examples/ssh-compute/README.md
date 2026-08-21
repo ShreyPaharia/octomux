@@ -23,6 +23,24 @@ honest first answer to "can a plugin's untrusted work be sandboxed?" — see
   many ssh-backed tasks would otherwise mean a burst of remote fetches for no
   reason — `create()` is allowed to be slow and to mutate remote state,
   `resume()` is not).
+
+  **This is not what actually happens today, and it's worth knowing before you
+  rely on it.** `sessionFor()` (`server/compute/index.ts`) is the only call
+  path into a compute provider — every task-engine call site goes through it
+  — and it picks `provider.resume ?? provider.create`: when a provider
+  defines both, as this one does, `resume` is used unconditionally,
+  including for a task's very first session, because the host cannot yet
+  tell "reattach after restart" from "first create" (see the comment in
+  `sessionFor`). Concretely: `create()`'s clone-or-fetch logic never runs
+  through the normal `startTask` path for this plugin — the first
+  `sessionFor(task)` call for a brand-new task hits `resume()`, which throws
+  `ssh-compute: resume() found no clone at "…"` because nothing has cloned
+  the repo yet. `create()` is exercised only by
+  `server/compute/ssh-example.test.ts`, which calls it directly. Until the
+  host's restart-reconcile wave lands, don't point a fresh task at this
+  compute kind expecting `create()` to run — pre-seed the remote clone
+  yourself, or drop the `resume` export until the host can disambiguate.
+
 - `exec(argv, opts)` — runs `argv` on the remote box via `ssh`, with
   `opts.cwd`/`opts.env` translated into a `cd ... && VAR=... ...` prefix on
   the remote command string.
@@ -67,7 +85,20 @@ import works under Bun's ESM resolver.)
 plugins:
   - id: ssh
     name: /absolute/path/to/docs/plugins/examples/ssh-compute
+    grants: [compute.register]
 ```
+
+`ctx.compute.register` requires the `compute.register` capability grant —
+omit it and registration throws at boot, and the row lands in the load
+report as an `apply`-phase failure naming this plugin and the capability
+(`server/plugins/context.ts`, `server/plugins/grants.ts`). `ctx.logger`
+needs no grant at all — it's ungated.
+
+If you later extend this plugin with a `ctx.*` call that needs a grant not
+already declared here, the new grant is withheld until you run `octomux
+plugins approve ssh` (`server/plugins/grants.ts::resolveGrantsForRow`,
+`cli/src/commands/plugins.ts`) — the row's _existing_ `compute.register`
+grant keeps working, only the addition is pending.
 
 This plugin registers `ctx.compute.register({ kind: 'ssh', ... })` — a
 **local** id. octomux qualifies it under the manifest row's own `id` before
