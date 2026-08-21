@@ -46,10 +46,15 @@ const logger = childLogger('artifact-task');
  * debug) if the task has no worktree yet. All errors are swallowed — this is
  * called from fire-and-forget hook paths that must never throw.
  *
- * ponytail: writes the file synchronously on every call. The hottest caller
- * (POST /api/hooks/post-tool-use) fires this on every tool use, not just at
- * Stop — fine at today's one-small-file-per-task scale; if rapid-fire tool
- * calls make this measurably hot, debounce/coalesce writes per task instead.
+ * Summary is AUTHORED content — an agent, a human, or the opt-in Stop
+ * summarizer. It is deliberately not written by the post-tool-use hook, which
+ * writes Activity instead (`setArtifactActivity`, see server/hooks.ts): that
+ * fires on every tool use, and letting it touch Summary is what used to leave
+ * the field holding an agent's last Bash command (SHR-278).
+ *
+ * ponytail: writes the file synchronously on every call. Callers are now
+ * low-frequency (Stop, or an explicit `octomux task summary`), so the
+ * every-tool-use hot path this comment used to warn about no longer exists.
  */
 export function setTaskSummary(taskId: string, summary: string): void {
   try {
