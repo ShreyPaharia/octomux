@@ -13,7 +13,8 @@ vi.mock('./event-source', () => ({
 }));
 
 const { renderHook, waitFor, act } = await import('@testing-library/react');
-const { usePluginUiContributions, usePluginFacts } = await import('./plugin-ui');
+const { usePluginUiContributions, usePluginFacts, usePluginCollection } =
+  await import('./plugin-ui');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -112,6 +113,84 @@ describe('usePluginFacts', () => {
 
     act(() => {
       eventCallback?.({ type: 'task:updated', payload: { taskId: 'other-task' } });
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fetch for a collection-bound contribution (no factType)', async () => {
+    const collectionContribution = {
+      pluginId: 'coverage-bot',
+      slot: 'task.panel' as const,
+      collection: 'baselines',
+      collectionName: 'coverage-bot:baselines',
+      as: 'stat',
+    };
+
+    const { result } = renderHook(() => usePluginFacts('t1', collectionContribution));
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(result.current.facts).toEqual([]);
+    expect(result.current.loading).toBe(false);
+  });
+});
+
+describe('usePluginCollection', () => {
+  const contribution = {
+    pluginId: 'coverage-bot',
+    slot: 'task.panel' as const,
+    collection: 'baselines',
+    collectionName: 'coverage-bot:baselines',
+    as: 'stat',
+  };
+
+  it('fetches records from the qualified collection endpoint, URL-encoding the ":"', async () => {
+    requestMock.mockResolvedValue({
+      records: [
+        {
+          collection: 'coverage-bot:baselines',
+          key: 'main',
+          record: { pct: 90 },
+          createdAt: 'c',
+          updatedAt: 'u',
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => usePluginCollection(contribution));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(requestMock).toHaveBeenCalledWith('/plugin-collections/coverage-bot%3Abaselines');
+    expect(result.current.records).toHaveLength(1);
+    expect(result.current.records[0].key).toBe('main');
+  });
+
+  it('does not fetch for a fact-bound contribution (no collectionName)', async () => {
+    const factContribution = {
+      pluginId: 'coverage-bot',
+      slot: 'task.panel' as const,
+      fact: 'coverage',
+      factType: 'coverage-bot:coverage',
+      as: 'stat',
+    };
+
+    const { result } = renderHook(() => usePluginCollection(factContribution));
+
+    await new Promise((r) => setTimeout(r, 50));
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(result.current.records).toEqual([]);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('does not refetch on a WS event — no broadcast exists yet for collection writes', async () => {
+    requestMock.mockResolvedValue({ records: [] });
+    renderHook(() => usePluginCollection(contribution));
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      eventCallback?.({ type: 'plugin:ui-updated', payload: {} });
     });
 
     await new Promise((r) => setTimeout(r, 50));

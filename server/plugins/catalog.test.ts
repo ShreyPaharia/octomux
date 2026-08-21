@@ -16,6 +16,7 @@ import { resetPluginUi } from './ui-registry.js';
 // These tests exercise the catalog, not the grant model, so grant everything.
 import { setPluginGrants, PLUGIN_CAPABILITIES } from './grants.js';
 import { resetFacts } from './facts.js';
+import { resetCollections } from './collections.js';
 import { resetHarnesses, registerHarness } from '../harnesses/registry.js';
 import { resetProviders } from '../integrations/registry.js';
 import { loadPlugins, resetMountedPlugins } from './loader.js';
@@ -32,6 +33,7 @@ beforeEach(() => {
   resetPluginRoutes();
   resetPluginUi();
   resetFacts();
+  resetCollections();
   resetHarnesses();
   resetProviders();
   resetMountedPlugins();
@@ -64,6 +66,7 @@ describe('pluginRegistrations', () => {
       handler: async () => {},
     });
     mine.facts.define({ type: 'observed', schema: { type: 'object' } });
+    mine.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
     mine.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
 
     const sibling =
@@ -90,11 +93,12 @@ describe('pluginRegistrations', () => {
     expect(reg.routes).toEqual(['GET /thing']);
     expect(reg.uiSlots).toEqual(['task.panel']);
     expect(reg.factTypes).toEqual(['cat-mine:observed']);
+    expect(reg.collectionNames).toEqual(['cat-mine:baselines']);
   });
 });
 
 describe('pluginProvides', () => {
-  it('flattens in order: workflows, harnesses, integrations, routes, ui, facts', () => {
+  it('flattens in order: workflows, harnesses, integrations, routes, ui, facts, collections', () => {
     const ctx =
       (setPluginGrants('cat-order', PLUGIN_CAPABILITIES), createPluginContext('cat-order'));
     ctx.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
@@ -119,6 +123,7 @@ describe('pluginProvides', () => {
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+    ctx.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
 
     expect(pluginProvides('cat-order')).toEqual([
       'workflow:cat-order:k',
@@ -127,6 +132,7 @@ describe('pluginProvides', () => {
       'route:GET /thing',
       'ui:task.panel',
       'fact:cat-order:observed',
+      'collection:cat-order:baselines',
     ]);
   });
 });

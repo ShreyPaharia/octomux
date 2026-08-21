@@ -50,6 +50,8 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'http.route',
   'facts.define',
   'facts.put',
+  'collections.define',
+  'collections.write',
   'ui.panel',
   'artifacts.write',
   'policy.intercept',

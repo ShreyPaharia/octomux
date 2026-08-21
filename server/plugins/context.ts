@@ -16,6 +16,7 @@ import { registerHarness } from '../harnesses/registry.js';
 import { registerCompute } from '../compute/registry.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
+import { defineCollection, putRecord, queryCollection, watchCollection } from './collections.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
@@ -31,6 +32,9 @@ import type {
   ComputeRegistrar,
   HttpRegistrar,
   FactsRegistrar,
+  CollectionsRegistrar,
+  CollectionDefinition,
+  QuerySpec,
   ArtifactsApi,
   UiRegistrar,
   PolicyRegistrar,
@@ -324,6 +328,38 @@ export function createPluginContext(
     },
   };
 
+  const collections: CollectionsRegistrar = {
+    define(def: CollectionDefinition) {
+      assertLive('collections.define');
+      assertGranted(id, 'collections.define');
+      requireLocalId(def as unknown as Record<string, unknown>, 'name', 'collections.define');
+      requireLocalId(def as unknown as Record<string, unknown>, 'key', 'collections.define');
+      defineCollection(id, def);
+    },
+    // Not `assertLive` — same split as `facts.put`: the revoke guard stops a
+    // timed-out apply() from mutating the REGISTRIES, not a healthy plugin
+    // from writing a record. Grant-checked regardless.
+    put(collection: string, record: unknown) {
+      assertGranted(id, 'collections.write');
+      return putRecord(id, collection, record);
+    },
+    // Ungated and unscoped, like facts.read: any plugin may read any
+    // collection, its own or a sibling's.
+    query(collection: string, q?: QuerySpec) {
+      return queryCollection(id, collection, q);
+    },
+    watch(qualifiedName: string, cb: (record: unknown) => void) {
+      assertLive('collections.watch');
+      const unsubscribe = watchCollection(qualifiedName, cb);
+      // Auto-disposed on unmount, same as facts.watch — and for the same
+      // reason: `unregisterPluginCollections` can only reach names this
+      // plugin DEFINED, so a watcher on a sibling's collection would
+      // otherwise keep firing after this plugin is gone.
+      effects.push(unsubscribe);
+      return unsubscribe;
+    },
+  };
+
   // Not a registrar — a method on ctx, same as facts.put/facts.read. Nobody
   // needs a different artifact implementation; they need to write one. There
   // is no `artifacts.register()` and there will not be.
@@ -358,8 +394,12 @@ export function createPluginContext(
       assertGranted(id, 'ui.panel');
       const payload = binding as unknown as Record<string, unknown>;
       requireLocalId(payload, 'slot', 'ui.panel');
-      requireLocalId(payload, 'fact', 'ui.panel');
       requireLocalId(payload, 'as', 'ui.panel');
+      // `fact` is no longer unconditionally required (SHR-275): a binding
+      // names EITHER a task-scoped fact type or a durable collection.
+      // Deliberately not re-checked here — `registerPluginUiPanel` owns the
+      // exactly-one rule so there is one place that decides it, and it has
+      // the slot/renderer validation next to it already.
       registerPluginUiPanel(id, binding);
     },
   };
@@ -398,6 +438,7 @@ export function createPluginContext(
     compute,
     http,
     facts,
+    collections,
     artifacts,
     ui,
     catalog,

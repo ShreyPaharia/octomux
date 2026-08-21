@@ -1282,6 +1282,26 @@ export function runMigrations(instance: Database): void {
     CREATE INDEX IF NOT EXISTS idx_plugin_facts_task ON plugin_facts(task_id, seq);
     CREATE INDEX IF NOT EXISTS idx_plugin_facts_type ON plugin_facts(type, seq);
   `);
+
+  // ── ctx.collections — durable keyed records (2026-08-21, SHR-275) ─────────
+  // The durable sibling of plugin_facts above: a small upsert store keyed on
+  // (collection, key) instead of an append-only log keyed on task_id. Its own
+  // table for the same reason plugin_facts got its own table rather than
+  // reusing `events` — different lifetime, different shape. Rows here are
+  // DURABLE: unlike plugin_facts there is deliberately no delete-on-task-delete
+  // sweep, because a collection record has no task in the picture at all.
+  // No extra index: every query filters on `collection`, which is the leading
+  // column of the PRIMARY KEY, so the PK's own b-tree already covers it.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_collections (
+      collection TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      record     TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (collection, key)
+    );
+  `);
 }
 
 /**

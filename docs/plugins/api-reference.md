@@ -43,6 +43,7 @@ export interface PluginContext {
   readonly harnesses: HarnessRegistrar;
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
+  readonly collections: CollectionsRegistrar;
   readonly ui: UiRegistrar;
   readonly catalog: CatalogReader;
   effect(dispose: () => void | Promise<void>): void;
@@ -51,7 +52,7 @@ export interface PluginContext {
 ```
 
 `http`, `facts`, `ui`, and `effect` aren't documented here yet — that's other
-tickets' debt. `catalog` is below.
+tickets' debt. `catalog` is below, `collections` after it.
 
 One context is built per manifest row (`createPluginContext(row.id)` in
 `context.ts`) and handed only to that row's `apply()`/`reconcile()`.
@@ -232,6 +233,93 @@ never includes yourself, even in a single-plugin manifest; it includes
 siblings that finished mounting earlier (manifest order) and always includes
 `core`. Call it later — a route handler, a `run`, anything that executes
 after `apply()` finishes — to see yourself.
+
+### `ctx.collections`
+
+```ts
+interface CollectionsRegistrar {
+  define(def: { name: string; schema: Record<string, unknown>; key: string }): void;
+  put(collection: string, record: unknown): Promise<void>;
+  query(collection: string, q?: QuerySpec): Promise<unknown[]>;
+  watch(qualifiedName: string, cb: (record: unknown) => void): () => void;
+}
+
+interface QuerySpec {
+  where?: Record<string, unknown>; // exact match on top-level record fields
+  orderBy?: string; // top-level record field; default `updatedAt`
+  order?: 'asc' | 'desc'; // default `asc`
+  limit?: number;
+  offset?: number;
+}
+```
+
+Durable, keyed, schema-validated records. The half of plugin storage
+`ctx.facts` deliberately is not: a fact is an append-only entry scoped to one
+task and deleted with it, while a collection record has no task at all and
+survives every task, every plugin reload, and the plugin's own uninstall.
+
+```js
+export default {
+  async apply(ctx) {
+    ctx.collections.define({
+      name: 'baselines',
+      key: 'repo',
+      schema: {
+        type: 'object',
+        required: ['repo', 'pct'],
+        properties: { repo: { type: 'string' }, pct: { type: 'number' } },
+        additionalProperties: false,
+      },
+    });
+
+    // Upserts on `repo`. Writing the same repo twice replaces, never appends.
+    await ctx.collections.put('baselines', { repo: '/src/api', pct: 87.4 });
+
+    const low = await ctx.collections.query('baselines', {
+      orderBy: 'pct',
+      order: 'asc',
+      limit: 10,
+    });
+  },
+};
+```
+
+Manifest grants: `collections.define` for `define`, `collections.write` for
+`put`. `query` and `watch` are ungated, like `facts.read`.
+
+Rules worth knowing before you design against it:
+
+- **Names qualify**, exactly like fact types — you declare `baselines`, it
+  stores `<your-plugin-id>:baselines`. A `core:` name is refused.
+- **`put` takes a BARE name.** Cross-plugin writes are out of scope; a
+  qualified name here is an error, not a write to someone else's collection.
+- **`query` takes bare OR qualified**, and reads are unscoped — you can read
+  a sibling's collection by its qualified name, same as `facts.read` reads
+  every plugin's facts on a task.
+- **The key must be a top-level `string` or finite `number` field** named by
+  `def.key`. A record missing it, or holding an object there, is rejected.
+- **`QuerySpec` is deliberately tiny.** Exact matches, an order, a window.
+  No operators, no joins, no aggregates. A plugin that needs those has
+  outgrown this API rather than found a gap in it.
+- **Unmount drops the definition, never the rows.** Durability is the whole
+  point, and a hot reload re-runs `apply()` expecting its records still
+  there. Redefining a name with a different schema on reload is honoured (the
+  compiled-schema cache is busted), but there is **no schema migration** of
+  records already stored — that is explicitly out of scope.
+- Not `ctx.kv`: kv is opaque per-plugin blobs keyed by a string (and still
+  throws — see README §Limits). This is schema-validated queryable records.
+
+This is also what makes a durable UI panel possible. `ctx.ui.panel()` binds to
+either a `fact` or a `collection`:
+
+```js
+ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
+```
+
+A fact-bound panel renders that task's facts; a collection-bound panel renders
+the collection's records, with no task involved. Records reach the SPA over
+`GET /api/plugin-collections/<qualified-name>`.
 
 ## `ctx.compute`
 

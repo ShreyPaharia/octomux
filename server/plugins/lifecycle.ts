@@ -3,9 +3,9 @@
  * Reverses, in reverse registration order, everything a plugin's `apply()`
  * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> ui -> policy -> the four registries (workflow
- * kinds, harnesses, compute providers, providers) -> ctx.effect() disposers
- * per-plugin isolation policy).
+ * Order: routes -> facts -> collections -> ui -> policy -> the four registries
+ * (workflow kinds, harnesses, compute providers, providers) -> ctx.effect()
+ * disposers per-plugin isolation policy).
  *
  * Capability grants are NOT released as an explicit step here — that already
  * happens inside `disposePluginContext()` (`server/plugins/context.ts`,
@@ -22,6 +22,7 @@ import { broadcast } from '../events.js';
 import { disposePluginContext } from './context.js';
 import { unregisterPluginRoutes } from './http-registry.js';
 import { unregisterPluginFacts } from './facts.js';
+import { unregisterPluginCollections } from './collections.js';
 import { unregisterPluginUi } from './ui-registry.js';
 import { unregisterPluginPolicy } from './policy.js';
 import { listWorkflows } from '../workflows/registry.js';
@@ -49,6 +50,9 @@ export interface UnmountReleased {
   computeKinds: string[];
   providerKinds: string[];
   factTypes: string[];
+  /** `ctx.collections.define()` names dropped (SHR-275). Records survive —
+   *  see the `collections` step below. */
+  collectionNames: string[];
   /** `ctx.effect()` callbacks that ran (successfully or not). */
   effects: number;
 }
@@ -144,6 +148,13 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
 
   await step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
 
+  // Drops this plugin's collection DEFINITIONS only. Deliberately does NOT
+  // delete stored records — collections are durable, that's the whole point
+  // of the API, and a hot reload (SHR-254) re-runs apply() moments later
+  // expecting its records still there. If a future change here starts
+  // deleting rows, that is a bug, not a missing cleanup.
+  await step(pluginId, failures, 'collections', () => unregisterPluginCollections(pluginId));
+
   await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
 
   const policyHooks =
@@ -179,6 +190,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     computeKinds: registered.computeKinds,
     providerKinds: registered.providerKinds,
     factTypes: registered.factTypes,
+    collectionNames: registered.collectionNames,
     effects: effectFailures.length,
   };
 

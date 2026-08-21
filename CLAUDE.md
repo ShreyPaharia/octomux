@@ -286,10 +286,11 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes seven registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes eight registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above),
-`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
+`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`),
+`ctx.collections` (`define`/`put`/`query`/`watch`), `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
 `ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
 (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
@@ -307,8 +308,8 @@ no host `node_modules` tree to import a runtime value from even by accident.
 - **Boot order is the correctness property.** `await loadPlugins(...)` runs in `server/index.ts`
   between `acquireInstanceLock()` and the synchronous `createApp()` — `createApp()` snapshots
   the workflow/capability registries, so a workflow or capability registered after it is a
-  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.facts` and `ctx.ui` are lookup
-  tables rather than express mounts: those three CAN be registered and unregistered at any
+  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.facts`, `ctx.collections` and `ctx.ui` are lookup
+  tables rather than express mounts: those four CAN be registered and unregistered at any
   time, which is what makes hot reload possible at all. Core
   harnesses/integrations register and freeze (`freezeCoreHarnesses()` etc.) before any plugin
   row loads; a plugin can never redefine `claude-code`, `cursor`, `jira`, or `linear`.
@@ -324,8 +325,10 @@ no host `node_modules` tree to import a runtime value from even by accident.
 - **Capability grants.** A manifest row declares the `ctx` surface its plugin uses:
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
-  `http.route`, `facts.define`, `facts.put`, `ui.panel`, `artifacts.write`,
-  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
+  `http.route`, `facts.define`, `facts.put`, `collections.define`, `collections.write`,
+  `ui.panel`, `artifacts.write`,
+  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `collections.query`,
+  `collections.watch`, `artifacts.list`, `ctx.settings`,
   `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
@@ -333,6 +336,23 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `plugin-grants.json` next to the manifest (first sight of a row grants everything it
   declares; narrowing is free; adding a grant sits pending until `octomux plugins approve
 <id>`). `LoadReport.grants`/`pendingGrants` (per plugin id) is what `octomux doctor` prints.
+- **`ctx.collections`** — the durable half of plugin storage (SHR-275).
+  `ctx.facts` is task-scoped and deleted with the task; a collection is a set of
+  schema-validated records keyed by a field the plugin nominates (`define({ name,
+schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
+  `plugin_collections` table, **not** `plugin_facts` with a nullable `task_id` —
+  same reasoning as ruling R1: two lifetimes do not share one table and one seq.
+  Names qualify to `<pluginId>:<name>` like fact types. `put` takes a BARE name
+  (cross-plugin writes are out of scope and rejected); `query` takes bare OR
+  qualified and is unscoped, like `facts.read`. `QuerySpec` is deliberately tiny:
+  exact-match `where`, `orderBy`/`order`, `limit`/`offset`, no operator language.
+  Unmount drops the _definitions_, never the rows — durability is the point, and
+  a hot reload re-runs `apply()` expecting its records still there.
+  This is what unstranded `ctx.ui`: `UiPanelBinding` is now a union of a
+  `{ fact }` and a `{ collection }` binding, so a panel can finally render
+  something that outlives a task. Records reach the SPA via
+  `GET /api/plugin-collections/:qualifiedName`.
+  Not `ctx.kv` (SHR-263) — kv is opaque blobs, this is queryable records.
 - **`ctx.policy.intercept(point, hook)`** — the one registrar that can refuse, not just add.
   Four points: `task.launch`, `harness.resume`, `review.publish`, `integration.send`. A hook
   returns `{ deny: reason }`, `{ patch: {...} }` (merged into `intent.data`, visible to later

@@ -228,3 +228,32 @@ describe('resolveGrantsForRow', () => {
     expect(result).toEqual({ effective: ['http.route'], pending: [] });
   });
 });
+
+describe('collections capabilities (SHR-275)', () => {
+  it.each(['collections.define', 'collections.write'] as const)(
+    '"%s" is a valid capability via isPluginCapability',
+    (cap) => {
+      expect(isPluginCapability(cap)).toBe(true);
+      expect(PLUGIN_CAPABILITIES).toContain(cap);
+    },
+  );
+
+  it('round-trips through the in-memory grant map, same as any other capability', () => {
+    resetPluginGrants();
+    setPluginGrants('demo', ['collections.define', 'collections.write']);
+    expect(getPluginGrants('demo').sort()).toEqual(['collections.define', 'collections.write']);
+  });
+
+  it('round-trips through the file-backed ledger, same as any other capability', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-grants-collections-'));
+    const manifestPath = path.join(tmpDir, 'octomux.yml');
+    try {
+      acknowledgeGrants(manifestPath, 'demo', ['collections.define', 'collections.write']);
+      expect(readGrantLedger(manifestPath)).toEqual({
+        demo: ['collections.define', 'collections.write'],
+      });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
