@@ -63,3 +63,65 @@ describe('BoardCard duration label', () => {
     expect(screen.getByTestId('task-duration')).toHaveTextContent('Failed after 30s');
   });
 });
+
+describe('BoardCard summary/activity fallback', () => {
+  it('renders the authored summary when both summary and activity are present', () => {
+    const task = makeTask({
+      runtime_state: 'running',
+      current_summary: 'Wrote the fix',
+      current_summary_updated_at: '2026-01-01 00:00:00',
+      current_activity: 'Bash: npm test',
+      current_activity_updated_at: '2026-01-01 00:00:05',
+    });
+
+    renderWithRouter(<BoardCard task={task} />);
+
+    expect(screen.getByText('Wrote the fix')).toBeInTheDocument();
+    expect(screen.queryByText('Bash: npm test')).not.toBeInTheDocument();
+  });
+
+  it('renders activity when only activity is present', () => {
+    const task = makeTask({
+      runtime_state: 'running',
+      current_summary: null,
+      current_summary_updated_at: null,
+      current_activity: 'Bash: npm test',
+      current_activity_updated_at: '2026-01-01 00:00:05',
+    });
+
+    renderWithRouter(<BoardCard task={task} />);
+
+    expect(screen.getByText('Bash: npm test')).toBeInTheDocument();
+  });
+
+  it("renders '—' when neither summary nor activity is present", () => {
+    const task = makeTask({
+      runtime_state: 'running',
+      current_summary: null,
+      current_summary_updated_at: null,
+      current_activity: null,
+      current_activity_updated_at: null,
+    });
+
+    renderWithRouter(<BoardCard task={task} />);
+
+    expect(screen.getByText('—')).toBeInTheDocument();
+  });
+
+  it('is not stale when activity is fresh but the authored summary is old', () => {
+    vi.setSystemTime(new Date('2026-01-01T02:00:00Z'));
+    const task = makeTask({
+      runtime_state: 'running',
+      current_summary: 'Old summary',
+      current_summary_updated_at: '2025-12-01 00:00:00',
+      current_activity: 'Bash: npm test',
+      current_activity_updated_at: '2026-01-01 01:59:00',
+    });
+
+    renderWithRouter(<BoardCard task={task} />);
+
+    const summary = screen.getByText('Old summary');
+    expect(summary.className).toContain('text-muted-foreground');
+    expect(summary.className).not.toContain('text-muted-soft');
+  });
+});

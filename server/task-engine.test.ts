@@ -1399,7 +1399,12 @@ describe('closeTask', () => {
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toBeUndefined();
+    // SHR-278: closeTask reports what it actually did instead of returning
+    // void, so a caller can tell a real close from a no-op.
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toEqual({
+      alreadyIdle: false,
+      tmuxKilled: true,
+    });
   });
 
   it('logs tmux "session not found" at debug, not warn', async () => {

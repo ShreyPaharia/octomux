@@ -16,7 +16,9 @@ vi.mock('child_process', () => ({
 
 vi.mock('./task-engine/index.js', () => ({
   closeTask: vi.fn(),
-  deleteTask: vi.fn(async () => undefined),
+  // SHR-278: deleteTask now returns a TeardownReport so the caller can tell a
+  // real teardown from a silent no-op.
+  deleteTask: vi.fn(async () => ({ worktreeRemoved: true, branchDeleted: true, errors: [] })),
   softDeleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
   resumeTask: vi.fn(async () => undefined),
@@ -1695,7 +1697,11 @@ describe('sweepStuckReviewRuns', () => {
 describe('pollSoftDeletes', () => {
   beforeEach(() => {
     vi.mocked(getSettings).mockResolvedValue({ deleteGraceHours: 6 } as any);
-    vi.mocked(deleteTask).mockResolvedValue(undefined);
+    vi.mocked(deleteTask).mockResolvedValue({
+      worktreeRemoved: true,
+      branchDeleted: true,
+      errors: [],
+    });
   });
 
   it('purges tasks past grace window, leaves recent ones alone', async () => {

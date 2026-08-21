@@ -53,15 +53,32 @@ const logger = childLogger('artifact-task');
  */
 export function setTaskSummary(taskId: string, summary: string): void {
   try {
-    const found = getWorktreePathForTask(taskId);
-    if (!found?.worktree) {
-      logger.debug({ task_id: taskId }, 'setTaskSummary skipped: task has no worktree yet');
-      return;
-    }
-    setArtifactSummary(found.worktree, summary);
+    setTaskSummaryStrict(taskId, summary);
   } catch (err) {
-    logger.warn({ task_id: taskId, err }, 'setTaskSummary failed to write artifact');
+    // A task with no worktree yet is the expected case, not a fault — this runs
+    // on hook paths that fire before setup finishes. Keep it at debug so it does
+    // not drown the log; anything else is a real write failure.
+    const level = /has no worktree/.test(String(err)) ? 'debug' : 'warn';
+    logger[level]({ task_id: taskId, err }, 'setTaskSummary did not write artifact');
   }
+}
+
+/**
+ * Set a task's summary by id, resolving its worktree first.
+ *
+ * Unlike `setTaskSummary` above, this THROWS (does not swallow) when the task
+ * is unknown or has no worktree yet. `setTaskSummary` is called from
+ * fire-and-forget hook paths where nothing is listening for the result; this
+ * is called from the `task.summary` capability handler, whose caller (CLI,
+ * HTTP, MCP, or agent) is actively awaiting a response and must not be told
+ * the write succeeded when it silently no-op'd.
+ */
+export function setTaskSummaryStrict(taskId: string, summary: string): { updatedAt: string } {
+  const found = getWorktreePathForTask(taskId);
+  if (!found?.worktree) {
+    throw new Error(`task "${taskId}" has no worktree — cannot write summary`);
+  }
+  return setArtifactSummary(found.worktree, summary);
 }
 
 /**
