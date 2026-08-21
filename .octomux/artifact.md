@@ -1,8 +1,3 @@
-# SHR-279 — collection-bound panels render somewhere
-
-`bun run typecheck` / `format:check` / `lint` clean; full suite green
-(3767 + 1305 + 223, 0 fail).
-
 ## The bug
 
 SHR-275 made `UiPanelBinding` a union so a panel could bind to a durable
@@ -53,3 +48,9 @@ the task path, but it left collection-bound panels drawn by nothing.
   nowhere on web. Worth challenging: it may want a generic `/plugins` page.
 - `RenderedPanel` doesn't carry `collectionName`. Callers get `pluginId`/`slot`;
   add it if a surface ever needs to group by collection.
+
+## Summary
+
+_Updated 2026-08-21 18:24:32_
+
+Bash: git diff .octomux/artifact.md | head -20
