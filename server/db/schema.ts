@@ -219,6 +219,14 @@ CREATE TABLE IF NOT EXISTS pull_requests (
 CREATE INDEX IF NOT EXISTS idx_pull_requests_task_id ON pull_requests(task_id);
 CREATE INDEX IF NOT EXISTS idx_pull_requests_state ON pull_requests(state);
 
+CREATE TABLE IF NOT EXISTS secrets (
+  name        TEXT PRIMARY KEY,
+  value_enc   TEXT NOT NULL,
+  description TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 `;
 
 /** Apply SQLite pragmas required for octomux (WAL + foreign keys). */

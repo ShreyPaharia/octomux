@@ -21,6 +21,7 @@ import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { defineCollection, putRecord, queryCollection, watchCollection } from './collections.js';
+import { listSecrets, resolveSecrets } from '../secrets/store.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
@@ -44,6 +45,7 @@ import type {
   CollectionDefinition,
   QuerySpec,
   ArtifactsApi,
+  SecretsApi,
   AgentRunner,
   AgentRunOptions,
   UiRegistrar,
@@ -394,6 +396,24 @@ export function createPluginContext(
     },
   };
 
+  // Not a registrar, same as artifacts/agents — nobody needs a different
+  // secret store, they need to read one. There is no write path here: a
+  // secret is written by a human (UI/CLI/API), never by a plugin, so nothing
+  // is registered and there is nothing for unmount to deregister — grants
+  // already clear via `clearPluginGrants` on dispose, same as every other
+  // capability.
+  const secrets: SecretsApi = {
+    async list() {
+      assertLive('secrets.list');
+      return listSecrets().map((s) => s.name);
+    },
+    async resolve<T>(value: T): Promise<T> {
+      assertLive('secrets.resolve');
+      assertGranted(id, 'secrets.read');
+      return resolveSecrets(value);
+    },
+  };
+
   // Not a registrar — a method on ctx, same as facts.put/facts.read. Nobody
   // needs a different artifact implementation; they need to write one. There
   // is no `artifacts.register()` and there will not be.
@@ -543,6 +563,7 @@ export function createPluginContext(
     facts,
     collections,
     artifacts,
+    secrets,
     agents,
     ui,
     catalog,

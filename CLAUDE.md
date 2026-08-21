@@ -255,6 +255,63 @@ in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH`/`DEL
 `GET /api/schedules/:id/export`, `POST /api/schedules/import`, `GET /api/schedules/kinds`)
 and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
 
+## Secrets
+
+**A named store, never a config column.** `secrets` table: `value_enc` is AES-256-GCM
+(`server/secrets/crypto.ts`), keyed by `<octomuxRoot()>/secret.key` (32 random bytes,
+mode 0600, created on first use; `OCTOMUX_SECRET_KEY` — base64, exactly 32 bytes —
+overrides it). Not envelope encryption, not a KMS: it stops a copied `tasks.db` or a
+backup from being a credential dump, nothing more.
+
+**No read API returns a value. Ever.** `GET /api/secrets` is metadata only
+(name/description/timestamps); there is no `GET /api/secrets/:name`. Writes are
+`PUT /api/secrets/:name` and `DELETE /api/secrets/:name`, plus
+`octomux secrets list|set|rm` (`set --stdin` keeps the token out of shell history).
+Manual replace is the whole v1 rotation story. `listSecrets()` doesn't even SELECT
+`value_enc`; `getSecretValue()` is the single decrypt path and is not exported over
+HTTP or onto `ctx`.
+
+**Reference by name, resolve at egress.** A config value holds the literal
+`${secret:NAME}` — same shape as the older `${env:VAR}` (`integrations/resolve-env.ts`),
+resolved by `resolveSecrets()` (`server/secrets/store.ts`). An unknown name **throws**
+where `${env:}` degrades to `''`: an empty credential is a 401 three layers away.
+Wired at exactly two core egress points — `hook-dispatcher.ts` (integration config,
+which now fails closed and skips the send rather than posting a literal placeholder as
+a credential) and `compute/config.ts` (the `secrets` sub-object only; `config` stays
+env-only, because `config` is the half that can reach the agent).
+
+**Deliberately NOT resolved** in `prompt-interpolate.ts` or `executeScheduleRun`'s
+`resolveWorkflowConfig`. Schedule config feeds the agent's prompt through
+`{{configKey}}`, so resolving there hands the credential straight to the agent — the
+exact failure this exists to prevent. A workflow that needs the value calls
+`resolveSecrets()` itself at the call that uses it.
+
+**Redaction is one choke point per egress.** `server/secrets/redact.ts` (zero imports —
+`logger.ts` imports it, and going through `store.ts` would cycle via `db.ts`) holds the
+set of values seen this process, populated on every write and every decrypt.
+`logger.ts` wraps its destination streams with `withRedaction()`, so every `logger.*`
+line in the codebase is scrubbed without call sites knowing; `finishRun()` scrubs
+`result_json` the same way. Values under `REDACT_MIN_LENGTH` (8) are not redacted —
+scrubbing every occurrence of a 4-char string would wreck the logs.
+
+**Plugins:** `ctx.secrets.list()` returns NAMES and is ungated (matching `facts.read` /
+`catalog.list`); `ctx.secrets.resolve(value)` returns VALUES and is gated on
+`secrets.read`. There is no plugin write path — a secret is written by a human. Nothing
+is registered, so nothing deregisters on unmount; `clearPluginGrants` already covers it.
+
+**Marking a config field as a reference:** a `config` JSON Schema property carries
+`secretRef: true` and `SchemaConfigForm.tsx` renders a picker of secret names instead of
+a text input, storing the wrapped `${secret:NAME}` form. Distinct from `secret: true`
+(`integrations/mask.ts`), which means "this field holds a literal secret" — do not
+conflate them.
+
+**Known gaps — do not describe as working:** the key sits next to the DB, so an attacker
+with the filesystem has both; there is no per-user scoping, no rotation automation, and
+no audit log of resolutions. A plugin runs in-process and can read the `secrets` table
+and the key file directly — `secrets.read` governs `ctx`, not the process. There is no
+Settings UI for creating a secret; the picker is populated by whatever the CLI or API
+wrote.
+
 ## Skills and agent roles
 
 Both ship in the bundled plugin (`plugin/skills/`, `plugin/agents/`) and reach launched

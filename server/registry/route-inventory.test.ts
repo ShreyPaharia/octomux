@@ -39,6 +39,7 @@ const PENDING_MIGRATION: string[] = [
   'DELETE /api/integrations/:id',
   'DELETE /api/kinds/:kind',
   'DELETE /api/schedules/:id',
+  'DELETE /api/secrets/:name',
   'DELETE /api/tasks/:id/comments/:cid',
   'DELETE /api/tasks/:id/refs/:integration',
   'DELETE /api/tasks/:id/terminals/:terminalId',
@@ -84,6 +85,7 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/schedules/:id/export',
   'GET /api/schedules/:id/runs',
   'GET /api/schedules/kinds',
+  'GET /api/secrets',
   'GET /api/settings',
   'GET /api/setup/status',
   'GET /api/skills',
@@ -149,6 +151,7 @@ const PENDING_MIGRATION: string[] = [
   'POST /api/tasks/viewed-all',
   'PUT /api/kinds/:kind',
   'PUT /api/repos/:repoPath/files/content',
+  'PUT /api/secrets/:name',
 ];
 
 beforeEach(() => {

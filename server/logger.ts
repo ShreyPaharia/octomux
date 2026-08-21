@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { octomuxRoot } from './octomux-root.js';
+import { redactSecretValues } from './secrets/redact.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProduction = process.env.NODE_ENV === 'production';
@@ -59,6 +60,29 @@ function rollingDestination(file: string): { write(line: string): void } {
   };
 }
 
+/**
+ * Wraps a write-only destination so every line passes through
+ * `redactSecretValues()` before it reaches the underlying stream. Both the
+ * rolling file and the dev pretty stream are wrapped with this at the
+ * destination — the single choke point every `logger.*` call funnels
+ * through, so redaction never needs to be scattered into call sites.
+ *
+ * Exported for tests only: in `NODE_ENV=test`, `buildLogger()` returns a bare
+ * `pino({ level })` with no destination stream at all, so this path is inert
+ * under the default test logger — a test asserting redaction has to exercise
+ * this function directly against an explicit stream, not go through
+ * `getLogger()`.
+ */
+export function withRedaction(stream: { write(line: string): unknown }): {
+  write(line: string): unknown;
+} {
+  return {
+    write(line: string): unknown {
+      return stream.write(redactSecretValues(line));
+    },
+  };
+}
+
 function buildLogger(): Logger {
   const level = defaultLevel();
 
@@ -66,7 +90,7 @@ function buildLogger(): Logger {
   if (isTest) return pino({ level });
 
   fs.mkdirSync(resolveLogDir(), { recursive: true });
-  const file = rollingDestination(resolveLogFile());
+  const file = withRedaction(rollingDestination(resolveLogFile()));
 
   if (isProduction) {
     // Prod: JSON to file only
@@ -77,7 +101,12 @@ function buildLogger(): Logger {
   return pino(
     { level },
     pino.multistream([
-      { level, stream: pretty({ colorize: true, translateTime: 'SYS:HH:MM:ss.l' }) },
+      {
+        level,
+        stream: withRedaction(
+          pretty({ colorize: true, translateTime: 'SYS:HH:MM:ss.l' }),
+        ) as unknown as pino.DestinationStream,
+      },
       { level, stream: file as unknown as pino.DestinationStream },
     ]),
   );

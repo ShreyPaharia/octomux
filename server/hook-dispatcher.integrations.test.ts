@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from './bun-test.js';
+import crypto from 'crypto';
 import type { HookEnvelope } from './hook-types.js';
 import type { IntegrationProvider, Integration } from './integrations/types.js';
+import { createTestDb } from './test-helpers.js';
+import { resetSecretKey } from './secrets/crypto.js';
+import { resetRedaction } from './secrets/redact.js';
+import { putSecret } from './secrets/store.js';
 
 // ─── Mock child_process & fs so fireHook shell-script path doesn't interfere ──
 
@@ -70,6 +75,10 @@ describe('fireHook — integration providers', () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    createTestDb();
+    resetSecretKey();
+    resetRedaction();
+    process.env.OCTOMUX_SECRET_KEY = crypto.randomBytes(32).toString('base64');
     ({ fireHook } = await import('./hook-dispatcher.js'));
   });
 
@@ -173,6 +182,64 @@ describe('fireHook — integration providers', () => {
       } else {
         process.env.OCTOMUX_HOOK_TIMEOUT_MS = origTimeout;
       }
+    }
+  });
+
+  it('resolves ${secret:NAME} in integration config before it reaches the handler', async () => {
+    putSecret('JIRA_TOKEN', 'the-real-jira-token-value');
+
+    const provider = makeProvider();
+    const integration = makeIntegration({
+      config: {
+        base_url: 'https://x.atlassian.net',
+        email: 'a@b.com',
+        api_token: '${secret:JIRA_TOKEN}',
+        status_map: {},
+      },
+    });
+
+    mockListIntegrations.mockReturnValue([integration]);
+    mockGetProvider.mockReturnValue(provider);
+
+    await fireHook('workflow_status_changed', ENVELOPE);
+
+    expect(provider.handler).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ api_token: 'the-real-jira-token-value' }),
+    );
+  });
+
+  it('still resolves ${env:VAR} alongside a ${secret:NAME} in the same config (no regression)', async () => {
+    const origEnv = process.env.JIRA_EMAIL_TEST;
+    process.env.JIRA_EMAIL_TEST = 'env-resolved@example.com';
+    try {
+      putSecret('JIRA_TOKEN', 'the-real-jira-token-value');
+
+      const provider = makeProvider();
+      const integration = makeIntegration({
+        config: {
+          base_url: 'https://x.atlassian.net',
+          status_map: {},
+          api_token: '${secret:JIRA_TOKEN}',
+          email: '${env:JIRA_EMAIL_TEST}',
+        },
+      });
+
+      mockListIntegrations.mockReturnValue([integration]);
+      mockGetProvider.mockReturnValue(provider);
+
+      await fireHook('workflow_status_changed', ENVELOPE);
+
+      expect(provider.handler).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          api_token: 'the-real-jira-token-value',
+          email: 'env-resolved@example.com',
+        }),
+      );
+    } finally {
+      if (origEnv === undefined) delete process.env.JIRA_EMAIL_TEST;
+      else process.env.JIRA_EMAIL_TEST = origEnv;
     }
   });
 

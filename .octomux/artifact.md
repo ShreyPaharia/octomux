@@ -1,56 +1,73 @@
-## The bug
-
-SHR-275 made `UiPanelBinding` a union so a panel could bind to a durable
-collection instead of a task-scoped fact. SHR-267 landed in parallel against
-the old shape, walks a TASK, and reads `readFacts(taskId, { type: c.factType })`.
-The merge conflict was resolved with `if (!c.factType) continue;` — correct for
-the task path, but it left collection-bound panels drawn by nothing.
-
 ## What shipped
 
-- **`server/surfaces/render.ts`** — `renderCollectionPanels(kind, collectionName, q?)`,
-  a second entry point beside `panelsForSurface`, never folded into the task loop.
-  Reads records once via `queryRecords` (unscoped, like `facts.read`); `q` windows
-  a large collection. Same fail-soft discipline: a `render` that throws is logged
-  and skipped, `undefined` is dropped.
-- **Records arrive as `Fact[]`.** A local `recordsAsFacts` mirrors the one the
-  client already shipped in `src/components/PluginPanels.tsx`. That is what makes
-  the portability property hold for both binding kinds: a surface's `render`
-  never branches on which kind of binding it is drawing, so a `render` written
-  before collections existed draws a collection panel with zero change.
-- **`packages/plugin-api`** — `SurfacePanel.factType` optional, `collectionName?`
-  added, `facts` documented as "either kind".
-- **Slot: `settings.card`, no new `UiSlot`.** Of the two non-task-scoped slots,
-  `nav.section` would need a route and a page invented; `settings.card` already
-  has a page. `<PluginPanels slot="settings.card" />` mounts on SettingsPage with
-  `taskId` now optional — in task-free mode it renders only collection-bound
-  contributions, exactly mirroring the server's split.
-- **`GET /api/plugin-collections/:name/panels?surface=…`** — without it the new
-  function had no caller outside the process, which is the same bug again.
-  `web` 400s here by design (no `render`; the browser draws it).
-- **`table` renders one row per record.** `tableRows` only ever read the LATEST
-  payload, so a collection rendered as `—`. Now it falls back to one row per
-  entry — fixed identically in `server/surfaces/text.ts` and
-  `src/workflows/renderers/index.tsx`, which are deliberate mirrors. For a
-  fact-bound panel this only fires where the old code rendered nothing.
-- **`server/surfaces/portability.test.ts`** — the pinned property now holds for
-  both binding kinds: pipeline-bot binds a collection, `demo:discord` is
-  registered afterwards by a plugin with zero collection-aware code, and the
-  panel renders on it degraded to Discord's fallback.
+A named secret store. Encrypted at rest, **never returned by any read API**, referenced
+by name from config, resolved only at egress, scrubbed from logs and run results.
 
-## Not done
+| Piece               | Where                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| Table + repository  | `server/db/schema.ts` (`secrets`), `server/repositories/secrets.ts`                                     |
+| AES-256-GCM at rest | `server/secrets/crypto.ts` — key at `<octomuxRoot()>/secret.key` (0600), `OCTOMUX_SECRET_KEY` overrides |
+| Store / resolution  | `server/secrets/store.ts` — `${secret:NAME}` walk, mirrors `${env:VAR}`                                 |
+| Redaction           | `server/secrets/redact.ts` (zero imports, so `logger.ts` can use it)                                    |
+| HTTP                | `server/routes/secrets.ts` — `GET /api/secrets` (metadata), `PUT`/`DELETE /api/secrets/:name`           |
+| CLI                 | `octomux secrets list\|set\|rm` (`set --stdin`)                                                         |
+| Plugin API          | `ctx.secrets.list()` ungated, `ctx.secrets.resolve()` gated on `secrets.read`                           |
+| Form picker         | `secretRef: true` on a config schema property → `SchemaConfigForm.tsx` renders a picker                 |
 
-- No CLAUDE.md / `docs/plugins` update — SHR-274 owns that pass and is running
-  concurrently; a doc edit here would just collide.
-- `octomux task rename` doesn't exist in the installed CLI and `PATCH /api/tasks/:id`
-  refuses a non-draft task, so the task keeps its ticket title.
-- `nav.section` still hosts nothing. A collection panel declared there renders
-  nowhere on web. Worth challenging: it may want a generic `/plugins` page.
-- `RenderedPanel` doesn't carry `collectionName`. Callers get `pluginId`/`slot`;
-  add it if a surface ever needs to group by collection.
+## The invariants, and where they're enforced
+
+1. **No value ever leaves over HTTP.** There is no `GET /api/secrets/:name`.
+   `listSecretRows()` doesn't even `SELECT value_enc`, so the metadata path cannot leak
+   a ciphertext through a careless spread. `getSecretValue()` is the single decrypt
+   path — not on a route, not on `ctx`.
+2. **Reference by name, resolve at the call that uses it.** `${secret:NAME}` is a
+   literal in config. An unknown name **throws** (where `${env:}` degrades to `''`):
+   sending an empty credential is a 401 three layers away.
+3. **Two core egress points only** — `hook-dispatcher.ts` (integration config) and
+   `compute/config.ts` (the `secrets` sub-object; `config` stays env-only because
+   `config` is the half that can reach the agent).
+4. **Deliberately NOT `prompt-interpolate.ts` / `resolveWorkflowConfig`.** Schedule
+   config feeds the agent's prompt via `{{configKey}}`. Resolving there hands the
+   credential to the agent — the exact failure this ticket exists to prevent.
+5. **Redaction at one choke point per egress.** `logger.ts` wraps its destination
+   streams with `withRedaction()`, so every `logger.*` line in the codebase is scrubbed
+   without call sites knowing; `finishRun()` does the same for `result_json`.
+
+## Judgement calls worth challenging
+
+- **Encryption at rest with a local key file.** Out-of-scope said no KMS/envelope. A
+  32-byte key next to the DB is ~40 lines of stdlib `crypto` and stops a copied
+  `tasks.db` or a backup from being a credential dump. An attacker with the filesystem
+  has both. Called that a fair trade for the ticket's title; disagree and it's one file
+  to delete.
+- **`${secret:NAME}` string wrapper over a schema-driven bare name.** Uniform
+  substitution works at every use site with no schema in hand. Cost: the placeholder
+  can reach a prompt as a literal (harmless — it's a name).
+- **`hook-dispatcher` now fails closed.** The agent's first pass fell back to the
+  unresolved config on a resolution error, i.e. posted the literal `${secret:X}` as a
+  credential. Changed to log + skip the send. That is a behaviour change to the
+  pre-existing catch, which previously also swallowed `${env:}` resolution failures.
+- **`REDACT_MIN_LENGTH = 8`.** Below that, scrubbing every occurrence would wreck the
+  logs. A 4-char secret that leaks was already a bad secret.
+
+## Left out on purpose
+
+- **No Settings UI for creating a secret** — the picker is populated by whatever the
+  CLI or API wrote. CLI + picker was the tight scope; a Settings card is the obvious
+  next increment.
+- **No repository test for `server/repositories/secrets.ts`** — every one of its
+  functions is exercised through `server/secrets/store.test.ts`. A second suite would
+  restate the same assertions one layer down.
+- Per-user scoping, rotation automation, an audit log of resolutions, and a broker so a
+  plugin integration handler stops receiving cleartext (the pre-existing WAVE-3 gap).
+
+## Verification
+
+`bun run typecheck`, `bun run format:check`, `bun run lint` all clean.
+`bun run test` — 3809 + 1308 + 231 pass, 0 fail.
 
 ## Summary
 
-_Updated 2026-08-21 18:24:32_
+_Updated 2026-08-21 18:30:46_
 
-Bash: git diff .octomux/artifact.md | head -20
+Bash: cat > .octomux/artifact.md <<'MD' # SHR-277 — secrets: a store that is not a plaintext config…

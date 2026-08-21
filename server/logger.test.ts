@@ -18,7 +18,28 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-logger-'));
 process.env.OCTOMUX_DATA_DIR = root;
 process.env.NODE_ENV = 'production';
 
-const { childLogger } = await import('./logger.js');
+const { childLogger, withRedaction } = await import('./logger.js');
+const { rememberSecretValue, resetRedaction } = await import('./secrets/redact.js');
+
+test('withRedaction scrubs a remembered secret from every write, ordinary lines pass through unchanged', () => {
+  resetRedaction();
+  rememberSecretValue('super-secret-token-value');
+
+  const written: string[] = [];
+  const destination = withRedaction({
+    write(line: string): void {
+      written.push(line);
+    },
+  });
+
+  destination.write('log line with super-secret-token-value inside\n');
+  destination.write('a perfectly ordinary log line\n');
+
+  expect(written[0]).toBe('log line with •••• inside\n');
+  expect(written[1]).toBe('a perfectly ordinary log line\n');
+
+  resetRedaction();
+});
 
 test('writes structured lines to the rotated log file, no transport worker', async () => {
   childLogger('logcheck').info({ task_id: 'task-abc' }, 'hello from the compiled logger');

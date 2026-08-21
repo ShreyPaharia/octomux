@@ -1,5 +1,6 @@
 import { getSettings } from '../settings.js';
 import { resolveEnvVars } from '../integrations/resolve-env.js';
+import { resolveSecrets } from '../secrets/store.js';
 
 /**
  * Sets an own data property keyed by a caller-controlled string. Plain
@@ -44,12 +45,19 @@ export async function computeConfigFor(
     secrets?: Record<string, unknown>;
   };
 
+  // `config` is env-only, deliberately: it is NOT resolved through
+  // `resolveSecrets()`. `config` is the half of this split that the file's
+  // own invariant (above) says can reach the agent's environment — resolving
+  // `${secret:NAME}` here would hand a credential straight to the agent,
+  // which is exactly the egress path this store exists to avoid. `secrets`
+  // is the one the invariant says never reaches the agent, so it's the only
+  // side that gets both placeholder conventions.
   const config = resolveEnvVars(rawConfig) as Record<string, unknown>;
 
   const secrets: Record<string, string> = {};
   if (rawSecrets && typeof rawSecrets === 'object') {
     for (const [secretKey, value] of Object.entries(rawSecrets)) {
-      setOwn(secrets, secretKey, String(resolveEnvVars(value) ?? ''));
+      setOwn(secrets, secretKey, String(resolveSecrets(resolveEnvVars(value)) ?? ''));
     }
   }
 

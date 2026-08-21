@@ -257,3 +257,27 @@ describe('collections capabilities (SHR-275)', () => {
     }
   });
 });
+
+describe('secrets capability (SHR-277)', () => {
+  it('"secrets.read" is a valid capability via isPluginCapability', () => {
+    expect(isPluginCapability('secrets.read')).toBe(true);
+    expect(PLUGIN_CAPABILITIES).toContain('secrets.read');
+  });
+
+  it('round-trips through the in-memory grant map, same as any other capability', () => {
+    resetPluginGrants();
+    setPluginGrants('demo', ['secrets.read']);
+    expect(getPluginGrants('demo')).toEqual(['secrets.read']);
+  });
+
+  it('round-trips through the file-backed ledger, same as any other capability', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-grants-secrets-'));
+    const manifestPath = path.join(tmpDir, 'octomux.yml');
+    try {
+      acknowledgeGrants(manifestPath, 'demo', ['secrets.read']);
+      expect(readGrantLedger(manifestPath)).toEqual({ demo: ['secrets.read'] });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

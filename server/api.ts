@@ -22,6 +22,7 @@ import { router as taskAgentsRouter } from './routes/task-agents.js';
 import { router as worktreesRouter } from './routes/worktrees.js';
 import { router as schedulesRouter } from './routes/schedules.js';
 import { router as kindsRouter } from './routes/kinds.js';
+import { router as secretsRouter } from './routes/secrets.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { router as pluginUiRouter } from './routes/plugin-ui.js';
@@ -77,6 +78,7 @@ export function setupRoutes(app: Express): void {
   app.use(worktreesRouter);
   app.use(schedulesRouter);
   app.use(kindsRouter);
+  app.use(secretsRouter);
   app.use(runsRouter);
   app.use(agentsCrudRouter);
 
