@@ -8,7 +8,15 @@ import Database from '../sqlite.js';
 
 vi.mock('fs', (importOriginal) => {
   const actual = importOriginal<typeof import('fs')>();
-  const mocked = { ...actual, existsSync: vi.fn(() => true) };
+  const mocked = {
+    ...actual,
+    existsSync: vi.fn(() => true),
+    // recoverTasks() now checks worktree existence via ComputeFiles
+    // (fs.promises.access under the hood for local compute), not
+    // fs.existsSync directly — mock both so the fixture's fake path still
+    // reads as "exists".
+    promises: { ...actual.promises, access: vi.fn(async () => undefined) },
+  };
   return { ...mocked, default: mocked };
 });
 

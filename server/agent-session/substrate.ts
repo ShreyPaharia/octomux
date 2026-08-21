@@ -11,6 +11,12 @@ export interface ProcessHandle {
   onData(cb: (chunk: string) => void): void;
   onExit(cb: (info: { code: number; signal?: number }) => void): void;
   dispose(): void; // idempotent terminate + free
+  /**
+   * Live pty resize, for an interactive attach (xterm.js). Optional because
+   * only a pty-backed handle can honour it — a non-interactive substrate
+   * simply has nothing to resize.
+   */
+  resize?(cols: number, rows: number): void;
 }
 
 export interface ProcessSubstrate {

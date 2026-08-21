@@ -43,6 +43,7 @@ import {
   gcScratchDirs,
   recoverTasks,
 } from './task-engine/index.js';
+import { localSession } from './compute/index.js';
 import { ensureTmuxRuntimeDir } from './tmux-bin.js';
 import { ensureGithubLogin } from './github-login.js';
 import { acquireInstanceLock } from './single-instance.js';
@@ -130,7 +131,7 @@ ensureTmuxRuntimeDir();
 
 await reconcileOrphanSettingUp();
 await recoverTasks();
-await cleanupOrphanedViewerSessions();
+await cleanupOrphanedViewerSessions(localSession);
 await gcScratchDirs();
 
 // Resolve owner's GitHub login for reviewer-request polling (non-blocking)

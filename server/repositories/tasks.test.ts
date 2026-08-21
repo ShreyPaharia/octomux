@@ -143,6 +143,29 @@ describe('repositories/tasks', () => {
       const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
       expect(getTask(id)!.schedule_id).toBe('sched-1');
     });
+
+    // SHR-266: compute must stay NULL when unset, not default to a literal
+    // like harness_id does — sessionFor() resolves NULL to DEFAULT_COMPUTE_KIND
+    // itself, so a NULL row keeps following the default if it ever changes.
+    it('a task created without compute round-trips as null', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT compute FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.compute).toBeNull();
+      expect(getTask(id)!.compute).toBeNull();
+    });
+
+    it('a task created with compute: "ssh" round-trips as "ssh"', () => {
+      const id = insertTask({ title: 'T', description: 'D', compute: 'ssh' });
+      const row = db.prepare('SELECT compute FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.compute).toBe('ssh');
+      expect(getTask(id)!.compute).toBe('ssh');
+    });
   });
 
   // ─── listTasks ───────────────────────────────────────────────────────────────

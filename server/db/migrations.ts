@@ -369,6 +369,7 @@ export function runMigrations(instance: Database): void {
     taskColsForAgent,
   );
   addColumn(instance, 'tasks', 'model', 'model TEXT', taskColsForAgent);
+  addColumn(instance, 'tasks', 'compute', 'compute TEXT', taskColsForAgent);
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),

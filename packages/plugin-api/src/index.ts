@@ -16,6 +16,7 @@ export interface PluginContext {
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly compute: ComputeRegistrar;
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
   readonly ui: UiRegistrar;
@@ -61,6 +62,15 @@ export interface IntegrationRegistrar {
 }
 export interface HarnessRegistrar {
   register(h: PluginHarness): void;
+}
+/**
+ * Registers a compute provider — where a task's git worktree lives and where
+ * its processes run. NOT a pluggable isolation strategy: a git worktree per
+ * run is octomux's guarantee, not a preference. This decides *where that
+ * worktree lives*, nothing more.
+ */
+export interface ComputeRegistrar {
+  register(p: PluginCompute): void;
 }
 
 /**
@@ -194,6 +204,7 @@ export interface UiPanelBinding {
 export type PluginWorkflow = Record<string, unknown>;
 export type PluginIntegrationProvider = Record<string, unknown>;
 export type PluginHarness = Record<string, unknown>;
+export type PluginCompute = Record<string, unknown>;
 
 export interface PluginRow {
   id: string; // BARE local id, matches KIND_NAME_RE. Host qualifies.

@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import fs from 'fs';
 import path from 'path';
 import type { Harness } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
@@ -8,11 +7,13 @@ import {
   buildClaudeLaunchCommand,
   buildClaudeResumeCommand,
   formatHarnessFlags,
+  formatJsonConfig,
   validateSettingsObject,
-  writeJsonConfig,
 } from './shared.js';
 import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
+import type { ComputeFiles } from '../compute/types.js';
+import { localFiles } from '../compute/index.js';
 
 function buildHookEvents(baseUrl: string, token: string) {
   const url = (event: string) => `${baseUrl}/api/hooks/${event}?token=${encodeURIComponent(token)}`;
@@ -37,18 +38,25 @@ export const claudeCodeHarness: Harness = {
   buildResumeCommand: buildClaudeResumeCommand,
   buildContinueCommand: buildClaudeContinueCommand,
 
-  async installHooks(worktreePath: string, baseUrl: string, hookToken: string) {
+  async installHooks(
+    worktreePath: string,
+    baseUrl: string,
+    hookToken: string,
+    files: ComputeFiles = localFiles,
+  ) {
     const { ALLOWED_TOOLS, DENIED_TOOLS } = await import('../hook-settings.js');
     const claudeDir = path.join(worktreePath, '.claude');
     const settingsPath = path.join(claudeDir, 'settings.local.json');
-    fs.mkdirSync(claudeDir, { recursive: true });
+    await files.mkdirp(claudeDir);
 
     let existing: Record<string, unknown> = {};
     try {
-      const raw = fs.readFileSync(settingsPath, 'utf-8');
-      existing = JSON.parse(raw);
-      if (typeof existing !== 'object' || existing === null || Array.isArray(existing)) {
-        existing = {};
+      const raw = await files.read(settingsPath);
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          existing = parsed;
+        }
       }
     } catch {
       existing = {};
@@ -85,15 +93,17 @@ export const claudeCodeHarness: Harness = {
     const editorMode = typeof existing.editorMode === 'string' ? existing.editorMode : 'emacs';
 
     const merged = { ...existing, editorMode, permissions: mergedPermissions, hooks: mergedHooks };
-    writeJsonConfig(settingsPath, merged);
+    await files.write(settingsPath, formatJsonConfig(merged));
   },
 
-  async uninstallHooks(dirPath: string) {
+  async uninstallHooks(dirPath: string, files: ComputeFiles = localFiles) {
     const settingsPath = path.join(dirPath, '.claude', 'settings.local.json');
 
     let existing: Record<string, unknown>;
     try {
-      existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const raw = await files.read(settingsPath);
+      if (raw === null) return; // no config — nothing to clean
+      existing = JSON.parse(raw);
     } catch {
       return; // no config (or unparseable) — nothing to clean
     }
@@ -133,7 +143,7 @@ export const claudeCodeHarness: Harness = {
     const next: Record<string, unknown> = { ...existing };
     if (Object.keys(hooks).length > 0) next.hooks = hooks;
     else delete next.hooks;
-    writeJsonConfig(settingsPath, next);
+    await files.write(settingsPath, formatJsonConfig(next));
   },
 
   resolveFlags(settings: OctomuxSettings): string {

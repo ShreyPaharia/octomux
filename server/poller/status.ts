@@ -1,11 +1,12 @@
 import { broadcast } from '../events.js';
-import { execTmux } from '../tmux-bin.js';
+import { sessionFor } from '../compute/index.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import {
   listRunningTasks,
   setRuntimeStateIdle,
   setRuntimeStateSetupInterrupted,
   getParentTaskTmuxSession,
+  getTask,
 } from '../repositories/tasks.js';
 import {
   stopRunningAgentsForTask,
@@ -24,23 +25,37 @@ async function notifyParentTask(parentTaskId: string, finishedTask: Task): Promi
   const agent = findFirstActiveAgent(parentTaskId);
   if (!agent) return;
 
+  const parentTask = getTask(parentTaskId);
+  if (!parentTask) return;
+
   const msg = `[octomux] Worker task ${finishedTask.id} ("${finishedTask.title}") finished. Check results: octomux get-task --json ${finishedTask.id}`;
-  await sendMessageToAgent(parent.tmux_session, agent.window_index, msg);
+  await sendMessageToAgent(
+    await sessionFor(parentTask),
+    parent.tmux_session,
+    agent.window_index,
+    msg,
+  );
 }
 
 export async function checkTaskStatus(task: Task): Promise<'alive' | 'dead'> {
   if (!task.tmux_session) return 'dead';
   try {
-    await execTmux(['has-session', '-t', task.tmux_session]);
+    const compute = await sessionFor(task);
+    await compute.tmux(['has-session', '-t', task.tmux_session]);
     return 'alive';
   } catch {
     return 'dead';
   }
 }
 
-async function checkWindowStatus(session: string, windowIndex: number): Promise<'alive' | 'dead'> {
+async function checkWindowStatus(
+  task: Task,
+  session: string,
+  windowIndex: number,
+): Promise<'alive' | 'dead'> {
   try {
-    await execTmux(['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
+    const compute = await sessionFor(task);
+    await compute.tmux(['display-message', '-t', `${session}:${windowIndex}`, '-p', '#I']);
     return 'alive';
   } catch {
     return 'dead';
@@ -52,8 +67,16 @@ async function pollAgentWindows(): Promise<void> {
 
   const results = await Promise.allSettled(
     watchedAgents.map(async (agent) => {
-      const status = await checkWindowStatus(agent.tmux_session, agent.window_index);
-      return { agent, status };
+      // `listWatchedAgents` joins in the tmux session but not a full Task —
+      // rehydrate so the probe hits the agent's own compute, not the local
+      // machine. One indexed getTask() per watched agent on a poller tick;
+      // watched-agent counts are tiny (sub-agent notify targets), so the
+      // N+1 here is cheap and correct beats silently local-only.
+      const task = getTask(agent.task_id);
+      const status = task
+        ? await checkWindowStatus(task, agent.tmux_session, agent.window_index)
+        : 'dead';
+      return { agent, task, status };
     }),
   );
 
@@ -67,8 +90,18 @@ async function pollAgentWindows(): Promise<void> {
     const target = getNotifyAgentTarget(agent.notify_agent_id);
     if (!target) continue;
 
+    // The notify target lives in its own task, not necessarily the finishing
+    // worker's — hydrate and use ITS compute for the tmux send.
+    const targetTask = getTask(target.task_id);
+    if (!targetTask) continue;
+
     const msg = `[octomux] Sub-agent ${agent.id} ("${agent.label}") finished. Check results: octomux get-task --json ${agent.task_id}`;
-    await sendMessageToAgent(target.tmux_session, target.window_index, msg);
+    await sendMessageToAgent(
+      await sessionFor(targetTask),
+      target.tmux_session,
+      target.window_index,
+      msg,
+    );
   }
 }
 

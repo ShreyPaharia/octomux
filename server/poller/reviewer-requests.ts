@@ -21,6 +21,7 @@ import { deleteWorktree } from '../repositories/worktrees.js';
 import { countAgentsForTask, findFirstActiveAgent } from '../repositories/workers.js';
 import { resumeTask, softDeleteTask } from '../task-engine/index.js';
 import { checkoutRef, fetchOriginQuiet } from '../task-engine/git.js';
+import { sessionFor } from '../compute/index.js';
 import { repoNameWithOwner } from './github-repo.js';
 import type { Task } from '../types.js';
 
@@ -164,32 +165,39 @@ function buildReReviewNudge(pr: OpenReviewPR, taskId: string): string {
 }
 
 async function nudgeAgentForReReview(
-  taskId: string,
+  task: Task,
   tmuxSession: string,
   pr: OpenReviewPR,
 ): Promise<boolean> {
-  const agent = findFirstActiveAgent(taskId);
+  const agent = findFirstActiveAgent(task.id);
   if (!agent) return false;
   try {
-    await sendMessageToAgent(tmuxSession, agent.window_index, buildReReviewNudge(pr, taskId));
+    const compute = await sessionFor(task);
+    await sendMessageToAgent(
+      compute,
+      tmuxSession,
+      agent.window_index,
+      buildReReviewNudge(pr, task.id),
+    );
     return true;
   } catch (err) {
     logger.warn(
-      { task_id: taskId, err: (err as Error).message },
+      { task_id: task.id, err: (err as Error).message },
       'failed to nudge agent for re-review (session may be gone)',
     );
     return false;
   }
 }
 
-async function checkoutNewHead(taskId: string, worktreePath: string | null, headRefOid: string) {
+async function checkoutNewHead(task: Task, worktreePath: string | null, headRefOid: string) {
   if (!worktreePath) return;
   try {
-    await fetchOriginQuiet(worktreePath);
-    await checkoutRef(worktreePath, headRefOid);
+    const compute = await sessionFor(task);
+    await fetchOriginQuiet(compute, worktreePath);
+    await checkoutRef(compute, worktreePath, headRefOid);
   } catch (err) {
     logger.warn(
-      { task_id: taskId, err: (err as Error).message },
+      { task_id: task.id, err: (err as Error).message },
       'failed to fetch/checkout new head; proceeding — the agent can fetch for itself',
     );
   }
@@ -211,7 +219,7 @@ async function upsertReviewTask(
         // (harness session id) and hand it the re-review prompt.
         const task = getTask(existing.id) as Task | undefined;
         if (!task) return { action: 'skipped' };
-        await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
+        await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
         await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id) });
         setPrHeadSha(existing.id, pr.headRefOid);
         return { action: 'resumed', taskId: existing.id };
@@ -230,8 +238,10 @@ async function upsertReviewTask(
     if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
 
-      await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
-      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
+      const task = getTask(existing.id) as Task | undefined;
+      if (!task) return { action: 'skipped' };
+      await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
+      const delivered = await nudgeAgentForReReview(task, existing.tmux_session, pr);
       if (!delivered) return { action: 'skipped' };
       setPrHeadSha(existing.id, pr.headRefOid);
       return { action: 'nudged', taskId: existing.id };

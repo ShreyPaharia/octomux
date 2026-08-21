@@ -4,7 +4,6 @@ import { resolveHarnessFlags } from '../../harness-flags.js';
 import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
 import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
-import { execTmux } from '../../tmux-bin.js';
 import {
   getWorker,
   setAgentWindowRunning,
@@ -12,6 +11,7 @@ import {
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
 import { isTmuxTargetMissing } from '../sessions.js';
+import { sessionFor } from '../../compute/index.js';
 import type { Worker, Task } from '../../types.js';
 
 const logger = childLogger('task-engine/lifecycle');
@@ -42,6 +42,8 @@ export async function respawnAgentFresh(
     'respawn_fresh: start',
   );
 
+  const compute = await sessionFor(task);
+
   const harness = getHarness(agent.harness_id);
   const flags = await resolveHarnessFlags(harness, {
     skillContentOverrides: await skillContentOverridesForScheduleId(
@@ -50,7 +52,7 @@ export async function respawnAgentFresh(
   });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.installHooks(task.worktree!, hookBaseUrl(), agent.hook_token);
+  await harness.installHooks(task.worktree!, hookBaseUrl(), agent.hook_token, compute.files);
 
   const baseCmd = harness.buildLaunchCommand({
     sessionId: sessionIdForLaunch,
@@ -59,7 +61,7 @@ export async function respawnAgentFresh(
     model: (task as { model?: string | null }).model ?? null,
     workspacePath: task.worktree!,
   });
-  const startupCmd = buildAgentStartupCommand({
+  const startupCmd = await buildAgentStartupCommand(compute, {
     baseCmd,
     prompt: opts?.prompt,
     worktreePath: opts?.prompt ? task.worktree! : undefined,
@@ -69,7 +71,7 @@ export async function respawnAgentFresh(
 
   const fresh = opts?.fresh ?? false;
   const oldWindowIndex = agent.window_index;
-  const newWindowIndex = await launchAgentWindow({
+  const newWindowIndex = await launchAgentWindow(compute, {
     session: task.tmux_session!,
     cwd: task.worktree!,
     startupCmd,
@@ -85,14 +87,16 @@ export async function respawnAgentFresh(
   void harness.postLaunch?.(target);
 
   if (!fresh) {
-    await execTmux(['kill-window', '-t', `${task.tmux_session}:${oldWindowIndex}`]).catch((err) => {
-      if (!isTmuxTargetMissing(err)) {
-        logger.warn(
-          { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh', err },
-          'respawn_fresh: kill old window failed',
-        );
-      }
-    });
+    await compute
+      .tmux(['kill-window', '-t', `${task.tmux_session}:${oldWindowIndex}`])
+      .catch((err) => {
+        if (!isTmuxTargetMissing(err)) {
+          logger.warn(
+            { task_id: task.id, agent_id: agent.id, operation: 'respawn_fresh', err },
+            'respawn_fresh: kill old window failed',
+          );
+        }
+      });
   }
 
   const updated = getWorker(agent.id) as Worker;

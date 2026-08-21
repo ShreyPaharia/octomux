@@ -32,6 +32,15 @@ function makeHandle(pty: Pty): ProcessHandle {
       });
     },
 
+    resize(cols: number, rows: number): void {
+      if (disposed || exited) return;
+      try {
+        pty.resize(cols, rows);
+      } catch {
+        // PTY already exited
+      }
+    },
+
     dispose(): void {
       if (disposed) return;
       disposed = true;

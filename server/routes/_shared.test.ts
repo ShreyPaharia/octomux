@@ -11,9 +11,11 @@ vi.mock('../settings.js', () => ({ getSettings: () => mockGetSettings() }));
 // but must not blow up module resolution.
 vi.mock('../title-gen.js', () => ({ generateTitleAndDescription: vi.fn() }));
 
-const { resolveAiTaskNamingEnabled, lookupExistingReviewId } = await import('./_shared.js');
+const { resolveAiTaskNamingEnabled, lookupExistingReviewId, validateCreateTaskBody } =
+  await import('./_shared.js');
 const { createTestDb, insertTask } = await import('../test-helpers.js');
 const { getDb } = await import('../db.js');
+const { CORE_COMPUTE_KINDS } = await import('../compute/index.js');
 
 describe('resolveAiTaskNamingEnabled', () => {
   beforeEach(() => {
@@ -109,5 +111,25 @@ describe('lookupExistingReviewId', () => {
     const result = lookupExistingReviewId(sourceTaskInRepoA);
 
     expect(result).toBe('review-in-repo-a');
+  });
+});
+
+describe('validateCreateTaskBody — compute', () => {
+  const baseBody = { title: 't', description: 'd', repo_path: '/repo/a' };
+
+  it('accepts an omitted compute field', () => {
+    const result = validateCreateTaskBody(baseBody, 'new');
+    expect(result).toBeNull();
+  });
+
+  it('accepts a known compute kind', () => {
+    const result = validateCreateTaskBody({ ...baseBody, compute: CORE_COMPUTE_KINDS[0] }, 'new');
+    expect(result).toBeNull();
+  });
+
+  it('rejects an unknown compute kind with a 400', () => {
+    const result = validateCreateTaskBody({ ...baseBody, compute: 'bogus-compute' }, 'new');
+    expect(result?.status).toBe(400);
+    expect(result?.message).toMatch(/bogus-compute/);
   });
 });

@@ -8,6 +8,8 @@ import { childLogger } from '../../logger.js';
 import { broadcast } from '../../events.js';
 import { resolveHarnessFlags } from '../../harness-flags.js';
 import { skillContentOverridesForScheduleId } from '../../schedule-prompt.js';
+import { sessionFor } from '../../compute/index.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task, RunMode } from '../../types.js';
 import {
   setRuntimeState,
@@ -131,6 +133,7 @@ interface FirstAgentLaunchParams {
 }
 
 async function prepareFirstAgentLaunch(
+  c: ComputeSession,
   id: string,
   task: Task,
   setup: import('../setup/types.js').SetupResult,
@@ -148,10 +151,10 @@ async function prepareFirstAgentLaunch(
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
   await timed(id, 'install_hooks', () =>
-    harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken),
+    harness.installHooks(setup.worktreePath, hookBaseUrl(), hookToken, c.files),
   );
 
-  flags = applyOrchestratorMcpConfig(flags, setup.worktreePath, id, hookToken);
+  flags = await applyOrchestratorMcpConfig(c, flags, setup.worktreePath, id, hookToken);
 
   const baseCmd = harness.buildLaunchCommand({
     sessionId: sessionIdForLaunch,
@@ -160,7 +163,7 @@ async function prepareFirstAgentLaunch(
     model: (task as any).model ?? null,
     workspacePath: setup.worktreePath,
   });
-  const startupCmd = buildAgentStartupCommand({
+  const startupCmd = await buildAgentStartupCommand(c, {
     baseCmd,
     prompt: task.initial_prompt,
     worktreePath: setup.worktreePath,
@@ -171,12 +174,13 @@ async function prepareFirstAgentLaunch(
 }
 
 async function launchFirstWindow(
+  c: ComputeSession,
   id: string,
   session: string,
   setup: import('../setup/types.js').SetupResult,
   startupCmd: string,
 ): Promise<number> {
-  const windowIndex = await launchAgentWindow({
+  const windowIndex = await launchAgentWindow(c, {
     session,
     cwd: setup.worktreePath,
     startupCmd,
@@ -237,8 +241,10 @@ export async function startTask(task: Task): Promise<void> {
 
   let stage = 'validate';
   try {
+    const compute = await sessionFor(task);
+
     stage = 'mode_setup';
-    const setup = await timed(id, 'mode_setup', () => runSetup(task));
+    const setup = await timed(id, 'mode_setup', () => runSetup(compute, task));
 
     persistWorktreeRow(id, task, setup, runMode);
     await timed(id, 'infer_refs', () => inferAndPersistRefs(id, setup, task));
@@ -246,12 +252,12 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
     const { agentId, hookToken, sessionIdForDb, startupCmd } = await timed(id, 'launch_agent', () =>
-      prepareFirstAgentLaunch(id, task, setup, harness),
+      prepareFirstAgentLaunch(compute, id, task, setup, harness),
     );
 
     stage = 'tmux_session';
     const windowIndex = await timed(id, 'tmux_session', () =>
-      launchFirstWindow(id, session, setup, startupCmd),
+      launchFirstWindow(compute, id, session, setup, startupCmd),
     );
 
     persistFirstAgentRow(

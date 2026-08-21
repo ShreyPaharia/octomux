@@ -1,5 +1,5 @@
-import fs from 'fs';
 import path from 'path';
+import type { ComputeSession } from '../../compute/types.js';
 import type { LoopRunStatus } from '../../types.js';
 
 export const STATUS_REL_PATH = path.join('.octomux', 'loop-status.json');
@@ -18,8 +18,12 @@ export interface LoopStatusRecord {
 /** Explicit, inspectable, recoverable per-run status — written into the candidate's own worktree
  * at every iteration boundary so a best-of-N group's state can be reconstructed by reading each
  * worktree directly, even if a DB write was lost (spec/workflow-framework.md §12). */
-export function writeLoopStatusFile(worktree: string, record: LoopStatusRecord): void {
+export async function writeLoopStatusFile(
+  c: ComputeSession,
+  worktree: string,
+  record: LoopStatusRecord,
+): Promise<void> {
   const dir = path.join(worktree, '.octomux');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(worktree, STATUS_REL_PATH), JSON.stringify(record, null, 2) + '\n');
+  await c.files.mkdirp(dir);
+  await c.files.write(path.join(worktree, STATUS_REL_PATH), JSON.stringify(record, null, 2) + '\n');
 }

@@ -3,6 +3,7 @@ import { getTaskRuntimeState, setAgentHookToken } from './repositories/index.js'
 import { getHarness } from './harnesses/index.js';
 import { hookBaseUrl } from './hook-base-url.js';
 import type { Worker } from './types.js';
+import type { ComputeFiles } from './compute/types.js';
 import { childLogger } from './logger.js';
 
 const logger = childLogger('hook-token');
@@ -19,7 +20,11 @@ const logger = childLogger('hook-token');
  * been closed have runtime_state = 'idle'. We gate on that to avoid
  * spurious writes to worktrees that are no longer actively running.
  */
-export async function ensureHookToken(agent: Worker, worktreePath: string | null): Promise<string> {
+export async function ensureHookToken(
+  agent: Worker,
+  worktreePath: string | null,
+  files?: ComputeFiles,
+): Promise<string> {
   if (agent.hook_token && agent.hook_token !== '') return agent.hook_token;
 
   if (agent.task_id) {
@@ -32,7 +37,7 @@ export async function ensureHookToken(agent: Worker, worktreePath: string | null
 
   if (worktreePath) {
     try {
-      await getHarness(agent.harness_id).installHooks(worktreePath, hookBaseUrl(), token);
+      await getHarness(agent.harness_id).installHooks(worktreePath, hookBaseUrl(), token, files);
     } catch (err) {
       logger.warn(
         { agent_id: agent.id, err: (err as Error).message },

@@ -1,17 +1,15 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import { validateRepo, revParseHead, checkDirty } from '../git.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task } from '../../types.js';
 import type { SetupResult } from './types.js';
 
-const execFile = promisify(execFileCb);
+export async function setupNone(c: ComputeSession, task: Task): Promise<SetupResult> {
+  await validateRepo(c, c.repoPath);
 
-export async function setupNone(task: Task): Promise<SetupResult> {
-  await validateRepo(task.repo_path);
-
-  const { stdout: headOut } = await execFile('git', [
+  const { stdout: headOut } = await c.exec([
+    'git',
     '-C',
-    task.repo_path,
+    c.repoPath,
     'rev-parse',
     '--abbrev-ref',
     'HEAD',
@@ -35,12 +33,12 @@ export async function setupNone(task: Task): Promise<SetupResult> {
       throw new Error(`none mode preflight failed: ${reason}`);
     }
     if (targetBranch !== currentBranch) {
-      await execFile('git', ['-C', task.repo_path, 'checkout', targetBranch]);
+      await c.exec(['git', '-C', c.repoPath, 'checkout', targetBranch]);
     }
   } else {
     // Legacy path: no target branch provided, but the tree must still be clean
     // for none mode (preserves existing behavior).
-    const dirty = await checkDirty(task.repo_path);
+    const dirty = await checkDirty(c, c.repoPath);
     if (dirty.length > 0) {
       const preview = dirty.slice(0, 5).join(', ');
       const extra = dirty.length > 5 ? ` (+${dirty.length - 5} more)` : '';
@@ -49,13 +47,13 @@ export async function setupNone(task: Task): Promise<SetupResult> {
   }
 
   const finalBranch = targetBranch ?? currentBranch;
-  const baseSha = await revParseHead(task.repo_path);
+  const baseSha = await revParseHead(c, c.repoPath);
 
   return {
-    worktreePath: task.repo_path,
+    worktreePath: c.repoPath,
     branch: finalBranch,
     baseBranch: targetBranch,
     baseSha,
-    installHooksAt: task.repo_path,
+    installHooksAt: c.repoPath,
   };
 }

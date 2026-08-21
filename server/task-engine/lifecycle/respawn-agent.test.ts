@@ -1,21 +1,15 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import Database from '../../sqlite.js';
-import { describe, it, expect, beforeEach, vi } from '../../bun-test.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 import type { Task, Worker } from '../../types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
-
-vi.mock('fs', (importOriginal) => {
-  const actual = importOriginal<typeof import('fs')>();
-  const mocked = {
-    ...actual,
-    existsSync: vi.fn(() => true),
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    readFileSync: vi.fn(),
-    unlinkSync: vi.fn(),
-  };
-  return { ...mocked, default: mocked };
-});
+//
+// `fs` is intentionally NOT mocked: buildAgentStartupCommand now writes the
+// prompt file through `localSession.files` (real `fs.promises`), same
+// real-fs pattern as `launch.test.ts`. Only `child_process` (tmux) is mocked.
 
 let nextWindowIndex = 5;
 
@@ -83,12 +77,18 @@ const { broadcast } = await import('../../events.js');
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 let db: Database;
+let worktreeDir: string;
 
 beforeEach(() => {
   db = createTestDb();
   vi.clearAllMocks();
   nextWindowIndex = 5;
-  insertTask(db, { ...DEFAULTS.runningTask });
+  worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-respawn-test-'));
+  insertTask(db, { ...DEFAULTS.runningTask, worktree: worktreeDir });
+});
+
+afterEach(() => {
+  fs.rmSync(worktreeDir, { recursive: true, force: true });
 });
 
 function makeAgentRow(overrides: Partial<Worker> = {}): Worker {
@@ -100,12 +100,16 @@ function makeAgentRow(overrides: Partial<Worker> = {}): Worker {
   });
 }
 
+function makeTask(overrides: Partial<Task> = {}): Task {
+  return { ...DEFAULTS.runningTask, worktree: worktreeDir, ...overrides } as Task;
+}
+
 // ─── respawnAgentFresh ────────────────────────────────────────────────────────
 
 describe('respawnAgentFresh', () => {
   it('issues tmux new-window before any kill-window', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent);
 
@@ -118,7 +122,7 @@ describe('respawnAgentFresh', () => {
 
   it('launches with a fresh session id and does not resume', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent);
 
@@ -131,7 +135,7 @@ describe('respawnAgentFresh', () => {
 
   it('returns an agent whose harness_session_id differs from the input', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     const result = await respawnAgentFresh(task, agent);
 
@@ -141,7 +145,7 @@ describe('respawnAgentFresh', () => {
 
   it('keeps the same task_id on the returned agent', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     const result = await respawnAgentFresh(task, agent);
 
@@ -150,7 +154,7 @@ describe('respawnAgentFresh', () => {
 
   it('broadcasts a task:updated event', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent);
 
@@ -162,7 +166,7 @@ describe('respawnAgentFresh', () => {
 
   it('creates the new window in the task tmux_session, not a new session', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent);
 
@@ -174,21 +178,17 @@ describe('respawnAgentFresh', () => {
 
   it('passes opts.prompt through to the startup command as a prompt file', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent, { prompt: 'do the loop thing' });
 
-    const fs = await import('fs');
-    expect(fs.writeFileSync).toHaveBeenCalledWith(
-      expect.stringContaining(`.claude-prompt-${agent.id}`),
-      expect.stringContaining('do the loop thing'),
-      expect.anything(),
-    );
+    const promptFile = path.join(worktreeDir, `.claude-prompt-${agent.id}`);
+    expect(fs.readFileSync(promptFile, 'utf-8')).toContain('do the loop thing');
   });
 
   it('exposes a hook token in the startup env that checkAgentTokenExists accepts (loop emit auth)', async () => {
     const agent = makeAgentRow({ hook_token: 'real-hook-token-abc' });
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent, {
       env: {
@@ -211,7 +211,7 @@ describe('respawnAgentFresh', () => {
 
   it('opts.fresh=true creates a brand-new tmux session instead of a window, and never kill-windows', async () => {
     const agent = makeAgentRow();
-    const task = { ...DEFAULTS.runningTask } as Task;
+    const task = makeTask();
 
     await respawnAgentFresh(task, agent, { fresh: true });
 

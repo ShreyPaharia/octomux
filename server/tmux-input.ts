@@ -1,4 +1,4 @@
-import { execTmux } from './tmux-bin.js';
+import type { ComputeSession } from './compute/types.js';
 
 const PASTE_TO_ENTER_DELAY_MS = 50;
 
@@ -34,12 +34,13 @@ export function normalizePromptForPaste(prompt: string): string {
  * is fine, faster, and `server/chats.ts` relies on it.
  */
 export async function sendMessageToAgent(
+  c: ComputeSession,
   session: string,
   windowIndex: number,
   message: string,
 ): Promise<void> {
   const target = `${session}:${windowIndex}`;
-  await execTmux(['send-keys', '-t', target, '-l', message]);
+  await c.tmux(['send-keys', '-t', target, '-l', message]);
   await new Promise<void>((resolve) => setTimeout(resolve, PASTE_TO_ENTER_DELAY_MS));
-  await execTmux(['send-keys', '-t', target, 'Enter']);
+  await c.tmux(['send-keys', '-t', target, 'Enter']);
 }

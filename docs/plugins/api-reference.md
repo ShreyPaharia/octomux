@@ -41,6 +41,7 @@ export interface PluginContext {
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly compute: ComputeRegistrar;
 }
 ```
 
@@ -191,6 +192,113 @@ The eight bold-"yes" functions are exactly `HARNESS_REQUIRED_FN_FIELDS` in
 `server/plugins/context.ts` — every member core calls unconditionally on a
 hot path (task launch, hook install/uninstall, settings validate/merge, flag
 resolution).
+
+## `ctx.compute`
+
+```ts
+interface ComputeRegistrar {
+  register(p: PluginCompute): void;
+}
+```
+
+Registers a **compute provider** — the seam that decides _where a task's git
+worktree lives and where its processes run_ (`server/compute/types.ts`). It
+is **not** a pluggable isolation strategy: every provider still gets a real
+git worktree per task, that guarantee is not negotiable. A provider only
+changes which machine that worktree — and every process touching it — lives
+on. See [`examples/ssh-compute`](./examples/ssh-compute) for a complete,
+tested reference provider that runs a task over SSH.
+
+`PluginCompute` is `Record<string, unknown>` at the `@octomux/plugin-api`
+type level, same reason as the other three registrars. The concrete runtime
+shape:
+
+| Field    | Type                                                                 | Required by `ctx.compute.register`?                                                               |
+| -------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `kind`   | `string`                                                             | **yes** — non-empty, becomes the local half of `<row-id>:<kind>`                                  |
+| `create` | `(task: Task, ctx: ComputeCreateContext) => Promise<ComputeSession>` | **yes**, must be a function — `sessionFor()` dereferences it unconditionally on every task launch |
+| `resume` | `(task: Task, ctx: ComputeCreateContext) => Promise<ComputeSession>` | no, must be a function if present — the host falls back to `create()` when absent                 |
+
+Same qualification and warn-and-keep-first duplicate policy as
+`ctx.integrations`/`ctx.harnesses` (`server/compute/registry.ts`): you
+declare `kind: 'ssh'`, the kind every other part of octomux sees is
+`<row-id>:ssh`. Core providers (currently just `local`) register directly,
+outside `ctx.compute`, and are frozen against redefinition before any plugin
+loads — a plugin can never redefine `local`.
+
+### `ComputeSession` (`server/compute/types.ts`)
+
+What `create`/`resume` must return — the whole surface the rest of octomux
+uses instead of talking to tmux/git/fs/pty directly for a task on this
+provider:
+
+```ts
+interface ComputeSession {
+  readonly kind: string; // the provider kind that made this session
+  readonly taskId: string;
+  readonly repoPath: string; // the git repo root ON THE COMPUTE
+  exec(argv: string[], opts?: ExecOpts): Promise<ExecResult>; // throws non-zero unless opts.allowFailure
+  tmux(args: string[], opts?: { cwd?: string }): Promise<{ stdout: string; stderr: string }>;
+  spawn(opts: SpawnOptions): Promise<ProcessHandle>; // interactive pty, for xterm.js streaming
+  readonly files: ComputeFiles; // exists/mkdirp/read/write/chmod/copy/rm, all async
+  dispose(opts?: { destroy?: boolean }): Promise<void>;
+}
+```
+
+`tmux`'s signature must match `execTmux` (`server/tmux-bin.ts`) exactly,
+including that it **throws** on a non-zero exit with the error carrying
+`.stderr` — call sites read that field directly. `dispose({ destroy: true })`
+additionally tears down whatever this session's provider owns (a no-op for
+`local`); without `destroy` it only releases the host's own handles.
+
+### `ComputeCreateContext`
+
+What `create`/`resume` receive as their second argument — deliberately the
+**only** runtime capability a compute provider gets, since `@octomux/plugin-api`
+is types-only and a plugin has no other path to a real process:
+
+```ts
+interface ComputeCreateContext {
+  config: Record<string, unknown>; // settings.compute[<qualified-kind>], env-resolved
+  secrets: Record<string, string>; // resolved server-side, handed ONLY to create()/resume()
+  logger: PluginLogger;
+  host: ComputeHost; // the server's own machine — build your transport on this
+  execBackedFiles(exec: ComputeSession['exec']): ComputeFiles; // a ComputeFiles for free, over any exec
+}
+
+interface ComputeHost {
+  exec(argv: string[], opts?: ExecOpts): Promise<ExecResult>; // runs argv on the SERVER's own machine
+  spawnPty(opts: SpawnOptions): Promise<ProcessHandle>; // a local pty on the SERVER's own machine
+}
+```
+
+`host` is the reason a remote provider doesn't need a new dependency: every
+remote provider (ssh, docker, a cloud CLI) is fundamentally "run a local
+command that proxies to the remote box", and `host.exec`/`host.spawnPty` is
+that local command surface, already wired into the same observable/disposable
+process machinery as everything else octomux spawns. Prefer it over
+`node:child_process` directly — nothing stops a plugin from importing that
+(plugins run in-process with full Node/Bun privileges), but doing so opens a
+second, untracked spawn path.
+
+`execBackedFiles(exec)` builds a complete `ComputeFiles` — `exists`, `mkdirp`,
+`read`, `write`, `chmod`, `copy`, `rm` — purely by shelling `test`/`mkdir`/
+`cat`/`chmod`/`cp`/`rm` through whatever `exec` you pass it. A remote
+provider gets working file operations in one line:
+`files: ctx.execBackedFiles(exec)`.
+
+**The credential invariant.** `secrets` is resolved server-side from
+`settings.compute[<qualified-kind>].secrets`, with `${env:VAR}` placeholders
+expanded (`computeConfigFor()`, `server/settings.ts` — same convention
+integration providers use). It exists to build **transport** arguments only —
+an SSH `-i <keyfile>`, a cloud API token used to authenticate the CLI call
+that provisions a box. **It must never reach the agent**: not folded into a
+remote command string, not set as an env var on a spawned process, not
+written into the worktree. This is the actual security property compute
+providers exist to uphold — `docs/plugins/examples/ssh-compute`'s test file
+asserts it directly (register the provider with a recognizable secret, drive
+`create()` and a few `exec()`s, assert the secret string appears only in the
+transport argv).
 
 ## Manifest (`octomux.yml`)
 

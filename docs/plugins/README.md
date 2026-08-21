@@ -66,6 +66,11 @@ See [`examples/hello-plugin`](./examples/hello-plugin) for a full package
 (`package.json`, a kind preset, a `README.md` showing both manifest-row
 styles) verified against the real loader.
 
+For a bigger, non-toy example — a real compute provider that runs a task's
+git worktree and processes on another machine over SSH — see
+[`examples/ssh-compute`](./examples/ssh-compute), covered in
+[§`ctx.compute.register(p)`](#ctxcomputeregisterp) below.
+
 ## The three registrars
 
 `ctx.workflows`, `ctx.integrations`, `ctx.harnesses` are the only way a
@@ -150,6 +155,41 @@ on your object.
 
 Same qualification and same warn-and-keep-first duplicate policy as
 integrations (`server/harnesses/registry.ts`).
+
+### `ctx.compute.register(p)`
+
+A fourth registrar, alongside the three above: it decides **where a task's
+git worktree lives and where its processes run**. Not a pluggable isolation
+strategy — every provider still gets a real git worktree per task, that's
+octomux's guarantee, not a preference — a provider only changes which
+machine that worktree (and everything touching it: `git`, tmux, the agent
+process) lives on.
+
+```js
+ctx.compute.register({
+  kind: 'ssh', // local id — becomes "<row-id>:ssh"
+  async create(task, computeCtx) {
+    /* ... make sure the repo exists on the remote, return a ComputeSession */
+  },
+  async resume(task, computeCtx) {
+    /* optional — re-attach after a server restart; falls back to create() */
+  },
+});
+```
+
+`create`/`resume` get a `ComputeCreateContext` with `config` (your
+`settings.compute[<qualified-kind>]` blob), `secrets` (env-resolved,
+handed to `create`/`resume` only — **must never reach the agent**), and
+`host` (the server's own machine — `host.exec`/`host.spawnPty` is how a
+remote provider spawns anything, without a new dependency). Full field-by-
+field reference, including the credential invariant and why `host` exists
+instead of a plugin importing `node:child_process` directly:
+[`api-reference.md` §`ctx.compute`](./api-reference.md#ctxcompute).
+
+See [`examples/ssh-compute`](./examples/ssh-compute) for a complete provider
+built on exactly this — it runs a task over SSH, with a README covering
+config/secrets, remote-box prerequisites, the trust model, and precisely
+what its test suite verifies versus what still needs a real remote host.
 
 ## Kind presets (`kinds/*.json`)
 

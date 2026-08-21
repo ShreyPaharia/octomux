@@ -41,6 +41,7 @@ vi.mock('child_process', () => ({
 }));
 
 const { findExecCall } = await import('../test-helpers.js');
+const { localSession } = await import('../compute/index.js');
 
 const {
   addWorktreeWithBranch,
@@ -89,12 +90,12 @@ describe('slugifyTitle', () => {
 describe('gitBranchExists', () => {
   it('returns false when branch does not exist (execFile errors)', async () => {
     // Default mock: branch probe errors → branch doesn't exist
-    const exists = await gitBranchExists('/repo', 'my-branch');
+    const exists = await gitBranchExists(localSession, '/repo', 'my-branch');
     expect(exists).toBe(false);
   });
 
   it('calls git rev-parse --verify --quiet refs/heads/<branch>', async () => {
-    await gitBranchExists('/repo', 'my-branch');
+    await gitBranchExists(localSession, '/repo', 'my-branch');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['rev-parse', '--verify', '--quiet', 'refs/heads/my-branch'],
@@ -113,12 +114,12 @@ describe('gitBranchExists', () => {
       cb(null, { stdout: 'abc1234\n', stderr: '' });
       return undefined as any;
     }) as any);
-    const exists = await gitBranchExists('/repo', 'existing-branch');
+    const exists = await gitBranchExists(localSession, '/repo', 'existing-branch');
     expect(exists).toBe(true);
   });
 
   it('passes repo path with -C flag', async () => {
-    await gitBranchExists('/my/repo', 'feat/test');
+    await gitBranchExists(localSession, '/my/repo', 'feat/test');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['-C', '/my/repo'],
@@ -131,12 +132,12 @@ describe('gitBranchExists', () => {
 
 describe('revParseHead', () => {
   it('returns trimmed commit SHA', async () => {
-    const sha = await revParseHead('/repo');
+    const sha = await revParseHead(localSession, '/repo');
     expect(sha).toBe('abcdef0000000000000000000000000000000000');
   });
 
   it('calls git rev-parse <ref>^{commit} with -C <cwd>', async () => {
-    await revParseHead('/my/worktree');
+    await revParseHead(localSession, '/my/worktree');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['-C', '/my/worktree', 'rev-parse', 'HEAD^{commit}'],
@@ -145,7 +146,7 @@ describe('revParseHead', () => {
   });
 
   it('accepts a custom ref', async () => {
-    await revParseHead('/repo', 'main');
+    await revParseHead(localSession, '/repo', 'main');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['rev-parse', 'main^{commit}'],
@@ -168,12 +169,12 @@ describe('checkDirty', () => {
       cb(null, { stdout: '', stderr: '' });
       return undefined as any;
     }) as any);
-    const result = await checkDirty('/repo');
+    const result = await checkDirty(localSession, '/repo');
     expect(result).toEqual([]);
   });
 
   it('calls git status --porcelain=v1', async () => {
-    await checkDirty('/repo');
+    await checkDirty(localSession, '/repo');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['status', '--porcelain=v1'],
@@ -192,7 +193,7 @@ describe('checkDirty', () => {
       cb(null, { stdout: ' M src/foo.ts\n?? bar.ts\n', stderr: '' });
       return undefined as any;
     }) as any);
-    const result = await checkDirty('/repo');
+    const result = await checkDirty(localSession, '/repo');
     expect(result).toEqual(['M src/foo.ts', '?? bar.ts']);
   });
 
@@ -207,7 +208,7 @@ describe('checkDirty', () => {
       cb(null, { stdout: ' M a.ts\n\n M b.ts\n', stderr: '' });
       return undefined as any;
     }) as any);
-    const result = await checkDirty('/repo');
+    const result = await checkDirty(localSession, '/repo');
     expect(result).toHaveLength(2);
   });
 });
@@ -217,7 +218,13 @@ describe('checkDirty', () => {
 describe('addWorktreeWithBranch', () => {
   it('creates new branch with -b when branch does not exist (no base)', async () => {
     // Default mock: branch does not exist
-    await addWorktreeWithBranch('/repo', '/repo/.worktrees/my-branch', 'agents/my-branch', null);
+    await addWorktreeWithBranch(
+      localSession,
+      '/repo',
+      '/repo/.worktrees/my-branch',
+      'agents/my-branch',
+      null,
+    );
 
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
@@ -231,7 +238,13 @@ describe('addWorktreeWithBranch', () => {
   });
 
   it('creates new branch with -b and base when base is provided', async () => {
-    await addWorktreeWithBranch('/repo', '/repo/.worktrees/my-branch', 'agents/my-branch', 'main');
+    await addWorktreeWithBranch(
+      localSession,
+      '/repo',
+      '/repo/.worktrees/my-branch',
+      'agents/my-branch',
+      'main',
+    );
 
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
@@ -242,6 +255,7 @@ describe('addWorktreeWithBranch', () => {
 
   it('returns the branch name used', async () => {
     const result = await addWorktreeWithBranch(
+      localSession,
       '/repo',
       '/repo/.worktrees/my-branch',
       'agents/my-branch',
@@ -273,6 +287,7 @@ describe('addWorktreeWithBranch', () => {
     }) as any);
 
     const result = await addWorktreeWithBranch(
+      localSession,
       '/repo',
       '/repo/.worktrees/existing',
       'docs/existing',
@@ -317,6 +332,7 @@ describe('addWorktreeWithBranch', () => {
     }) as any);
 
     const result = await addWorktreeWithBranch(
+      localSession,
       '/repo',
       '/repo/.worktrees/fallback',
       'agents/my-branch',
@@ -361,6 +377,7 @@ describe('addWorktreeWithBranch', () => {
     }) as any);
 
     await addWorktreeWithBranch(
+      localSession,
       '/repo',
       '/repo/.worktrees/fallback',
       'agents/my-branch',
@@ -390,12 +407,12 @@ describe('diffNameOnly', () => {
       return undefined as any;
     }) as any);
 
-    const files = await diffNameOnly('/repo/wt', 'sha1', 'sha2');
+    const files = await diffNameOnly(localSession, '/repo/wt', 'sha1', 'sha2');
     expect(files).toEqual(['src/foo.ts', 'src/bar.ts']);
   });
 
   it('calls git diff --name-only <from>..<to>', async () => {
-    await diffNameOnly('/repo/wt', 'sha1', 'sha2');
+    await diffNameOnly(localSession, '/repo/wt', 'sha1', 'sha2');
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['-C', '/repo/wt', 'diff', '--name-only', 'sha1..sha2'],
@@ -414,7 +431,7 @@ describe('diffNameOnly', () => {
       cb(null, { stdout: 'a.ts\n\nb.ts\n', stderr: '' });
       return undefined as any;
     }) as any);
-    const files = await diffNameOnly('/repo/wt', 'sha1', 'sha2');
+    const files = await diffNameOnly(localSession, '/repo/wt', 'sha1', 'sha2');
     expect(files).toHaveLength(2);
   });
 });
@@ -455,7 +472,7 @@ describe('commitAll', () => {
         cb(null, { stdout: '', stderr: '' });
       }) as any);
 
-    const committed = await commitAll('/repo/wt', 'loop(run1): iteration 1');
+    const committed = await commitAll(localSession, '/repo/wt', 'loop(run1): iteration 1');
     expect(committed).toBe(true);
 
     expect(
@@ -470,7 +487,7 @@ describe('commitAll', () => {
   });
 
   it('skips commit when the worktree is clean', async () => {
-    const committed = await commitAll('/repo/wt', 'loop(run1): iteration 1');
+    const committed = await commitAll(localSession, '/repo/wt', 'loop(run1): iteration 1');
     expect(committed).toBe(false);
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'git', argsInclude: ['add', '-A'] }),

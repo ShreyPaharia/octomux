@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import fs from 'fs';
 import { childLogger } from '../logger.js';
 import { hashObject, revParseHead } from '../task-engine/git.js';
+import { sessionFor } from '../compute/index.js';
 import { safeResolvePath } from '@octomux/diff-engine';
 import { taskWorkingDir } from '../task-paths.js';
 import { setReviewed, clearReviewed } from '../repositories/file-review-state.js';
@@ -48,8 +49,10 @@ router.post('/api/tasks/:id/files/*path/reviewed', async (req: Request, res: Res
   const relPath = resolveRelPath(req);
   assertValidPath(cwd, relPath);
 
-  const headSha = await revParseHead(cwd);
-  const blobSha = await hashObject(cwd, relPath);
+  // This task's own worktree — run git on the task's compute, not the server's.
+  const compute = await sessionFor(task);
+  const headSha = await revParseHead(compute, cwd);
+  const blobSha = await hashObject(compute, cwd, relPath);
   setReviewed(task.id, relPath, headSha, blobSha);
   res.status(204).send();
 });

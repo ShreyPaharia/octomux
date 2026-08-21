@@ -1,6 +1,7 @@
 import { broadcast } from '../events.js';
-import { execTmux } from '../tmux-bin.js';
+import { sessionFor } from '../compute/index.js';
 import { listRunningTerminals, updateUserTerminalStatus } from '../repositories/workers.js';
+import { getTask } from '../repositories/tasks.js';
 import type { UserTerminal } from '../types.js';
 
 const SHELL_COMMANDS = new Set(['zsh', 'bash', 'sh', 'fish', 'dash']);
@@ -15,7 +16,16 @@ export async function pollTerminalActivity(): Promise<void> {
   const changedTasks = new Set<string>();
   for (const row of rows) {
     try {
-      const { stdout } = await execTmux([
+      // `listRunningTerminals` joins in the tmux session but not a full
+      // Task — rehydrate so the probe hits the terminal's own compute, not
+      // the local machine. One indexed getTask() per running user terminal
+      // per poll tick; that count is small (interactive terminals a user
+      // has open), so the N+1 here is cheap and correct beats silently
+      // local-only.
+      const task = getTask(row.task_id);
+      if (!task) continue;
+      const compute = await sessionFor(task);
+      const { stdout } = await compute.tmux([
         'list-panes',
         '-t',
         `${row.tmux_session}:${row.window_index}`,

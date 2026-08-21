@@ -1,27 +1,27 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
 import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
+import type { ComputeSession } from '../compute/types.js';
 
-const execFile = promisify(execFileCb);
 const logger = childLogger('task-engine/git');
 
-export async function validateRepo(repoPath: string): Promise<void> {
-  if (!fs.existsSync(repoPath)) {
+export async function validateRepo(c: ComputeSession, repoPath: string): Promise<void> {
+  if (!(await c.files.exists(repoPath))) {
     throw new Error(`Repository path does not exist: ${repoPath}`);
   }
-  await execFile('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree']);
+  await c.exec(['git', '-C', repoPath, 'rev-parse', '--is-inside-work-tree']);
 }
 
-export async function revParseHead(cwd: string, ref = 'HEAD'): Promise<string> {
-  const { stdout } = await execFile('git', ['-C', cwd, 'rev-parse', `${ref}^{commit}`]);
+export async function revParseHead(c: ComputeSession, cwd: string, ref = 'HEAD'): Promise<string> {
+  const { stdout } = await c.exec(['git', '-C', cwd, 'rev-parse', `${ref}^{commit}`]);
   return stdout.trim();
 }
 
-export async function getRemoteOriginUrl(repoPath: string): Promise<string | null> {
+export async function getRemoteOriginUrl(
+  c: ComputeSession,
+  repoPath: string,
+): Promise<string | null> {
   try {
-    const { stdout } = await execFile('git', ['-C', repoPath, 'remote', 'get-url', 'origin']);
+    const { stdout } = await c.exec(['git', '-C', repoPath, 'remote', 'get-url', 'origin']);
     const url = stdout.trim();
     return url || null;
   } catch {
@@ -29,9 +29,13 @@ export async function getRemoteOriginUrl(repoPath: string): Promise<string | nul
   }
 }
 
-export async function hashObject(cwd: string, relPath: string): Promise<string | null> {
+export async function hashObject(
+  c: ComputeSession,
+  cwd: string,
+  relPath: string,
+): Promise<string | null> {
   try {
-    const { stdout } = await execFile('git', ['-C', cwd, 'hash-object', '--', relPath]);
+    const { stdout } = await c.exec(['git', '-C', cwd, 'hash-object', '--', relPath]);
     const sha = stdout.trim();
     return sha || null;
   } catch {
@@ -39,30 +43,31 @@ export async function hashObject(cwd: string, relPath: string): Promise<string |
   }
 }
 
-export async function fetchOriginQuiet(cwd: string): Promise<void> {
-  await execFile('git', ['-C', cwd, 'fetch', 'origin', '--quiet']);
+export async function fetchOriginQuiet(c: ComputeSession, cwd: string): Promise<void> {
+  await c.exec(['git', '-C', cwd, 'fetch', 'origin', '--quiet']);
 }
 
-export async function checkoutRef(cwd: string, ref: string): Promise<void> {
-  await execFile('git', ['-C', cwd, 'checkout', ref]);
+export async function checkoutRef(c: ComputeSession, cwd: string, ref: string): Promise<void> {
+  await c.exec(['git', '-C', cwd, 'checkout', ref]);
 }
 
 /** True when `ancestor` is an ancestor of `descendant` in `cwd`. */
 export async function isAncestor(
+  c: ComputeSession,
   cwd: string,
   ancestor: string,
   descendant: string,
 ): Promise<boolean> {
   try {
-    await execFile('git', ['-C', cwd, 'merge-base', '--is-ancestor', ancestor, descendant]);
+    await c.exec(['git', '-C', cwd, 'merge-base', '--is-ancestor', ancestor, descendant]);
     return true;
   } catch {
     return false;
   }
 }
 
-export async function checkDirty(repoPath: string): Promise<string[]> {
-  const { stdout } = await execFile('git', ['-C', repoPath, 'status', '--porcelain=v1']);
+export async function checkDirty(c: ComputeSession, repoPath: string): Promise<string[]> {
+  const { stdout } = await c.exec(['git', '-C', repoPath, 'status', '--porcelain=v1']);
   return stdout
     .split('\n')
     .map((l) => l.trim())
@@ -70,8 +75,14 @@ export async function checkDirty(repoPath: string): Promise<string[]> {
 }
 
 /** Files changed between two commits (`git diff --name-only <from>..<to>`). */
-export async function diffNameOnly(cwd: string, shaFrom: string, shaTo: string): Promise<string[]> {
-  const { stdout } = await execFile('git', [
+export async function diffNameOnly(
+  c: ComputeSession,
+  cwd: string,
+  shaFrom: string,
+  shaTo: string,
+): Promise<string[]> {
+  const { stdout } = await c.exec([
+    'git',
     '-C',
     cwd,
     'diff',
@@ -85,18 +96,23 @@ export async function diffNameOnly(cwd: string, shaFrom: string, shaTo: string):
 }
 
 /** Stage and commit all changes if the worktree is dirty. Returns false (no-op) when clean. */
-export async function commitAll(cwd: string, message: string): Promise<boolean> {
-  const dirty = await checkDirty(cwd);
+export async function commitAll(c: ComputeSession, cwd: string, message: string): Promise<boolean> {
+  const dirty = await checkDirty(c, cwd);
   if (dirty.length === 0) return false;
-  await execFile('git', ['-C', cwd, 'add', '-A']);
-  await execFile('git', ['-C', cwd, 'commit', '-m', message]);
+  await c.exec(['git', '-C', cwd, 'add', '-A']);
+  await c.exec(['git', '-C', cwd, 'commit', '-m', message]);
   return true;
 }
 
 /** True if `refs/heads/<branch>` exists in the repo. */
-export async function gitBranchExists(repoPath: string, branch: string): Promise<boolean> {
+export async function gitBranchExists(
+  c: ComputeSession,
+  repoPath: string,
+  branch: string,
+): Promise<boolean> {
   try {
-    await execFile('git', [
+    await c.exec([
+      'git',
       '-C',
       repoPath,
       'rev-parse',
@@ -122,20 +138,21 @@ export async function gitBranchExists(repoPath: string, branch: string): Promise
  * Returns the branch name actually used.
  */
 export async function addWorktreeWithBranch(
+  c: ComputeSession,
   repoPath: string,
   worktreePath: string,
   branch: string,
   baseBranch: string | null | undefined,
 ): Promise<string> {
-  if (!(await gitBranchExists(repoPath, branch))) {
+  if (!(await gitBranchExists(c, repoPath, branch))) {
     const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branch];
     if (baseBranch) args.push(baseBranch);
-    await execFile('git', args);
+    await c.exec(['git', ...args]);
     return branch;
   }
 
   try {
-    await execFile('git', ['-C', repoPath, 'worktree', 'add', worktreePath, branch]);
+    await c.exec(['git', '-C', repoPath, 'worktree', 'add', worktreePath, branch]);
     logger.info({ operation: 'addWorktree', branch }, 'addWorktree: reused existing branch');
     return branch;
   } catch (err) {
@@ -146,7 +163,7 @@ export async function addWorktreeWithBranch(
     );
     const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', unique];
     if (baseBranch) args.push(baseBranch);
-    await execFile('git', args);
+    await c.exec(['git', ...args]);
     return unique;
   }
 }

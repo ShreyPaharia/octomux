@@ -11,6 +11,7 @@ import {
   setLearningsSeeded,
 } from '../../repositories/loop-runs.js';
 import { revParseHead, commitAll } from '../git.js';
+import { sessionFor } from '../../compute/index.js';
 import { runVerify } from './verify.js';
 import { writeLoopStatusFile } from './status-file.js';
 import { respawnAgentFresh } from '../lifecycle/respawn-agent.js';
@@ -209,7 +210,8 @@ export async function startLoop(
 
   setRuntimeState(taskId, 'looping');
 
-  writeLoopStatusFile(task.worktree!, {
+  const startC = await sessionFor(task);
+  await writeLoopStatusFile(startC, task.worktree!, {
     loopRunId: run.id,
     groupId: run.group_id,
     taskId,
@@ -252,10 +254,11 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
 
   const spec = JSON.parse(run.spec_json) as LoopSpec;
   const worktree = task.worktree;
+  const c = await sessionFor(task);
 
-  const shaFrom = await revParseHead(worktree);
-  await commitAll(worktree, `loop(${run.id}): iteration ${run.iteration + 1}`);
-  const shaTo = await revParseHead(worktree);
+  const shaFrom = await revParseHead(c, worktree);
+  await commitAll(c, worktree, `loop(${run.id}): iteration ${run.iteration + 1}`);
+  const shaTo = await revParseHead(c, worktree);
 
   const verify = await runVerify(worktree, spec.verify);
 
@@ -293,7 +296,7 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
 
     terminateLoopRun(run.id, finalStatusFor(reason), reason);
     setRuntimeState(taskId, 'idle');
-    writeLoopStatusFile(worktree, {
+    await writeLoopStatusFile(c, worktree, {
       loopRunId: run.id,
       groupId: run.group_id,
       taskId,
@@ -329,7 +332,7 @@ export async function handleLoopIterationBoundary(taskId: string, agentId: strin
   }
 
   resumeLoopRun(run.id);
-  writeLoopStatusFile(worktree, {
+  await writeLoopStatusFile(c, worktree, {
     loopRunId: run.id,
     groupId: run.group_id,
     taskId,

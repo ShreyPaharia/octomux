@@ -238,6 +238,32 @@ describe('cursorHarness.installHooks', () => {
     }
   });
 
+  it('locks .octomux-hooks to 0700 and bridge.js to 0500 on fresh install and reinstall', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-modes-'));
+    try {
+      const hooksDir = path.join(tmpDir, '.octomux-hooks');
+      const bridgeDest = path.join(hooksDir, 'bridge.js');
+      const configPath = path.join(hooksDir, 'config.json');
+
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      expect(fs.statSync(hooksDir).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(bridgeDest).mode & 0o777).toBe(0o500);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+
+      // Simulate permission drift on an existing tree (e.g. hand-edited,
+      // or a provider that doesn't preserve modes) — reinstall must fix it.
+      fs.chmodSync(hooksDir, 0o755);
+      fs.chmodSync(configPath, 0o644);
+
+      await cursorHarness.installHooks(tmpDir, 'http://127.0.0.1:7777', 'tok-abc');
+      expect(fs.statSync(hooksDir).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(bridgeDest).mode & 0o777).toBe(0o500);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('installHooks leaves config and hooks.json unchanged when inputs match', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-cursor-hooks-idem-'));
     try {

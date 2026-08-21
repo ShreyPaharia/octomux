@@ -1,0 +1,10 @@
+{
+  "name": "octomux-plugin-ssh-compute",
+  "version": "1.0.0",
+  "description": "Reference octomux compute provider — runs a task's git worktree and processes on another machine over SSH.",
+  "type": "module",
+  "main": "index.mjs",
+  "files": [
+    "index.mjs"
+  ]
+}
