@@ -315,12 +315,7 @@ async function upsertReviewTask(
       const task = getTask(existing.id) as Task | undefined;
       if (!task) return { action: 'skipped' };
       if (headChanged) await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
-      const delivered = await nudgeAgentForReReview(
-        task,
-        existing.tmux_session,
-        pr,
-        headChanged,
-      );
+      const delivered = await nudgeAgentForReReview(task, existing.tmux_session, pr, headChanged);
       if (!delivered) return { action: 'skipped' };
       markTriggered();
       return { action: 'nudged', taskId: existing.id };

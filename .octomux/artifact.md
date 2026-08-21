@@ -26,7 +26,7 @@
   `@octomux/plugin-api` boundary.
 - **`server/compute/plugin-seam.test.ts`** is the done-when test: a provider
   registered through `ctx.compute` is selected by `tasks.compute`, and real
-  task-engine helpers (tmux window launch, worktree file writes) land on *that*
+  task-engine helpers (tmux window launch, worktree file writes) land on _that_
   provider rather than the local machine.
 
 ## Not done — please challenge
@@ -48,7 +48,7 @@
    loses execFile's `promisify.custom`, so going all-raw-3-arg would have silently
    broken every still-promisify-based consumer sharing the same mocks. Documented in
    the function — worth a second opinion.
-5. **`chats.ts` and `orchestrator/**` are deliberately outside the seam** (no `Task`
+5. **`chats.ts` and `orchestrator/**`are deliberately outside the seam** (no`Task`
    — task-free by design) and always run local. Conductor conversations on remote
    compute is separate work.
 

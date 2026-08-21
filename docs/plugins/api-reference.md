@@ -232,6 +232,7 @@ never includes yourself, even in a single-plugin manifest; it includes
 siblings that finished mounting earlier (manifest order) and always includes
 `core`. Call it later — a route handler, a `run`, anything that executes
 after `apply()` finishes — to see yourself.
+
 ## `ctx.compute`
 
 ```ts
