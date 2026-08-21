@@ -1,78 +1,83 @@
+# SHR-267 — `ctx.surfaces`
+
+Commit `aaef24b`. **Not merged** — human reviews and merges.
+
 ## What shipped
 
-- **`server/compute/`** — `ComputeProvider {kind, create, resume?}` +
-  `ComputeSession {kind, taskId, repoPath, exec, tmux, spawn, files, dispose}`.
-  Registry mirrors `harnesses/registry.ts` (`DEFAULT_COMPUTE_KIND='local'`, core
-  frozen before plugins load). `sessionFor(task)` is the single entry point,
-  cached per `task.id` — which is why nothing up the call stack needed a new
-  parameter threaded through it.
-- **Full task-engine migration**: `git.ts`, `setup/*`, `launch.ts`, `lifecycle/*`,
-  `cleanup`, `sessions`, `reconcile`, `terminals`, `loop/*`, `poller/status`,
-  `poller/terminal-activity`, `terminal.ts` (pty attach), `tmux-input`.
-  Verified: **zero `execTmux()` and zero `fs.*Sync` remain** in `server/task-engine`,
-  `server/poller`, or `server/terminal.ts`.
-- **Per-task selection**: `tasks.compute TEXT` (NULL → local, no backfill),
-  `POST /api/tasks {compute}`, `octomux create-task --compute <kind>` (generated
-  from the zod schema — no CLI file touched), `settings.defaultComputeKind` /
-  `settings.compute[kind]`.
-- **Credential brokering**: `computeConfigFor(kind)` splits `settings.compute[kind]`
-  into `config` + `secrets`, expands `${env:VAR}` in both (reusing the existing
-  integrations convention), and hands the result to `provider.create()` only.
-- **`ctx.compute.register()`** on `PluginContext`, qualified `<pluginId>:<kind>`,
-  unregistered on unmount alongside harnesses/providers.
-- **Out-of-core proof**: `docs/plugins/examples/ssh-compute/` — a real SSH provider,
-  ~320 lines, zero deps, zero host imports. Providers get `ctx.host.{exec,spawnPty}`
-  and `ctx.execBackedFiles(exec)`, the only runtime crossing the types-only
-  `@octomux/plugin-api` boundary.
-- **`server/compute/plugin-seam.test.ts`** is the done-when test: a provider
-  registered through `ctx.compute` is selected by `tasks.compute`, and real
-  task-engine helpers (tmux window launch, worktree file writes) land on _that_
-  provider rather than the local machine.
+- **`ctx.surfaces.register({ kind, renderers, fallback, render, prompt })`** — the
+  eighth registrar. Gated on a new `surfaces.register` capability (added to both
+  `PLUGIN_CAPABILITIES` in `server/plugins/grants.ts` and the `PluginCapability`
+  union in `@octomux/plugin-api`, so the manifest validator accepts it). Kind is
+  qualified to `<pluginId>:<kind>`; deregistered on unmount alongside compute and
+  harnesses.
+- **`server/surfaces/`** — `registry.ts` (mirrors `compute/registry.ts` exactly:
+  warn-and-keep-first, `freezeCoreSurfaces()`, core kinds un-unregisterable),
+  `core.ts` (`web`/`cli`/`slack`/`telegram` as `CORE_SURFACE_KINDS`), `text.ts`
+  (one plain-text renderer shared by the three server-rendered core surfaces),
+  `render.ts` (resolution + fact loading + fail-soft render), `index.ts` (barrel
+  that registers and freezes at module scope).
+- **Renderer contract.** A surface declares the renderer names it draws. The host
+  resolves `panel.as` → `panel.renderer` _before_ calling `render`: the declared
+  renderer when supported, otherwise the surface's `fallback` (default `json`).
+  Degraded, never dropped, never blank — the same rule the web client always
+  applied to an unknown renderer name. `render` throwing skips that one panel.
+- **Read-only surfaces.** `prompt` is optional; without it the surface is read-only
+  and `promptOn()` throws naming it. A question nobody can answer is a wedged run,
+  not a degraded one, so it is never swallowed.
+- **REST.** `GET /api/surfaces`; `GET /api/tasks/:id/panels?surface=<kind>`; an
+  optional `?surface=` on the existing contributions endpoint (byte-identical
+  without it — that is the no-behaviour-change proof for web).
+- **`server/surfaces/portability.test.ts`** is the ticket's actual claim: a binding
+  `coverage-bot` registered when no Discord surface existed renders on a
+  later-registered `demo:discord` (`stat` → `markdown` fallback) _and_ on `cli`
+  (`stat` native). Unregistering the surface leaves the binding in the contribution
+  table, still rendering on `cli` — removed surface degrades, panels are not
+  orphaned.
+- **Docs** — `CLAUDE.md`, `docs/plugins/{README,api-reference}.md`, and
+  `docs/plugins/examples/discord-surface/` (registers a surface that is _not_
+  read-only; its Discord network calls are an explicitly-marked stub, not fake
+  working code).
+
+Verified: `bun run typecheck` clean, `bun run format:check` clean, `bun run test`
+green — 3631 server / 1294 client / 223 unit.
 
 ## Not done — please challenge
 
-1. **"Runs a task to completion on a different machine" is NOT verified.** There is
-   no sshd on this box (`ssh localhost` refused), so the SSH provider is proven only
-   against a fake transport: argv/quoting, clone-vs-fetch, dispose, and the
-   credential invariant (the `identityFile` secret appears only in the `ssh -i` pair,
-   never in a remote command or env). Real OpenSSH, real remote `tmux attach` into
-   xterm.js, and real auth are untested. This is the one DoD bullet I cannot claim.
-2. **`resume()`** is registered and called, but the host can't yet distinguish
-   "reattach after restart" from "first create", so it falls back to `create()`.
-   Needs the restart-reconcile path.
-3. **`hop-agent` now refuses** to move an agent between tasks on different compute
-   kinds rather than silently launching a blank session that looks like a resume.
-   No-op today (only `local` exists). Challenge if you'd rather it degrade than throw.
-4. **`localExec` uses `promisify(execFile)` on its no-stdin path** and the raw
-   callback form only when `opts.input` is set. Not stylistic: a mocked `vi.fn()`
-   loses execFile's `promisify.custom`, so going all-raw-3-arg would have silently
-   broken every still-promisify-based consumer sharing the same mocks. Documented in
-   the function — worth a second opinion.
-5. **`chats.ts` and `orchestrator/**`are deliberately outside the seam** (no`Task`
-   — task-free by design) and always run local. Conductor conversations on remote
-   compute is separate work.
+1. **All four core surfaces are read-only.** No core `prompt` implementation exists.
+   octomux's only human-question path is the card-based approval gate
+   (`server/orchestrator/gate.ts`), DB-backed and untouched here — rewriting it onto
+   `surfaces.prompt` is a real migration with real risk and no ticket requirement.
+   `prompt` is exercised only by the example plugin and tests. Challenge me if you
+   wanted `slack.prompt` wired to block-actions.
+2. **Honest accounting of step 1's "migrate with no behaviour change".** Only `web`
+   had an existing panel path to move, and it was kept byte-identical without
+   `?surface=`. `cli`/`slack`/`telegram` had **no** panel rendering before this —
+   registering them is new capability, not migration. Calling that a migration would
+   be a lie.
+3. **The gateway's `ChannelAdapter.id: 'telegram' | 'slack'` union was NOT widened**
+   onto the registry. High blast radius on a default-deny security surface, zero
+   payoff today. That closed union is still the thing an out-of-tree chat channel
+   would hit first.
+4. **`web` omits `render` entirely** (the browser owns rendering), but the plugin
+   registrar _requires_ it. Deliberate and documented, but it is the one place the
+   contract is not uniform.
+5. **`WEB_RENDERERS` is hand-synced** with `src/workflows/renderers/index.tsx` —
+   `server/` cannot import from `src/`. No test enforces the sync.
+6. **No CLI command consumes the `cli` surface.** `GET /api/tasks/:id/panels?surface=cli`
+   is its only call site. A future `octomux panels <task>` is one thin command away.
+7. **`panelsForSurface` loads facts per contribution serially** — N queries per
+   render. Fine at current panel counts; batch if a task ever carries many bindings.
 
 ## Changed without being asked
 
-- `ComputeFiles` gained `chmod()` and `mkdirp(mode)`. Without it the cursor harness's
-  `.octomux-hooks` dir silently dropped from 0700 to umask, and mode stopped being
-  enforced when rewriting an existing secret-bearing file. Regression test added.
-- Fixed a pre-existing bug found en route: `pollAgentWindows` sent the notify-target
-  message via the **finishing worker's** compute rather than the notify target's own
-  — different tasks.
-- Moved `computeConfigFor` from `settings.ts` to `server/compute/config.ts` (it's
-  compute's concern, and `settings.ts` is partially mocked in ~14 suites).
-- This worktree had no `node_modules`, so `@octomux/*` resolved up to the main
-  checkout's stale `dist/`. Added gitignored symlinks under `node_modules/@octomux/`.
+- `server/registry/route-inventory.test.ts` gained `GET /api/surfaces` and
+  `GET /api/tasks/:id/panels` in `PENDING_MIGRATION` — that file's designed
+  onboarding mechanism for a new route, not a workaround.
+- This worktree had no `node_modules`, so `@octomux/*` resolved _up_ to the main
+  checkout's `packages/`. Ran `bun install`; typecheck was silently reading the
+  wrong `@octomux/plugin-api` before that.
 
 ## Housekeeping
 
-A stale `stash@{0}` on this branch is a mid-run snapshot an agent took; the working
-tree supersedes it. Left it rather than dropping someone else's stash —
-`git stash drop stash@{0}` is safe.
-
-## Summary
-
-_Updated 2026-08-21 04:49:16_
-
-Bash: cat > /private/tmp/claude-501/-Users-shreypaharia-Documents-Projects-octomux-agents--worktree…
+A stale `stash@{0}` on this branch is a mid-run snapshot from an earlier agent; the
+working tree supersedes it. Left alone rather than dropping someone else's stash.
