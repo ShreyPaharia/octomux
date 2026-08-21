@@ -668,6 +668,8 @@ describe('grant checks (SHR-259)', () => {
     await expect(
       ctx.artifacts.write('task-1', { name: 'r.md', mime: 'text/markdown', body: 'x' }),
     ).rejects.toThrow(/not granted/);
+    // SHR-272: ctx.agents.run() is gated on agents.run same as the above.
+    await expect(ctx.agents.run({ input: 'x', outputSchema: {} })).rejects.toThrow(/not granted/);
   });
 
   it('the ungranted error names the plugin and the missing capability', () => {
@@ -737,6 +739,18 @@ describe('grant checks (SHR-259)', () => {
       'ui.panel',
       (ctx: ReturnType<typeof createPluginContext>) =>
         ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' }),
+    ],
+    [
+      // SHR-272: ctx.agents.run() is async and, with no real harness/substrate
+      // wired in this test file, rejects downstream once past the grant
+      // check. Same pattern as the facts.put row above — only the synchronous
+      // grant check is asserted; silence the rejection so it doesn't surface
+      // as an unhandled rejection.
+      'agents.run',
+      (ctx: ReturnType<typeof createPluginContext>) => {
+        const result = ctx.agents.run({ input: 'x', outputSchema: {} });
+        result.catch(() => {});
+      },
     ],
   ])('a call granted only "%s" is allowed through, everything else stays denied', (cap, call) => {
     const ctx = createPluginContext('onegrant', [cap as (typeof ALL_CAPS)[number]]);

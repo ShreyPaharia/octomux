@@ -20,6 +20,7 @@ export interface PluginContext {
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
   readonly artifacts: ArtifactsApi;
+  readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
   readonly policy: PolicyRegistrar;
   /**
@@ -223,6 +224,44 @@ export interface ArtifactEntry {
   url: string;
 }
 
+export interface AgentRunOptions {
+  /** The prompt / task description handed to the agent. */
+  input: string;
+  /** JSON Schema the agent's structured result must conform to. */
+  outputSchema: object;
+  model?: string | null;
+  timeoutMs?: number;
+  /** Defaults to a fresh ephemeral scratch dir. No git, no worktree. */
+  workspaceDir?: string;
+}
+
+/**
+ * `ctx.agents` — run a headless, structured-output agent session: hand it a
+ * prompt and a JSON Schema, get back a validated result. Same primitive core
+ * uses for schedule verticals (`runAgentSession`), stripped of the schedule
+ * bookkeeping.
+ *
+ * Deliberately a METHOD ON ctx, not a registrar — same reasoning as
+ * `ctx.artifacts`: nobody needs a different agent-runner implementation,
+ * they need to run one.
+ *
+ * This is NOT the task lifecycle. It never creates a git worktree, a branch,
+ * or a tmux session — that machinery is for agents that write code back into
+ * a repo. An agent run here reads its input, searches, and returns JSON. The
+ * default workspace is a fresh, empty, throwaway scratch directory: no
+ * CLAUDE.md, no repo, no project skills bleeding into the prompt — a clean
+ * room, not a shortcut.
+ *
+ * There is no concurrency cap here. A plugin that fans out N runs owns its
+ * own limiter; this is a single call, not a queue.
+ *
+ * pty only. The session is not reattachable and does not survive a host
+ * restart — it lives and dies within one `run()` call.
+ */
+export interface AgentRunner {
+  run<T = unknown>(opts: AgentRunOptions): Promise<T>;
+}
+
 /**
  * `ctx.ui` — declarative bindings, never components.
  *
@@ -361,7 +400,8 @@ export type PluginCapability =
   | 'facts.put'
   | 'ui.panel'
   | 'artifacts.write'
-  | 'policy.intercept';
+  | 'policy.intercept'
+  | 'agents.run';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
 // concrete `WorkflowType` / `IntegrationProvider` / `Harness` bindings to the

@@ -69,6 +69,7 @@ only place your plugin's own code executes at boot.
 | `ctx.facts`        | `{define,put,read,watch}`                                            | task-scoped append-only observation log; your types are qualified `<id>:<type>`                                                       |
 | `ctx.ui`           | `{panel(binding)}`                                                   | declarative binding onto a fact type — never a component; the client owns every renderer                                              |
 | `ctx.artifacts`    | `{write(taskId, {name, mime, body}), list(taskId)}` — both **async** | files your run produced. NOT a registrar — see below                                                                                  |
+| `ctx.agents`       | `{run(opts)}` — **async**                                            | headless agent runs, structured JSON out. NOT a registrar — see below                                                                 |
 | `ctx.effect`       | `(dispose) => void`                                                  | teardown callback, run in reverse registration order when your plugin unmounts                                                        |
 
 ## `ctx.artifacts` — writing output
@@ -99,6 +100,35 @@ await ctx.artifacts.write(taskId, {
 
 This is a method on `ctx`, not a registrar. There is no `ctx.artifacts.register()`
 and there will not be: nobody needs a different artifact implementation.
+
+## `ctx.agents` — running a headless agent
+
+A plugin that needs an LLM to read something and answer, not write code, runs
+one here instead of shelling out to its own SDK client:
+
+```js
+const result = await ctx.agents.run({
+  input: `Classify this ticket:\n\n${body}`,
+  outputSchema: {
+    type: 'object',
+    properties: { category: { type: 'string' } },
+    required: ['category'],
+  },
+  timeoutMs: 60_000,
+});
+```
+
+- It wires to the same `runAgentSession()` primitive the host uses for
+  scheduled workflow kinds — default harness, pty substrate, no reattach.
+- **Git-free.** No worktree, no branch, no tmux session — that's the task
+  lifecycle, for a different kind of agent. Defaults to a fresh empty scratch
+  dir; pass `workspaceDir` if it genuinely needs a checkout.
+- No host concurrency cap and no `runs` row — you own your own limiter, and
+  this isn't a schedule run.
+- `timeoutMs` (default 5 minutes) bounds the wait; a session that never calls
+  `submit_result` rejects rather than hanging.
+
+This is also a method on `ctx`, not a registrar.
 
 ## Choosing a registrar
 
@@ -149,6 +179,7 @@ marked failed.
 | `facts.put`             | `ctx.facts.put()`             | —                       |
 | `ui.panel`              | `ctx.ui.panel()`              | —                       |
 | `policy.intercept`      | `ctx.policy.intercept()`      | —                       |
+| `agents.run`            | `ctx.agents.run()`            | —                       |
 
 Reads are ungated — `ctx.facts.read`/`.watch`, `ctx.settings`, `ctx.logger`,
 `ctx.effect` need no grant. Declare only what you call:

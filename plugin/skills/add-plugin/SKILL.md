@@ -74,7 +74,8 @@ has no legitimate use for them and they're a known expansion-bomb vector.
 
 `grants` is the plugin author's claim about which `ctx` methods their code
 calls — `workflows.register`, `integrations.register`, `harnesses.register`,
-`http.route`, `facts.define`, `facts.put`, `ui.panel`, `policy.intercept`. It's
+`http.route`, `facts.define`, `facts.put`, `ui.panel`, `policy.intercept`,
+`agents.run`. It's
 enforced (an undeclared call throws and the plugin fails to load), so the list
 is accurate about what the plugin's `ctx` calls can do. It says nothing about
 what the plugin's _other_ code can do — see "Security posture" above: no
