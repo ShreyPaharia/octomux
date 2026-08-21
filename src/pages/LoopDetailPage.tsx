@@ -4,6 +4,7 @@ import { runApi, type RunDetail } from '../lib/api/runApi';
 import { taskApi } from '../lib/api/taskApi';
 import { useResource } from '../lib/use-resource';
 import { IterationLedger } from '../components/loop/IterationLedger';
+import { RunArtifacts } from '../components/RunArtifacts';
 import { TerminalView } from '../components/TerminalView';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -115,6 +116,10 @@ export default function LoopDetailPage() {
         ) : (
           <p className="text-sm text-muted-foreground">No active agent session.</p>
         )}
+      </div>
+
+      <div className="mt-4">
+        <RunArtifacts artifacts={run.artifacts ?? []} />
       </div>
     </div>
   );

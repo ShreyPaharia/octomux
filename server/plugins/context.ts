@@ -17,6 +17,7 @@ import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
+import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -26,6 +27,7 @@ import type {
   HarnessRegistrar,
   HttpRegistrar,
   FactsRegistrar,
+  ArtifactsApi,
   UiRegistrar,
   PluginWorkflow,
   PluginIntegrationProvider,
@@ -268,6 +270,30 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  // Not a registrar — a method on ctx, same as facts.put/facts.read. Nobody
+  // needs a different artifact implementation; they need to write one. There
+  // is no `artifacts.register()` and there will not be.
+  const artifacts: ArtifactsApi = {
+    // `pluginId` is always this closure's `id`, never anything the caller
+    // could pass in `input` — a plugin can write only into its own artifact
+    // namespace, same discipline as `facts.put`'s `id` argument to `putFact`.
+    // Deliberately NOT gated on `assertLive`, for the same reason
+    // `facts.put`/`facts.read` aren't (see the comment there): the revoke
+    // guard exists to stop a timed-out `apply()` from mutating the live
+    // REGISTRIES, not to stop a healthy plugin from writing output long after
+    // `apply()` returned. No teardown either — an artifact is a file in the
+    // worktree that outlives the plugin, so nothing here pushes onto
+    // `effects`.
+    async write(taskId, input) {
+      return toArtifactEntry(taskId, writeTaskArtifact(taskId, id, input));
+    },
+    // Unscoped, like facts.read: every plugin's artifacts on the task, not
+    // just this plugin's own.
+    async list(taskId) {
+      return listTaskArtifacts(taskId).map((r) => toArtifactEntry(taskId, r));
+    },
+  };
+
   const ui: UiRegistrar = {
     panel(binding: UiPanelBinding) {
       assertLive('ui.panel');
@@ -296,6 +322,7 @@ export function createPluginContext(id: string): PluginContext {
     harnesses,
     http,
     facts,
+    artifacts,
     ui,
     catalog,
     effect(dispose: () => void | Promise<void>) {

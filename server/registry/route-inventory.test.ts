@@ -84,6 +84,8 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/setup/status',
   'GET /api/skills',
   'GET /api/skills/:name',
+  'GET /api/tasks/:id/artifacts',
+  'GET /api/tasks/:id/artifacts/:pluginId/:name',
   'GET /api/tasks/:id/branches',
   'GET /api/tasks/:id/comments',
   'GET /api/tasks/:id/commits',

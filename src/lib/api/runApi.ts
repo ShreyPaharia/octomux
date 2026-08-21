@@ -31,11 +31,25 @@ export interface RunRow {
   ended_at: string | null;
 }
 
+/** One file a plugin wrote via `ctx.artifacts.write()` (SHR-269), surfaced on the
+ * run's task. `updatedAt` is a sqlite `datetime('now')` string ('YYYY-MM-DD HH:MM:SS'
+ * UTC, no 'T'/'Z') — append 'Z' before parsing, same as `src/components/BoardCard.tsx`
+ * does for `created_at`/`updated_at`. `url` fetches the raw body from the server. */
+export interface RunArtifact {
+  pluginId: string;
+  name: string;
+  mime: string;
+  size: number;
+  updatedAt: string;
+  url: string;
+}
+
 /** Polymorphic detail — what GET/POST /api/runs(/:id) return. Exactly one of
  * `loop`/`loopGroup` is populated, depending on the run's shape. */
 export interface RunDetail extends RunRow {
   loop: (LoopRun & { iterations: LoopIteration[] }) | null;
   loopGroup: (LoopGroup & { candidates: LoopRun[] }) | null;
+  artifacts: RunArtifact[];
 }
 
 export const runApi = {
