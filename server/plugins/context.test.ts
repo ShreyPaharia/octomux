@@ -128,6 +128,7 @@ const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreComput
 const { listSurfaces, resetSurfaces, registerCoreSurfaces } = await import('../surfaces/index.js');
 const { resetPluginGrants } = await import('./grants.js');
 const { resetCollections } = await import('./collections.js');
+const { resetServices } = await import('./services.js');
 const { createTestDb } = await import('../test-helpers.js');
 const { putSecret } = await import('../secrets/store.js');
 const { resetSecretKey } = await import('../secrets/crypto.js');
@@ -179,6 +180,7 @@ beforeEach(() => {
   registerCoreSurfaces();
   resetPluginGrants();
   resetCollections();
+  resetServices();
   createTestDb();
   process.env.OCTOMUX_SECRET_KEY = TEST_SECRET_KEY;
   resetSecretKey();
@@ -199,6 +201,7 @@ const ALL_CAPS = [
   'facts.put',
   'collections.define',
   'collections.write',
+  'services.provide',
   'ui.panel',
   'policy.intercept',
 ] as const;
@@ -803,6 +806,10 @@ describe('grant checks (SHR-259)', () => {
       /not granted/,
     );
     expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
+    // SHR-260: services.provide is gated the same way; services.require is
+    // deliberately NOT in this list — it's ungated, see the ctx.services
+    // describe block below.
+    expect(() => ctx.services.provide('chat.send', {})).toThrow(/not granted/);
     expect(() => ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' })).toThrow(
       /not granted/,
     );
@@ -919,6 +926,10 @@ describe('grant checks (SHR-259)', () => {
         result.catch(() => {});
       },
     ],
+    [
+      'services.provide',
+      (ctx: ReturnType<typeof createPluginContext>) => ctx.services.provide('chat.send', {}),
+    ],
   ])('a call granted only "%s" is allowed through, everything else stays denied', (cap, call) => {
     const ctx = createPluginContext('onegrant', [cap as (typeof ALL_CAPS)[number]]);
     expect(() => call(ctx)).not.toThrow();
@@ -1026,6 +1037,53 @@ describe('ctx.collections (SHR-275)', () => {
     // even though `owner` (which defines and owns the collection) was never
     // touched.
     expect(seen).toEqual([{ id: '1' }]);
+  });
+});
+
+describe('ctx.services (SHR-260)', () => {
+  it('provide throws without services.provide, naming the plugin and the capability', () => {
+    const ctx = createPluginContext('svc-provide-nogrant');
+    expect(() => ctx.services.provide('chat.send', {})).toThrow(/"svc-provide-nogrant"/);
+    expect(() => ctx.services.provide('chat.send', {})).toThrow(/"services\.provide"/);
+  });
+
+  it("provide succeeds with the grant, and a DIFFERENT plugin's require().get() resolves it", () => {
+    const provider = createPluginContext('svc-provider', ['services.provide']);
+    const impl = { send: () => 'sent' };
+    provider.services.provide('chat.send', impl);
+
+    // No grant needed on the consumer side — require() is ungated.
+    const consumer = createPluginContext('svc-consumer');
+    const handle = consumer.services.require('chat.send');
+
+    expect(handle.get()).toBe(impl);
+  });
+
+  it('require works with an empty grant set — declaring a dependency is ungated', () => {
+    const ctx = createPluginContext('svc-require-nogrant');
+    expect(() => ctx.services.require('chat.send')).not.toThrow();
+  });
+
+  it('a handle resolves live, not captured at require() time — get() throws before a provider exists, then resolves once one registers', () => {
+    const consumer = createPluginContext('svc-live-consumer');
+    const handle = consumer.services.require('chat.send');
+
+    expect(() => handle.get()).toThrow(/no plugin provides service "chat\.send"/);
+
+    const provider = createPluginContext('svc-live-provider', ['services.provide']);
+    const impl = { send: () => 'sent' };
+    provider.services.provide('chat.send', impl);
+
+    // Same handle, resolved live — not a stale reference from require() time.
+    expect(handle.get()).toBe(impl);
+  });
+
+  it('a revoked context refuses both provide and require', () => {
+    const ctx = createPluginContext('svc-revoked', ['services.provide']);
+    revokePluginContext(ctx);
+
+    expect(() => ctx.services.provide('chat.send', {})).toThrow(/revoked/);
+    expect(() => ctx.services.require('chat.send')).toThrow(/revoked/);
   });
 });
 

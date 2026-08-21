@@ -6,6 +6,7 @@ import { resetPluginUi, listUiContributions } from './ui-registry.js';
 import { resetFacts } from './facts.js';
 import { resetCollections, listPluginCollections, isCollectionDefined } from './collections.js';
 import * as collectionsModule from './collections.js';
+import { resetServices, listPluginServices, getService } from './services.js';
 import { getRecord } from '../repositories/plugin-collections.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
@@ -81,6 +82,7 @@ beforeEach(() => {
   resetPluginUi();
   resetFacts();
   resetCollections();
+  resetServices();
   resetHarnesses();
   resetCompute();
   // context.ts imports `../surfaces/index.js`, whose module scope registers
@@ -131,6 +133,7 @@ describe('unmountPlugin', () => {
       'collections.write',
       'ui.panel',
       'policy.intercept',
+      'services.provide',
     ]);
 
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
@@ -143,6 +146,7 @@ describe('unmountPlugin', () => {
     ctx.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
     ctx.policy.intercept('task.launch', () => ({ deny: 'no' }));
+    ctx.services.provide('chat.send', () => {});
 
     const order: string[] = [];
     ctx.effect(() => {
@@ -161,6 +165,7 @@ describe('unmountPlugin', () => {
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(false);
     expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(true);
+    expect(getService('chat.send')).toBeDefined();
 
     const report = await unmountPlugin(pluginId, ctx);
 
@@ -176,6 +181,7 @@ describe('unmountPlugin', () => {
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
     expect(report.released.collectionNames).toEqual([`${pluginId}:baselines`]);
+    expect(report.released.serviceNames).toEqual(['chat.send']);
     expect(report.released.effects).toBe(0);
 
     // Actually released, not just reported.
@@ -190,6 +196,8 @@ describe('unmountPlugin', () => {
     // below for the record itself surviving unmount.
     expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(false);
     expect(listPluginCollections(pluginId)).toEqual([]);
+    expect(getService('chat.send')).toBeUndefined();
+    expect(listPluginServices(pluginId)).toEqual([]);
     // The policy hook stopped firing — the point falls back to the fast
     // "no hooks registered" path and allows through.
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(true);
@@ -238,6 +246,7 @@ describe('unmountPlugin', () => {
       providerKinds: [],
       factTypes: [],
       collectionNames: [],
+      serviceNames: [],
       effects: 0,
     });
   });

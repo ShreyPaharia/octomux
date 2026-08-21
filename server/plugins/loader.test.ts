@@ -17,6 +17,7 @@ import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetFacts } from './facts.js';
 import { subscribeServerEvents } from '../events.js';
 import { resetPluginGrants } from './grants.js';
+import { resetServices } from './services.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -42,6 +43,7 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.unstubAllEnvs();
   resetPluginGrants();
+  resetServices();
 });
 
 describe('loadPlugins', () => {
@@ -551,6 +553,114 @@ plugins:
     expect(second.loaded).toHaveLength(1);
     expect(second.grants).toEqual({ widenplug: ['harnesses.register'] });
     expect(second.pendingGrants).toEqual({ widenplug: ['http.route'] });
+  });
+});
+
+describe('ctx.services mount-time resolution (SHR-260)', () => {
+  afterEach(() => {
+    resetMountedPlugins();
+    resetPluginGrants();
+    resetServices();
+  });
+
+  it('a consumer listed BEFORE its provider in the manifest still resolves', async () => {
+    const consumer = writeModule(
+      'services-consumer.mjs',
+      "export async function apply(ctx) { ctx.services.require('chat.send'); }\n",
+    );
+    const provider = writeModule(
+      'services-provider.mjs',
+      "export async function apply(ctx) { ctx.services.provide('chat.send', { send: () => {} }); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: consumer
+    name: ${consumer}
+  - id: provider
+    name: ${provider}
+    grants: [services.provide]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded.map((p) => p.id).sort()).toEqual(['consumer', 'provider']);
+  });
+
+  it('an unmet requirement fails only the consumer, naming the plugin and the service', async () => {
+    const consumer = writeModule(
+      'services-lonely-consumer.mjs',
+      "export async function apply(ctx) { ctx.services.require('chat.send'); }\n",
+    );
+    const ok = writeModule('services-unrelated-ok.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: lonelyconsumer
+    name: ${consumer}
+  - id: unrelatedok
+    name: ${ok}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded.map((p) => p.id)).toEqual(['unrelatedok']);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'lonelyconsumer', phase: 'apply' });
+    expect(report.failed[0].error).toContain('lonelyconsumer');
+    expect(report.failed[0].error).toContain('chat.send');
+  });
+
+  it('cascades: unmounting a provider for its own unmet requirement strands its consumer too', async () => {
+    // A provides "x" but requires "y", which nothing provides — A must be
+    // unmounted. B requires "x", which only A provided — B must be unmounted
+    // as a consequence, in a second pass.
+    const a = writeModule(
+      'services-cascade-a.mjs',
+      "export async function apply(ctx) { ctx.services.provide('x', {}); ctx.services.require('y'); }\n",
+    );
+    const b = writeModule(
+      'services-cascade-b.mjs',
+      "export async function apply(ctx) { ctx.services.require('x'); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: cascadea
+    name: ${a}
+    grants: [services.provide]
+  - id: cascadeb
+    name: ${b}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed.map((f) => f.id).sort()).toEqual(['cascadea', 'cascadeb']);
+  });
+
+  it('order has no gaps after a services failure removes a middle plugin', async () => {
+    const ok1 = writeModule('services-order-ok1.mjs', 'export async function apply() {}\n');
+    const badConsumer = writeModule(
+      'services-order-bad.mjs',
+      "export async function apply(ctx) { ctx.services.require('nope'); }\n",
+    );
+    const ok2 = writeModule('services-order-ok2.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: ordok1
+    name: ${ok1}
+  - id: ordbad
+    name: ${badConsumer}
+  - id: ordok2
+    name: ${ok2}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0].id).toBe('ordbad');
+    expect(report.loaded).toHaveLength(2);
+    expect(report.loaded[0]).toMatchObject({ id: 'ordok1', order: 0 });
+    expect(report.loaded[1]).toMatchObject({ id: 'ordok2', order: 1 });
   });
 });
 

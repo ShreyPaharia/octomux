@@ -253,3 +253,15 @@ export function ensureTmuxRuntimeDir(): void {
   fs.mkdirSync(runDir, { recursive: true });
   _runtimeDirEnsured = true;
 }
+
+/**
+ * Start the shared tmux server (if not already running) and disable
+ * `exit-empty`, so it never auto-exits between the last session dying and a
+ * new one being created. Call this once, awaited, before any concurrent
+ * `new-session` calls (e.g. boot-time task recovery) — otherwise every
+ * concurrent client races to spawn the server on the same socket and loses
+ * with "server exited unexpectedly".
+ */
+export async function ensureTmuxServerRunning(): Promise<void> {
+  await execTmux(['start-server', ';', 'set-option', '-g', 'exit-empty', 'off']);
+}

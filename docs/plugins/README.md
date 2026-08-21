@@ -116,6 +116,7 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 | `facts.put`             | `ctx.facts.put()`             |
 | `collections.define`    | `ctx.collections.define()`    |
 | `collections.write`     | `ctx.collections.put()`       |
+| `services.provide`      | `ctx.services.provide()`      |
 | `ui.panel`              | `ctx.ui.panel()`              |
 | `artifacts.write`       | `ctx.artifacts.write()`       |
 | `policy.intercept`      | `ctx.policy.intercept()`      |
@@ -128,7 +129,8 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 Reads and logging are ungated — no grant needed for `ctx.logger`,
 `ctx.settings`, `ctx.catalog.list()`, `ctx.facts.read()`/`ctx.facts.watch()`,
 `ctx.collections.query()`/`ctx.collections.watch()`, `ctx.artifacts.list()`,
-`ctx.fanout.status()`/`ctx.fanout.list()`, or `ctx.effect()`. (`ctx.kv`
+`ctx.fanout.status()`/`ctx.fanout.list()`, `ctx.services.require()`, or
+`ctx.effect()`. (`ctx.kv`
 throws regardless of grants — see [§`ctx.kv` throws today](#ctxkv-throws-today).)
 
 ### Figuring out which grants you need
@@ -174,13 +176,14 @@ confirming intent, not a security check on the plugin's code. See
 
 There are more than three now: `ctx.workflows`, `ctx.integrations`,
 `ctx.harnesses`, `ctx.compute`, `ctx.surfaces`, `ctx.http`, `ctx.facts`,
-`ctx.collections`, `ctx.ui`, and `ctx.policy` are **registrars** — each adds
-something to core's registries, or (only `ctx.policy`) can refuse something
-core was about to do. `ctx.artifacts`, `ctx.agents`, `ctx.attention`,
-`ctx.fanout`, and `ctx.catalog` are **methods on `ctx`**, not registrars —
-nobody needs a different artifact/agent-run/attention/fan-out implementation,
-they need to run one, so none of them has a `register()`. `ctx.effect()`,
-`ctx.logger`, `ctx.settings`, and `ctx.kv` round out the object.
+`ctx.collections`, `ctx.services`, `ctx.attention`, `ctx.ui`, and `ctx.policy` are
+**registrars** — each adds something to core's registries, or (only
+`ctx.policy`) can refuse something core was about to do. `ctx.artifacts`,
+`ctx.agents`, `ctx.fanout`, and `ctx.catalog` are **methods on `ctx`**, not
+registrars — nobody needs a different artifact/agent-run/fan-out
+implementation, they need to run one, so none of them has a `register()`.
+`ctx.effect()`, `ctx.logger`, `ctx.settings`, and `ctx.kv` round out the
+object.
 
 | `ctx` member                                       | What it's for                                           | This guide     | Deep reference                                                                     |
 | -------------------------------------------------- | ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
@@ -192,6 +195,7 @@ they need to run one, so none of them has a `register()`. `ctx.effect()`,
 | `ctx.http.route()`                                 | add an HTTP route                                       | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
 | `ctx.facts` (`define`/`put`/`read`/`watch`)        | task-scoped notes, deleted with the task                | reference only | [api-reference.md](./api-reference.md#ctxfacts)                                    |
 | `ctx.collections` (`define`/`put`/`query`/`watch`) | durable, schema'd records that outlive a task           | reference only | [api-reference.md](./api-reference.md#ctxcollections)                              |
+| `ctx.services` (`provide`/`require`)               | depend on a capability by name, not a plugin package    | §below         | [api-reference.md](./api-reference.md#ctxservices)                                 |
 | `ctx.ui.panel()`                                   | bind a declarative panel to a fact or collection        | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
 | `ctx.policy.intercept()`                           | deny or patch a task intent at a gate point             | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
 | `ctx.artifacts` (`write`/`list`)                   | drop a file into the task's worktree                    | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
@@ -308,6 +312,40 @@ the full shape.
 ```js
 const installed = ctx.catalog.list();
 ctx.logger.info({ installed: installed.map((e) => e.id) }, 'who else is here');
+```
+
+## Depending on a capability — ctx.services
+
+`ctx.services` lets a plugin depend on "something that can send chat
+messages" instead of on `octomux-plugin-slack` by name. One plugin provides
+a name, another requires it, and neither imports the other:
+
+```js
+// provider (e.g. a Slack plugin)
+ctx.services.provide('chat.send', {
+  async send(text) {
+    /* ... */
+  },
+});
+
+// consumer — order in octomux.yml doesn't matter, resolution happens at mount
+const chat = ctx.services.require('chat.send');
+await chat.get().send('build failed');
+```
+
+Service names are the one unqualified thing in this API — `chat.send` has to
+be the same string on both sides, so it isn't prefixed with a plugin id like
+everything else you register. If two plugins provide the same name, the one
+listed earlier in `octomux.yml` wins; the other takes over only if the first
+unmounts. An unmet `require()` fails just that plugin at boot, in the load
+report, never the whole boot. Full semantics, including the reload gap:
+[`api-reference.md` §`ctx.services`](./api-reference.md#ctxservices).
+
+```yaml
+plugins:
+  - id: slack-notify
+    name: '@acme/octomux-slack-notify'
+    grants: [services.provide]
 ```
 
 ### `ctx.compute.register(p)`

@@ -16,6 +16,10 @@
  * `reconcile?(ctx)` is intentionally NOT called here — that is a later wave
  * (runs after `recoverTasks()` in the boot sequence; see the plan's
  * "boot-order contract"). This loader only calls `apply(ctx)`.
+ *
+ * SHR-260: after every row has been applied, `loadPlugins()` also resolves
+ * `ctx.services` requirements (a post-loop fixpoint pass — see that pass's
+ * own doc comment below for why it can't be a per-row check).
  */
 import { createRequire } from 'module';
 import fs from 'fs';
@@ -27,6 +31,7 @@ import { manifestPath as defaultManifestPath } from './paths.js';
 import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
 import { resolveGrantsForRow, allPluginGrants } from './grants.js';
+import { unmetRequirements } from './services.js';
 import type { UnmountReport } from './lifecycle.js';
 import type {
   LoadReport,
@@ -457,15 +462,68 @@ export async function loadPlugins(opts: LoadPluginsOptions): Promise<LoadReport>
     loaded.push({ ...result.loaded, order: order++ });
   }
 
+  // SHR-260: resolve `ctx.services` requirements only AFTER the whole
+  // manifest has been applied, never inline in the loop above. A `require()`
+  // just records a name against the shared registry — it can't tell whether
+  // the provider simply hasn't been applied yet (it's later in the manifest)
+  // from "nothing will ever provide this". Only once every row has had its
+  // turn is "unmet" a real answer, which is exactly what makes a consumer
+  // listed before its provider in octomux.yml still work.
+  //
+  // A single pass isn't enough: unmounting a plugin for an unmet requirement
+  // can itself strand another plugin that required a service THAT plugin
+  // provided (A requires "y" — nothing provides it — A unmounts — B required
+  // "x", which A provided, so B is now unmet too). Repeat until a full pass
+  // unmounts nothing.
+  //
+  // ponytail: mount-time check is boot-only; reload falls back to a throw at
+  // first get(). Wire it into reloadPluginOnce if hot reload of dependent
+  // plugins becomes common.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of [...loaded]) {
+      const unmet = unmetRequirements(entry.id);
+      if (unmet.length === 0) continue;
+
+      const mountedEntry = mounted.get(entry.id);
+      if (mountedEntry) {
+        await unmountPlugin(entry.id, mountedEntry.ctx);
+        mounted.delete(entry.id);
+      }
+      loaded.splice(
+        loaded.findIndex((p) => p.id === entry.id),
+        1,
+      );
+
+      const names = unmet.map((n) => `"${n}"`).join(', ');
+      const message = `plugin "${entry.id}": requires service${unmet.length > 1 ? 's' : ''} ${names}, which no installed plugin provides`;
+      failed.push({ id: entry.id, name: entry.name, error: message, phase: 'apply' });
+      logger.warn(
+        { id: entry.id, unmet },
+        'plugin has an unmet ctx.services requirement — unmounted after boot',
+      );
+      changed = true;
+    }
+  }
+
+  // Removals above leave gaps in `order` — reindex so it still means
+  // "position among successfully loaded plugins", not "position in the
+  // original manifest".
+  const reindexed = loaded.map((p, i) => ({ ...p, order: i }));
+
   return {
-    loaded,
+    loaded: reindexed,
     failed,
     manifestPath: opts.manifestPath,
     safeMode,
     loadedAt: new Date().toISOString(),
     // Every plugin's EFFECTIVE grants this boot, regardless of pending/failed
     // status — `allPluginGrants()` reads the same in-memory map the loader
-    // just populated via `createPluginContext(id, effective)`.
+    // just populated via `createPluginContext(id, effective)`. A plugin
+    // unmounted by the services pass above has already had its grants
+    // cleared by `disposePluginContext` (inside `unmountPlugin`), so it's
+    // correctly absent here without any extra handling.
     grants: allPluginGrants(),
     // Omitted entirely (not an empty object) when nothing is pending, so an
     // older report and a clean boot both read the same on this field.

@@ -44,7 +44,7 @@ import {
   recoverTasks,
 } from './task-engine/index.js';
 import { localSession } from './compute/index.js';
-import { ensureTmuxRuntimeDir } from './tmux-bin.js';
+import { ensureTmuxRuntimeDir, ensureTmuxServerRunning } from './tmux-bin.js';
 import { ensureGithubLogin } from './github-login.js';
 import { acquireInstanceLock } from './single-instance.js';
 import { childLogger } from './logger.js';
@@ -131,6 +131,9 @@ server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
 
 // Create the run/ dir holding the private tmux socket before any tmux call.
 ensureTmuxRuntimeDir();
+// Start the shared tmux server (once, serially) before recovery fires off
+// concurrent `new-session` calls — otherwise they race to spawn it and lose.
+await ensureTmuxServerRunning();
 
 await reconcileOrphanSettingUp();
 await recoverTasks();

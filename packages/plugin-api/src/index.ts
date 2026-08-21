@@ -20,6 +20,15 @@ export interface PluginContext {
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
   readonly collections: CollectionsRegistrar;
+  /**
+   * `ctx.services` — cross-plugin dependency by CAPABILITY rather than by
+   * package name (SHR-260). A plugin provides `chat.send`; another requires
+   * `chat.send`; neither names the other. Service names are the one thing in
+   * this API that is NOT namespaced per plugin — a shared contract has to be
+   * the same string on both sides. Requirements resolve after the whole
+   * manifest has mounted, so a consumer may be listed before its provider.
+   */
+  readonly services: ServicesRegistrar;
   readonly artifacts: ArtifactsApi;
   readonly secrets: SecretsApi;
   readonly agents: AgentRunner;
@@ -874,7 +883,47 @@ export interface FanOutItemStatus {
  * `secrets.list()` (names only) is ungated for the same reason — knowing a
  * credential exists is not the thing worth a second look. `secrets.resolve()`
  * returns values, so it IS gated on `secrets.read`.
+ *
+ * `services.require()` is ungated too: declaring a dependency is a statement
+ * about this plugin, not a reach into anyone else's. `services.provide()` puts
+ * an implementation into a namespace every other plugin reads, so it IS gated.
  */
+/**
+ * `ctx.services` — the seam that lets one plugin depend on "something that can
+ * send chat messages" instead of on `octomux-plugin-slack`.
+ *
+ * **Names are unqualified and shared.** Everything else a plugin registers is
+ * prefixed with its manifest id; a service name is not, because `chat.send`
+ * must be the same string coming from the provider and the consumer.
+ *
+ * **First provider wins.** If two plugins provide the same name, the one that
+ * appears earlier in `octomux.yml` is live; the other queues behind it and
+ * takes over if the first unmounts. Reordering the two rows is how you choose.
+ *
+ * **Unmet requirements fail the plugin, not the boot.** `require()` records the
+ * dependency; the host checks it once every row has been applied, so ordering
+ * does not matter. An unmet name lands in the load report as a `phase: 'apply'`
+ * failure naming the plugin and the service — the same shape an ungranted
+ * capability produces.
+ */
+export interface ServicesRegistrar {
+  /** Publishes an implementation under a shared name. Requires the
+   *  `services.provide` capability. Throws if this plugin already provides it. */
+  provide(name: string, impl: unknown): void;
+  /** Declares a dependency and returns a live handle to it. Safe to call during
+   *  `apply()` before the provider has mounted — nothing is resolved until
+   *  `handle.get()`. */
+  require<T = unknown>(name: string): ServiceHandle<T>;
+}
+
+export interface ServiceHandle<T = unknown> {
+  /** The service name this handle was created for. */
+  readonly name: string;
+  /** The live implementation. Throws if nothing provides the name — which the
+   *  mount-time check makes unreachable unless the provider unmounted since. */
+  get(): T;
+}
+
 export type PluginCapability =
   | 'workflows.register'
   | 'integrations.register'
@@ -885,6 +934,7 @@ export type PluginCapability =
   | 'facts.put'
   | 'collections.define'
   | 'collections.write'
+  | 'services.provide'
   | 'ui.panel'
   | 'artifacts.write'
   | 'policy.intercept'
