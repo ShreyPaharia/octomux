@@ -21,6 +21,7 @@ import { listCatalog } from './catalog.js';
 import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
 import { setPluginGrants, clearPluginGrants, assertGranted } from './grants.js';
 import { registerPolicyHook } from './policy.js';
+import { createFanOutApi, abortPluginFanOuts } from './fanout.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -34,6 +35,8 @@ import type {
   ArtifactsApi,
   UiRegistrar,
   PolicyRegistrar,
+  FanOutApi,
+  FanOutSpec,
   PluginCapability,
   PluginWorkflow,
   PluginIntegrationProvider,
@@ -387,6 +390,26 @@ export function createPluginContext(
     },
   };
 
+  // Not a registrar, same as `artifacts` — nobody needs a different fan-out
+  // implementation, they need to run one. `run` is grant-gated here rather
+  // than inside the engine so every capability check in the plugin runtime
+  // lives in one file; `status`/`list` are ungated reads, matching
+  // `facts.read` and `artifacts.list`.
+  //
+  // Deliberately NOT `assertLive`: a fan-out is work a healthy plugin starts
+  // long after `apply()` returned. The revoke guard exists to stop a
+  // timed-out `apply()` from mutating the REGISTRIES — same reasoning as
+  // `facts.put` above.
+  const fanoutApi = createFanOutApi(id);
+  const fanout: FanOutApi = {
+    run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>) {
+      assertGranted(id, 'fanout.run');
+      return fanoutApi.run<T, R>(spec);
+    },
+    status: (runId: string) => fanoutApi.status(runId),
+    list: (name?: string) => fanoutApi.list(name),
+  };
+
   const ctx: PluginContext = {
     id,
     logger,
@@ -402,6 +425,7 @@ export function createPluginContext(
     ui,
     catalog,
     policy,
+    fanout,
     effect(dispose: () => void | Promise<void>) {
       assertLive('effect');
       if (typeof dispose !== 'function') {
@@ -419,6 +443,15 @@ export function createPluginContext(
   // depends on the grant record still being present.
   effects.push(() => {
     clearPluginGrants(id);
+  });
+  // Everything registered through `ctx` is undone on unmount; a fan-out is
+  // the one thing that is still *running* at that point. Abort stops the
+  // scheduler handing out new items and marks the run `canceled` — it does
+  // NOT await in-flight handlers, because a handler may be a multi-minute
+  // agent session and unmount must not block on it. The items it was mid-way
+  // through go back to `pending`, so a later `{ resume: runId }` picks them up.
+  effects.push(() => {
+    abortPluginFanOuts(id);
   });
   effectStacks.set(ctx, effects);
   return ctx;

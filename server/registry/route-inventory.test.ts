@@ -53,6 +53,8 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/chats',
   'GET /api/chats/:id',
   'GET /api/default-branch',
+  'GET /api/fanout/runs',
+  'GET /api/fanout/runs/:id',
   'GET /api/harnesses',
   'GET /api/health',
   'GET /api/hooks/registry',

@@ -73,6 +73,6 @@ tree supersedes it. Left it rather than dropping someone else's stash —
 
 ## Summary
 
-_Updated 2026-08-21 04:49:16_
+_Updated 2026-08-21 16:15:29_
 
-Bash: cat > /private/tmp/claude-501/-Users-shreypaharia-Documents-Projects-octomux-agents--worktree…
+Bash: bun run lint 2>&1 | grep -i "fanout" | head

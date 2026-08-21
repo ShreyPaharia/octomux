@@ -1282,6 +1282,41 @@ export function runMigrations(instance: Database): void {
     CREATE INDEX IF NOT EXISTS idx_plugin_facts_task ON plugin_facts(task_id, seq);
     CREATE INDEX IF NOT EXISTS idx_plugin_facts_type ON plugin_facts(type, seq);
   `);
+
+  // ── fan-out: run a step per item (2026-08-21, SHR-276) ──────────────────────
+  // Own tables rather than reusing `runs` — `runs` is one row per workflow
+  // execution with a single `result_json` blob, but the whole point of fan-out
+  // is that one run explodes into N item rows, each with its own status and
+  // result. Per-item rows are what make a partially-completed run legible (you
+  // can see exactly which items are done/pending/dead) and a redrive possible
+  // (reset only the dead ones back to pending, leave completed work alone).
+  // `fanout_items` has no surrogate id — `(run_id, item_key)` is the natural
+  // key, and it's what makes `upsertFanOutItems` idempotent via INSERT OR
+  // IGNORE on a re-run over the same source.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS fanout_runs (
+      id         TEXT PRIMARY KEY,
+      plugin_id  TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'running',
+      total      INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_fanout_runs_plugin ON fanout_runs(plugin_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS fanout_items (
+      run_id      TEXT NOT NULL REFERENCES fanout_runs(id) ON DELETE CASCADE,
+      item_key    TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      attempts    INTEGER NOT NULL DEFAULT 0,
+      item_json   TEXT NOT NULL DEFAULT 'null',
+      result_json TEXT,
+      error       TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (run_id, item_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_fanout_items_status ON fanout_items(run_id, status);
+  `);
 }
 
 /**

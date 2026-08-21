@@ -45,6 +45,7 @@ export interface PluginContext {
   readonly facts: FactsRegistrar;
   readonly ui: UiRegistrar;
   readonly catalog: CatalogReader;
+  readonly fanout: FanOutApi;
   effect(dispose: () => void | Promise<void>): void;
   readonly compute: ComputeRegistrar;
 }
@@ -339,6 +340,80 @@ providers exist to uphold — `docs/plugins/examples/ssh-compute`'s test file
 asserts it directly (register the provider with a recognizable secret, drive
 `create()` and a few `exec()`s, assert the secret string appears only in the
 transport argv).
+
+## `ctx.fanout`
+
+Run a step **per item**, not once per schedule fire. One cron fire is one
+session and one output blob; a pipeline is "do this to each of N things".
+
+```ts
+interface FanOutApi {
+  run<T, R>(spec: FanOutSpec<T, R>): Promise<FanOutRunSummary>; // needs `fanout.run`
+  status(runId: string): Promise<FanOutRunStatus | undefined>; // ungated read
+  list(name?: string): Promise<FanOutRunSummary[]>; // ungated read
+}
+
+type FanOutSource<T> =
+  | { items: readonly T[] } // a plain array — e.g. the previous step's output
+  | { collection: string; query?: Record<string, unknown> } // a ctx.collections query
+  | { resume: string }; // redrive a previous run
+
+interface FanOutSpec<T, R> {
+  name: string; // BARE — qualified to `<pluginId>:<name>`
+  source: FanOutSource<T>;
+  each: (item: T, meta: FanOutItemMeta) => Promise<R>;
+  key?: (item: T) => string; // default: stable hash of the item
+  concurrency?: number; // clamped DOWN to the host ceiling, never up
+  maxAttempts?: number; // default 3, minimum 1
+  backoffMs?: number; // default 1000 → 1s, 2s, 4s …
+}
+```
+
+```js
+const summary = await ctx.fanout.run({
+  name: 'enrich',
+  source: { items: leads },
+  key: (lead) => lead.id,
+  concurrency: 3,
+  async each(lead, { attempt, signal }) {
+    return enrich(lead, { signal });
+  },
+});
+// { runId, name: 'funnel:enrich', status: 'failed', total: 60,
+//   succeeded: 58, dead: 2, pending: 0, … }
+
+// Redrive just the two that dead-lettered:
+await ctx.fanout.run({ name: 'enrich', source: { resume: summary.runId }, each });
+```
+
+**Per-item status is persisted** in `fanout_runs` / `fanout_items`, so a partial
+run is legible — `GET /api/fanout/runs` and `GET /api/fanout/runs/:id` — and
+resumable. `each` throwing schedules a retry with bounded exponential backoff;
+an item that exhausts `maxAttempts` is **dead-lettered** (`status: 'dead'`) and
+the rest of the run carries on untouched.
+
+**The concurrency cap is the host's, and it is global.** One semaphore is shared
+across every fan-out run of every plugin, sized by
+`settings.fanout.maxConcurrency` (default 4). Three plugins each asking for 4
+get 4 in total, not 12. That placement is deliberate: `ctx.agents.run()` stays a
+thin accessor with no scheduling policy in it, and fan-out is where scheduling
+policy belongs — an uncapped fan-out over a subscription-backed harness is the
+runaway case, saturating the operator's rate limits with no backpressure and no
+signal.
+
+`meta.signal` is aborted when your plugin unmounts. Unmount stops the scheduler
+immediately and does **not** await in-flight handlers (a handler may be a
+multi-minute agent session), so honour the signal in anything long-running.
+Items interrupted that way go back to `pending`; a later `{ resume: runId }`
+picks them up. `run()` resolves with a `canceled` summary rather than rejecting.
+
+Deliberately **not** a DAG. There is no step composition — chain by writing to a
+collection and querying it from the next step. There is also no HTTP redrive
+route: a redrive needs your live `each` closure, which cannot be persisted.
+Expose one yourself with `ctx.http.route` if you want a button.
+
+Until `ctx.collections` lands, a `{ collection }` source throws with a message
+saying so — pass `{ items }` in the meantime.
 
 ## Manifest (`octomux.yml`)
 

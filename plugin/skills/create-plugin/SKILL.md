@@ -144,13 +144,17 @@ marked failed.
 | `workflows.register`    | `ctx.workflows.register()`    | `kind`                  |
 | `integrations.register` | `ctx.integrations.register()` | `kind`                  |
 | `harnesses.register`    | `ctx.harnesses.register()`    | `id`                    |
+| `compute.register`      | `ctx.compute.register()`      | `kind`                  |
 | `http.route`            | `ctx.http.route()`            | —                       |
 | `facts.define`          | `ctx.facts.define()`          | `type`                  |
 | `facts.put`             | `ctx.facts.put()`             | —                       |
 | `ui.panel`              | `ctx.ui.panel()`              | —                       |
+| `artifacts.write`       | `ctx.artifacts.write()`       | —                       |
 | `policy.intercept`      | `ctx.policy.intercept()`      | —                       |
+| `fanout.run`            | `ctx.fanout.run()`            | `name`                  |
 
-Reads are ungated — `ctx.facts.read`/`.watch`, `ctx.settings`, `ctx.logger`,
+Reads are ungated — `ctx.facts.read`/`.watch`, `ctx.artifacts.list`,
+`ctx.fanout.status`/`.list`, `ctx.catalog.list`, `ctx.settings`, `ctx.logger`,
 `ctx.effect` need no grant. Declare only what you call:
 
 ```yaml

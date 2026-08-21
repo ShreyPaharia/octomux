@@ -290,6 +290,7 @@ tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built b
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above),
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
+`ctx.fanout` (`run`/`status`/`list`, see "Fan-out" below),
 `ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
 (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
@@ -325,7 +326,8 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
   `http.route`, `facts.define`, `facts.put`, `ui.panel`, `artifacts.write`,
-  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
+  `policy.intercept`, `fanout.run`. Reads (`facts.read`, `facts.watch`, `artifacts.list`,
+  `fanout.status`, `fanout.list`, `ctx.settings`,
   `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
@@ -333,6 +335,22 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `plugin-grants.json` next to the manifest (first sight of a row grants everything it
   declares; narrowing is free; adding a grant sits pending until `octomux plugins approve
 <id>`). `LoadReport.grants`/`pendingGrants` (per plugin id) is what `octomux doctor` prints.
+- **`ctx.fanout`** — run a step **per item**, not per schedule fire. `run({ name, source, each })`
+  maps a handler over an item source: `{ items }` (a plain array), `{ collection, query }` (a
+  `ctx.collections` query — SHR-275; the resolver is injected via `setCollectionResolver()`, and
+  until it lands a collection source throws a message saying so), or `{ resume: runId }` (redrive).
+  Per-item status persists in `fanout_runs` / `fanout_items`, so a partial run is legible
+  (`GET /api/fanout/runs[/:id]`) and resumable. Retries are bounded exponential backoff
+  (`maxAttempts` 3, `backoffMs` 1000 by default); an item that exhausts them is **dead-lettered**
+  and the rest of the run continues. **The concurrency cap is host-enforced and GLOBAL** — one
+  semaphore across every plugin's fan-out runs, `settings.fanout.maxConcurrency` (default 4). A
+  per-run `concurrency` is clamped down to it, never up. That placement is deliberate and
+  cross-ticket: `ctx.agents.run()` (SHR-272) stays a thin accessor, and fan-out is where scheduling
+  policy belongs, because fan-out is the runaway case. Unmount aborts in-flight runs without
+  awaiting their handlers (a handler may be a multi-minute agent session); interrupted items go
+  back to `pending` for a later resume. Deliberately not a DAG — chain by writing to a collection
+  and querying it from the next step. No HTTP redrive route: a redrive needs the plugin's live
+  `each` closure, which cannot be persisted.
 - **`ctx.policy.intercept(point, hook)`** — the one registrar that can refuse, not just add.
   Four points: `task.launch`, `harness.resume`, `review.publish`, `integration.send`. A hook
   returns `{ deny: reason }`, `{ patch: {...} }` (merged into `intent.data`, visible to later

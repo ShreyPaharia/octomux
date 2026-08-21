@@ -27,6 +27,7 @@ import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { router as pluginUiRouter } from './routes/plugin-ui.js';
 import { router as pluginFactsRouter } from './routes/plugin-facts.js';
 import { router as taskArtifactsRouter } from './routes/task-artifacts.js';
+import { router as fanoutRouter } from './routes/fanout.js';
 import { router as pluginsRouter } from './routes/plugins.js';
 import { listWorkflows } from './workflows/registry.js';
 import { createPluginParentRouter } from './plugins/http-registry.js';
@@ -57,6 +58,7 @@ export function setupRoutes(app: Express): void {
   app.use(pluginUiRouter);
   app.use(pluginFactsRouter);
   app.use(taskArtifactsRouter);
+  app.use(fanoutRouter);
   app.use(pluginsRouter);
 
   // DEPRECATED: `WorkflowType.apiRouter`. A plugin that declares one cannot be
