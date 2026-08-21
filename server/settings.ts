@@ -42,6 +42,18 @@ export interface OctomuxSettings {
   deleteGraceHours?: number;
 
   /**
+   * Host-enforced ceiling on `ctx.fanout` parallelism, shared across EVERY
+   * plugin's fan-out runs — not per run and not per plugin. A per-run
+   * `concurrency` is clamped down to this and never up. Default 4
+   * (DEFAULT_FANOUT_CONCURRENCY in server/plugins/fanout.ts) when absent.
+   *
+   * This is the backpressure for the runaway case: a plugin fanning 500
+   * records out over a subscription-backed harness would otherwise saturate
+   * the operator's rate limits with no signal.
+   */
+  fanout?: { maxConcurrency?: number };
+
+  /**
    * Per-card approval timeout (ms). Overridden by OCTOMUX_APPROVAL_TIMEOUT_MS.
    * Default 30 minutes (DEFAULT_APPROVAL_TIMEOUT_MS in orchestrator/approval-timeout.ts) when absent.
    */

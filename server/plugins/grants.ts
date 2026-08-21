@@ -56,6 +56,7 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'artifacts.write',
   'policy.intercept',
   'agents.run',
+  'fanout.run',
 ];
 
 export function isPluginCapability(value: unknown): value is PluginCapability {

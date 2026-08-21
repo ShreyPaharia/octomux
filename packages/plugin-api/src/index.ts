@@ -25,6 +25,12 @@ export interface PluginContext {
   readonly ui: UiRegistrar;
   readonly policy: PolicyRegistrar;
   /**
+   * `ctx.fanout` — run a step per item instead of once per schedule fire.
+   * See `FanOutApi`. Not a registrar: nobody needs a different fan-out
+   * implementation, they need to run one.
+   */
+  readonly fanout: FanOutApi;
+  /**
    * `ctx.catalog` — a READ over what is currently installed (SHR-268): this
    * plugin's own registrations plus every sibling's and core's, as one flat
    * list. There is deliberately no write path and no override path here —
@@ -478,6 +484,142 @@ export type PolicyDecision =
 export type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<PolicyDecision>;
 
 /**
+ * `ctx.fanout` — run a step **per item**, not per schedule fire.
+ *
+ * One cron fire is one session and one output blob. A pipeline is "do this to
+ * each of N things". Without this the only declarative way to process 60
+ * records is to stuff all 60 into one prompt and parse one blob back, which
+ * loses per-item status, per-item retry, progress, and eventually the context
+ * window.
+ *
+ * `run()` maps `each` over an item source — a plain array, a collection query
+ * (`ctx.collections`), or a previous run being redriven — and gives you:
+ *
+ * - **per-item status**, persisted, so a partial run is legible and resumable
+ * - **a concurrency cap the host enforces**, shared across every plugin
+ * - **retry with bounded exponential backoff**
+ * - **a dead-letter state** for items that exhaust their attempts, plus a
+ *   redrive path (`{ resume: runId }`)
+ *
+ * ## The cap lives here, deliberately
+ *
+ * `ctx.agents.run()` is a thin accessor onto the harness session runner; it
+ * carries no scheduling policy. Fan-out is where scheduling policy belongs,
+ * because fan-out is the runaway case: a plugin looping 500 records through a
+ * subscription-backed harness saturates the operator's rate limits with no
+ * backpressure and no signal. The host cap is global — every plugin's fan-out
+ * runs draw from ONE budget, so N plugins asking for 8 each do not add up to
+ * 8N concurrent sessions. A per-run `concurrency` is a request, clamped down
+ * to the host's ceiling and never up.
+ *
+ * ## What it is not
+ *
+ * Not a DAG. There is no step composition and no chaining of one step's output
+ * into the next: chain by writing to a collection and querying it from the
+ * next step. Not distributed either — every item runs in this process.
+ */
+export interface FanOutApi {
+  /** Requires the `fanout.run` capability grant. Resolves when every item has
+   *  reached a terminal state (`done` or `dead`), or the run was aborted —
+   *  item failures come back in the summary rather than as a rejection.
+   *  Rejects only when the run could not start (bad spec, unresolvable
+   *  source). */
+  run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>): Promise<FanOutRunSummary>;
+  /** One run with its per-item rows. Ungated read, matching `facts.read`. */
+  status(runId: string): Promise<FanOutRunStatus | undefined>;
+  /** This plugin's fan-out runs, newest first. Ungated read. */
+  list(name?: string): Promise<FanOutRunSummary[]>;
+}
+
+/**
+ * Where the items come from. Deliberately an interface rather than an array
+ * parameter so a collection query and a literal array are the same call:
+ *
+ * - `{ items }`      — a plain array, e.g. the previous step's output
+ * - `{ collection }` — a `ctx.collections` query, resolved by the host
+ * - `{ resume }`     — the redrive path: items come from the stored run,
+ *                      already-`done` ones are skipped, dead-lettered ones get
+ *                      a fresh attempt budget
+ */
+export type FanOutSource<T = unknown> =
+  | { items: readonly T[] }
+  | { collection: string; query?: Record<string, unknown> }
+  | { resume: string };
+
+export interface FanOutSpec<T = unknown, R = unknown> {
+  /** BARE local name. The host qualifies it to `<pluginId>:<name>`, same as
+   *  `facts.define`. Groups runs of the same step together for `list()`. */
+  name: string;
+  source: FanOutSource<T>;
+  /** Runs once per item, at most `concurrency` at a time. Throwing schedules a
+   *  retry; exhausting `maxAttempts` dead-letters the item and leaves the rest
+   *  of the run alone. */
+  each: (item: T, meta: FanOutItemMeta) => Promise<R>;
+  /** Item identity — what per-item status is keyed on, and what makes a
+   *  redrive skip work already done. Defaults to a stable hash of the item, so
+   *  two identical items collapse into one row; supply this when the item has
+   *  a real id. */
+  key?: (item: T) => string;
+  /** Requested parallelism. Clamped to the host ceiling — never raises it. */
+  concurrency?: number;
+  /** Attempts per item before it is dead-lettered. Default 3, minimum 1. */
+  maxAttempts?: number;
+  /** Base delay for exponential backoff between attempts, in ms. Default 1000
+   *  (so 1s, 2s, 4s …). */
+  backoffMs?: number;
+}
+
+export interface FanOutItemMeta {
+  runId: string;
+  /** This item's identity key — see `FanOutSpec.key`. */
+  key: string;
+  /** 1-based attempt number. */
+  attempt: number;
+  /** Aborted when the plugin unmounts. A handler that runs anything long —
+   *  an agent session, an HTTP call — should honour it; the host stops
+   *  scheduling new items either way. */
+  signal: AbortSignal;
+}
+
+export type FanOutRunState = 'running' | 'done' | 'failed' | 'canceled';
+export type FanOutItemState = 'pending' | 'running' | 'done' | 'dead';
+
+export interface FanOutRunSummary {
+  runId: string;
+  /** Qualified — `<pluginId>:<name>`. */
+  name: string;
+  /** `failed` means the run finished with at least one dead-lettered item, not
+   *  that the run itself crashed. */
+  status: FanOutRunState;
+  total: number;
+  succeeded: number;
+  /** Dead-lettered — exhausted `maxAttempts`. Redrive with `{ resume: runId }`. */
+  dead: number;
+  /** Neither done nor dead yet: nonzero only on a `running` or `canceled` run. */
+  pending: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FanOutRunStatus extends FanOutRunSummary {
+  items: FanOutItemStatus[];
+}
+
+export interface FanOutItemStatus {
+  key: string;
+  status: FanOutItemState;
+  attempts: number;
+  /** The item itself, as handed to `run()` — kept so a redrive can replay it
+   *  after a restart, when the source array is long gone. */
+  item: unknown;
+  /** Whatever `each` resolved with, when it succeeded. */
+  result?: unknown;
+  /** Last error message, on a retrying or dead-lettered item. */
+  error?: string;
+  updatedAt: string;
+}
+
+/**
  * Capabilities a manifest row can grant. **Undeclared is denied** — a row with
  * no `grants` key grants nothing, and every registrar below throws for it.
  * That is deliberate: a warning that nobody reads is not a decision.
@@ -507,7 +649,8 @@ export type PluginCapability =
   | 'ui.panel'
   | 'artifacts.write'
   | 'policy.intercept'
-  | 'agents.run';
+  | 'agents.run'
+  | 'fanout.run';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
 // concrete `WorkflowType` / `IntegrationProvider` / `Harness` bindings to the

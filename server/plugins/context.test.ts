@@ -65,6 +65,34 @@ vi.mock('./policy.js', () => ({
   }),
 }));
 
+// fanout.ts owns the scheduler, the global concurrency semaphore and the
+// retry/dead-letter loop; its own tests cover all of that. This file tests
+// context.ts's wiring around it — the grant check on `run`, the ungated
+// reads, and the abort-on-unmount effect — so it mocks the engine rather
+// than driving a real fan-out through SQLite. Registered before context.ts
+// is pulled in, same reasoning as the `fs` mock above.
+const fanoutCalls: Array<{ pluginId: string; method: string; arg: unknown }> = [];
+const abortedFanOutPlugins: string[] = [];
+vi.mock('./fanout.js', () => ({
+  createFanOutApi: vi.fn((pluginId: string) => ({
+    run: vi.fn(async (spec: unknown) => {
+      fanoutCalls.push({ pluginId, method: 'run', arg: spec });
+      return { runId: 'run-1' };
+    }),
+    status: vi.fn(async (runId: unknown) => {
+      fanoutCalls.push({ pluginId, method: 'status', arg: runId });
+      return undefined;
+    }),
+    list: vi.fn(async (name: unknown) => {
+      fanoutCalls.push({ pluginId, method: 'list', arg: name });
+      return [];
+    }),
+  })),
+  abortPluginFanOuts: vi.fn((pluginId: string) => {
+    abortedFanOutPlugins.push(pluginId);
+  }),
+}));
+
 // context.ts imports settings.js statically, which in turn reaches the real
 // fs module through the mock above — that mock must be registered before
 // context.ts is pulled in. bun's mock.module doesn't hoist, so this must be
@@ -125,6 +153,8 @@ beforeEach(() => {
   resetCollections();
   createTestDb();
   registeredPolicyHooks.length = 0;
+  fanoutCalls.length = 0;
+  abortedFanOutPlugins.length = 0;
 });
 
 /** Every capability a gated registrar might need, for tests that aren't
@@ -902,5 +932,62 @@ describe('disposePluginContext clears grants', () => {
     await disposePluginContext(ctx);
 
     expect(getPluginGrants('disposed-plugin')).toEqual([]);
+  });
+});
+describe('ctx.fanout', () => {
+  it('run() reaches the engine when the fanout.run grant is present', async () => {
+    const ctx = createPluginContext('fan-plugin', ['fanout.run']);
+    const spec = { name: 'enrich', source: { items: [1, 2] }, each: async () => 'ok' };
+
+    await expect(ctx.fanout.run(spec)).resolves.toEqual({ runId: 'run-1' });
+    expect(fanoutCalls).toEqual([{ pluginId: 'fan-plugin', method: 'run', arg: spec }]);
+  });
+
+  it('run() throws without the grant, naming the plugin and the capability', () => {
+    const ctx = createPluginContext('fan-plugin-2');
+    const spec = { name: 'enrich', source: { items: [] }, each: async () => 'ok' };
+
+    expect(() => ctx.fanout.run(spec)).toThrow(/"fan-plugin-2"/);
+    expect(() => ctx.fanout.run(spec)).toThrow(/"fanout\.run"/);
+    expect(fanoutCalls).toEqual([]);
+  });
+
+  // Reads follow the facts.read / artifacts.list precedent: ungated.
+  it.each([
+    [
+      'status',
+      (ctx: ReturnType<typeof createPluginContext>) => ctx.fanout.status('run-1'),
+      'run-1',
+    ],
+    ['list', (ctx: ReturnType<typeof createPluginContext>) => ctx.fanout.list('enrich'), 'enrich'],
+  ])('%s() is an ungated read', async (method, call, arg) => {
+    const ctx = createPluginContext(`fan-read-${method}`);
+
+    await call(ctx);
+
+    expect(fanoutCalls).toEqual([{ pluginId: `fan-read-${method}`, method, arg }]);
+  });
+
+  // A fan-out is the one thing still RUNNING at unmount — everything else
+  // registered through ctx is just a table row to delete.
+  it("aborts this plugin's in-flight runs on unmount", async () => {
+    const { disposePluginContext } = await import('./context.js');
+    const ctx = createPluginContext('fan-unmount', ['fanout.run']);
+
+    expect(abortedFanOutPlugins).toEqual([]);
+    await disposePluginContext(ctx);
+
+    expect(abortedFanOutPlugins).toEqual(['fan-unmount']);
+  });
+
+  // Deliberately NOT assertLive-gated: a fan-out is work a healthy plugin
+  // starts long after apply() returned, same as facts.put / artifacts.write.
+  it('still runs after revoke, given the grant', async () => {
+    const ctx = createPluginContext('fan-revoked', ['fanout.run']);
+    revokePluginContext(ctx);
+
+    await expect(
+      ctx.fanout.run({ name: 'enrich', source: { items: [] }, each: async () => 'ok' }),
+    ).resolves.toEqual({ runId: 'run-1' });
   });
 });
