@@ -167,13 +167,12 @@ export function unregisterPluginRoutes(pluginId: string): void {
   );
 }
 
-/** Route count per plugin id, for `octomux doctor`. */
-export function pluginRouteCounts(): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const [pluginId, pluginRoutes] of table) {
-    counts[pluginId] = pluginRoutes.size;
-  }
-  return counts;
+/** Every route a plugin registered, as `"METHOD /path"`, in registration
+ *  order. Backs both `octomux doctor`'s counts (via `.length`) and
+ *  `ctx.catalog`'s `route:METHOD /path` entries (SHR-268) — one accessor
+ *  instead of a count-only export plus a separate lister. */
+export function listPluginRoutes(pluginId: string): string[] {
+  return Array.from(table.get(pluginId)?.keys() ?? []);
 }
 
 function toPluginRequest(req: Request, params: Record<string, string>): PluginRequest {

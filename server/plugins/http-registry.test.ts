@@ -11,7 +11,7 @@ const { default: request } = await import('supertest');
 const {
   registerPluginRoute,
   unregisterPluginRoutes,
-  pluginRouteCounts,
+  listPluginRoutes,
   createPluginParentRouter,
   resetPluginRoutes,
   freezeCoreHttpRoutes,
@@ -152,19 +152,24 @@ describe('http-registry', () => {
     expect(() => unregisterPluginRoutes('never-registered')).not.toThrow();
   });
 
-  it('pluginRouteCounts reports the count per plugin id', () => {
+  it('listPluginRoutes reports "METHOD /path" entries in registration order', () => {
     registerPluginRoute('plugin-a', 'GET', '/one', () => {});
     registerPluginRoute('plugin-a', 'POST', '/two', () => {});
     registerPluginRoute('plugin-b', 'GET', '/one', () => {});
 
-    expect(pluginRouteCounts()).toEqual({ 'plugin-a': 2, 'plugin-b': 1 });
+    expect(listPluginRoutes('plugin-a')).toEqual(['GET /one', 'POST /two']);
+    expect(listPluginRoutes('plugin-b')).toEqual(['GET /one']);
   });
 
-  it('pluginRouteCounts omits a plugin after its routes are unregistered', () => {
+  it('listPluginRoutes returns empty for a plugin that registered nothing', () => {
+    expect(listPluginRoutes('never-registered')).toEqual([]);
+  });
+
+  it('listPluginRoutes is empty for a plugin after its routes are unregistered', () => {
     registerPluginRoute('plugin-a', 'GET', '/one', () => {});
     unregisterPluginRoutes('plugin-a');
 
-    expect(pluginRouteCounts()).toEqual({});
+    expect(listPluginRoutes('plugin-a')).toEqual([]);
   });
 
   // Review finding on SHR-253: decodeURIComponent throws URIError on a
@@ -202,7 +207,8 @@ describe('http-registry', () => {
 
     resetPluginRoutes();
 
-    expect(pluginRouteCounts()).toEqual({});
+    expect(listPluginRoutes('plugin-a')).toEqual([]);
+    expect(listPluginRoutes('plugin-b')).toEqual([]);
   });
 
   // Finding 2: a plugin manifest claiming a reserved id (e.g. `pr-extract`)
@@ -217,7 +223,7 @@ describe('http-registry', () => {
 
       registerPluginRoute(reservedId, 'GET', '/attacker-route', () => {});
 
-      expect(pluginRouteCounts()[reservedId]).toBe(1);
+      expect(listPluginRoutes(reservedId)).toEqual(['GET /core-route']);
     });
 
     it("a reserved id's routes survive an unregister attempt", async () => {
@@ -228,7 +234,7 @@ describe('http-registry', () => {
 
       unregisterPluginRoutes(reservedId);
 
-      expect(pluginRouteCounts()[reservedId]).toBe(1);
+      expect(listPluginRoutes(reservedId)).toEqual(['GET /core-route']);
       const res = await request(makeApp()).get(`/api/p/${reservedId}/core-route`);
       expect(res.status).toBe(200);
     });

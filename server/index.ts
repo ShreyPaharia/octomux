@@ -15,7 +15,7 @@ import { getBindHost, isRemoteMode, isUpgradeAuthorized, ensureToken } from './r
 import { getDb } from './db.js';
 import { octomuxRoot } from './octomux-root.js';
 import { loadPlugins, watchLocalPlugins } from './plugins/loader.js';
-import { pluginRouteCounts } from './plugins/http-registry.js';
+import { pluginProvides } from './plugins/catalog.js';
 import { manifestPath, pluginModulesDir, pluginReportPath } from './plugins/paths.js';
 import {
   setupTerminalWebSocket,
@@ -78,13 +78,16 @@ const pluginReport = await loadPlugins({
 });
 try {
   fs.mkdirSync(octomuxRoot(), { recursive: true });
-  // `routeCounts` (SHR-253) is snapshotted here, not inside `loadPlugins()`
-  // itself — the route table only reflects the CURRENT boot's registrations
-  // once every plugin's apply() has run, which is exactly this point.
-  // `octomux doctor` reads it back via `LoadReportWithMeta` (see
-  // `cli/src/commands/doctor.ts`'s doc comment — this was the known gap it
-  // was written ahead of).
-  const persisted = { ...pluginReport, routeCounts: pluginRouteCounts() };
+  // Each loaded plugin's `provides` (SHR-268) is snapshotted here, not inside
+  // `loadPlugins()` itself — the live registries only reflect the CURRENT
+  // boot's registrations once every plugin's apply() has run, which is
+  // exactly this point. `octomux doctor` has no running server and no live
+  // registries to query, so it reads this persisted report back through
+  // `buildCatalog()` (`server/plugins/catalog.ts`) instead.
+  const persisted = {
+    ...pluginReport,
+    loaded: pluginReport.loaded.map((p) => ({ ...p, provides: pluginProvides(p.id) })),
+  };
   fs.writeFileSync(pluginReportPath(), JSON.stringify(persisted, null, 2));
 } catch (err) {
   logger.warn({ err }, 'failed to persist plugin load report');

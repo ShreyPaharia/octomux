@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
-import { resetPluginRoutes, pluginRouteCounts } from './http-registry.js';
+import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetPluginUi, listUiContributions } from './ui-registry.js';
 import { resetFacts } from './facts.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
@@ -96,7 +96,7 @@ describe('unmountPlugin', () => {
       order.push('second');
     });
 
-    expect(pluginRouteCounts()[pluginId]).toBe(1);
+    expect(listPluginRoutes(pluginId)).toEqual(['GET /thing']);
     expect(getWorkflow(`${pluginId}:mine`)).toBeDefined();
     expect(getHarness(`${pluginId}:fake`).id).toBe(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
@@ -111,10 +111,11 @@ describe('unmountPlugin', () => {
     expect(report.released.workflowKinds).toEqual([`${pluginId}:mine`]);
     expect(report.released.harnessIds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
+    expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
     expect(report.released.effects).toBe(0);
 
     // Actually released, not just reported.
-    expect(pluginRouteCounts()[pluginId]).toBeUndefined();
+    expect(listPluginRoutes(pluginId)).toEqual([]);
     expect(getWorkflow(`${pluginId}:mine`)).toBeUndefined();
     expect(() => getHarness(`${pluginId}:fake`)).toThrow();
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
@@ -159,8 +160,29 @@ describe('unmountPlugin', () => {
       workflowKinds: [],
       harnessIds: [],
       providerKinds: [],
+      factTypes: [],
       effects: 0,
     });
+  });
+
+  it('snapshots what a plugin registered BEFORE any teardown step runs, so `released` stays accurate even though every step below mutates the same registries the snapshot read', async () => {
+    const pluginId = 'lc-snapshot';
+    const ctx = createPluginContext(pluginId);
+
+    ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
+    ctx.harnesses.register(fakeHarness('h'));
+    ctx.integrations.register(fakeProvider('p'));
+    ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+    ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+
+    const report = await unmountPlugin(pluginId, ctx);
+
+    expect(report.failures).toEqual([]);
+    expect(report.released.routes).toBe(1);
+    expect(report.released.uiContributions).toBe(1);
+    expect(report.released.harnessIds).toEqual([`${pluginId}:h`]);
+    expect(report.released.providerKinds).toEqual([`${pluginId}:p`]);
+    expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
   });
 
   it('core harness/provider ids are never touched, even if somehow prefixed the same as a plugin', () => {

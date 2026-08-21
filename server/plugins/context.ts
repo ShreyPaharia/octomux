@@ -16,6 +16,7 @@ import { registerHarness } from '../harnesses/registry.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { registerPluginUiPanel } from './ui-registry.js';
+import { listCatalog } from './catalog.js';
 import type {
   PluginContext,
   PluginSettingsScope,
@@ -278,6 +279,13 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  // Deliberately NOT gated on `assertLive` — same reasoning as `facts.put`
+  // above: this is a read, not a registration. A revoked context still has a
+  // perfectly good view of what's installed; the revoke guard exists to stop
+  // a timed-out apply() from mutating the live registries, not to blind a
+  // plugin to them afterward.
+  const catalog = { list: () => listCatalog() };
+
   const ctx: PluginContext = {
     id,
     logger,
@@ -289,6 +297,7 @@ export function createPluginContext(id: string): PluginContext {
     http,
     facts,
     ui,
+    catalog,
     effect(dispose: () => void | Promise<void>) {
       assertLive('effect');
       if (typeof dispose !== 'function') {

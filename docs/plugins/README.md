@@ -151,6 +151,22 @@ on your object.
 Same qualification and same warn-and-keep-first duplicate policy as
 integrations (`server/harnesses/registry.ts`).
 
+## Reading what is installed — ctx.catalog
+
+`ctx.catalog.list()` returns what's currently installed — every plugin's own
+registrations, every sibling's, and core's — as one flat list, computed live
+from the same registries the three registrars above write into. It's a plain
+read, not a fourth registrar: there's no `register()` on it and no way to
+override another entry, because "what's installed" is a query, never an
+implementation choice. See [`api-reference.md#not-seams`](./api-reference.md#not-seams)
+for the reasoning and [`api-reference.md`](./api-reference.md#ctxcatalog) for
+the full shape.
+
+```js
+const installed = ctx.catalog.list();
+ctx.logger.info({ installed: installed.map((e) => e.id) }, 'who else is here');
+```
+
 ## Kind presets (`kinds/*.json`)
 
 A plugin can ship declarative, schedulable kinds without writing a `run`

@@ -27,6 +27,7 @@ const { resetPluginUi } = await import('./ui-registry.js');
 const { subscribeServerEvents } = await import('../events.js');
 const { createTestDb, insertTestTask } = await import('../test-helpers.js');
 const { createApp } = await import('../app.js');
+const { listCatalog } = await import('./catalog.js');
 
 let tmpDir: string;
 
@@ -117,6 +118,43 @@ function readWatchLog(watchLogPath: string): Array<{ payload: { pct: number } }>
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+}
+
+/** Fixture that registers a route and a fact type (enough to show up in its
+ *  own `provides[]`), then exercises `ctx.catalog` two ways:
+ *
+ *  1. At `apply()` time — written to a marker file, since `loader.ts` only
+ *     adds a row to `mounted` (what `listCatalog()` iterates) AFTER `apply()`
+ *     returns successfully, so even a single-plugin manifest does NOT see
+ *     itself yet here. That's the ordering caveat, captured rather than
+ *     asserted around.
+ *  2. From a `/catalog` route handler — by request time the plugin IS
+ *     mounted, so this is where "the plugin sees itself" actually holds,
+ *     proven over real HTTP through the plugin's own closed-over `ctx`. */
+function fixtureCatalogSource(markerPath: string): string {
+  return `
+import fs from 'fs';
+
+export async function apply(ctx) {
+  ctx.http.route('GET', '/ping', (req, res) => {
+    res.status(200).json({ ok: true });
+  });
+
+  ctx.facts.define({
+    type: 'seen',
+    schema: { type: 'object', properties: {} },
+  });
+
+  fs.writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify({
+    catalogKeys: Object.keys(ctx.catalog),
+    atApplyTime: ctx.catalog.list().map((e) => e.id),
+  }));
+
+  ctx.http.route('GET', '/catalog', (req, res) => {
+    res.status(200).json({ entries: ctx.catalog.list() });
+  });
+}
+`;
 }
 
 beforeEach(() => {
@@ -274,5 +312,80 @@ plugins:
     const emit3 = await request(app).post('/api/p/fixture-a/emit/99');
     expect(emit3.status).toBe(200);
     expect(readWatchLog(watchLog)).toHaveLength(2); // unchanged — B is gone.
+  });
+});
+
+describe('plugin runtime integration: ctx.catalog (SHR-268)', () => {
+  it('is a read-only view a real fixture plugin can see itself and core through, and loses its own entry on unload', async () => {
+    const marker = path.join(tmpDir, 'catalog-marker.json');
+    const fixturePath = writeModule('fixture-catalog.mjs', fixtureCatalogSource(marker));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: fixture-catalog
+    name: ${fixturePath}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(1);
+
+    // What the plugin itself saw, from INSIDE its own apply() — this is the
+    // real ctx.catalog handed to a real fixture module, not a hand-built
+    // PluginContext.
+    const seenFromInside = JSON.parse(fs.readFileSync(marker, 'utf-8')) as {
+      catalogKeys: string[];
+      atApplyTime: string[];
+    };
+
+    // Read-only: `ctx.catalog` has exactly one method. No register/put/etc.
+    expect(seenFromInside.catalogKeys).toEqual(['list']);
+
+    // Ordering caveat: `loader.ts` only adds a row to `mounted` AFTER
+    // `apply()` returns, so a plugin never sees ITSELF from inside its own
+    // apply() — not even in a single-plugin manifest. Core is always visible
+    // (it isn't gated on `mounted`).
+    expect(seenFromInside.atApplyTime).not.toContain('fixture-catalog');
+    expect(seenFromInside.atApplyTime).toContain('core');
+
+    const app = createApp();
+
+    // By request time the plugin IS mounted — this is where "sees itself"
+    // actually holds, proven over real HTTP through the plugin's own ctx.
+    const catalogRes = await request(app).get('/api/p/fixture-catalog/catalog');
+    expect(catalogRes.status).toBe(200);
+    const entries = catalogRes.body.entries as Array<{
+      id: string;
+      kind: string;
+      provides: string[];
+      source: string;
+    }>;
+
+    const self = entries.find((e) => e.id === 'fixture-catalog');
+    expect(self).toMatchObject({ id: 'fixture-catalog', kind: 'plugin', source: fixturePath });
+    expect(self?.provides).toEqual(
+      expect.arrayContaining([
+        'route:GET /ping',
+        'route:GET /catalog',
+        'fact:fixture-catalog:seen',
+      ]),
+    );
+
+    const core = entries.find((e) => e.id === 'core');
+    expect(core).toMatchObject({ id: 'core', kind: 'core', source: 'built-in' });
+    expect(core?.provides).toEqual(expect.arrayContaining(['harness:claude-code']));
+
+    // Same property from OUTSIDE, via the real listCatalog() import.
+    const afterLoad = listCatalog();
+    expect(afterLoad.find((e) => e.id === 'fixture-catalog')).toBeDefined();
+    expect(afterLoad.find((e) => e.id === 'core')).toBeDefined();
+
+    const unloadResult = await unloadPlugin('fixture-catalog');
+    expect(unloadResult.ok).toBe(true);
+
+    // Gone from the catalog on unmount; core survives.
+    const afterUnload = listCatalog();
+    expect(afterUnload.find((e) => e.id === 'fixture-catalog')).toBeUndefined();
+    const coreAfterUnload = afterUnload.find((e) => e.id === 'core');
+    expect(coreAfterUnload).toMatchObject({ id: 'core', kind: 'core' });
   });
 });
