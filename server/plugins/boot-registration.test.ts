@@ -27,7 +27,7 @@ describe('plugin workflow apiRouter mounting order', () => {
     const router = express.Router();
     router.get('/api/__test_boot_before__', (_req, res) => res.status(200).json({ ok: true }));
 
-    const ctx = createPluginContext('boot-before-plugin');
+    const ctx = createPluginContext('boot-before-plugin', ['workflows.register']);
     ctx.workflows.register({
       kind: 'before',
       displayName: 'Before',
@@ -48,7 +48,7 @@ describe('plugin workflow apiRouter mounting order', () => {
     const router = express.Router();
     router.get('/api/__test_boot_after__', (_req, res) => res.status(200).json({ ok: true }));
 
-    const ctx = createPluginContext('boot-after-plugin');
+    const ctx = createPluginContext('boot-after-plugin', ['workflows.register']);
     ctx.workflows.register({
       kind: 'after',
       displayName: 'After',

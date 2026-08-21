@@ -22,7 +22,10 @@ const { default: request } = await import('supertest');
 const { loadPlugins, unloadPlugin, reloadPlugin, resetMountedPlugins } =
   await import('./loader.js');
 const { resetPluginRoutes } = await import('./http-registry.js');
-const { resetFacts, putFact } = await import('./facts.js');
+const { resetFacts, putFact, readFacts } = await import('./facts.js');
+const { evaluatePolicy, resetPolicy } = await import('./policy.js');
+const { acknowledgeGrants, resetPluginGrants } = await import('./grants.js');
+const { listTaskUpdates } = await import('../repositories/tasks.js');
 const { resetPluginUi } = await import('./ui-registry.js');
 const { subscribeServerEvents } = await import('../events.js');
 const { createTestDb, insertTestTask } = await import('../test-helpers.js');
@@ -125,6 +128,8 @@ beforeEach(() => {
   resetPluginRoutes();
   resetFacts();
   resetPluginUi();
+  resetPolicy();
+  resetPluginGrants();
   createTestDb();
 });
 
@@ -134,6 +139,8 @@ afterEach(() => {
   resetPluginRoutes();
   resetFacts();
   resetPluginUi();
+  resetPolicy();
+  resetPluginGrants();
 });
 
 describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
@@ -148,6 +155,7 @@ describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
 plugins:
   - id: fixture-a
     name: ${fixturePath}
+    grants: [http.route, facts.define, facts.put, ui.panel]
 `);
 
     // 1. Mount via the real loadPlugins().
@@ -236,6 +244,7 @@ describe('plugin runtime integration: cross-plugin ctx.facts.watch (SHR-255)', (
 plugins:
   - id: fixture-a
     name: ${writerPath}
+    grants: [http.route, facts.define, facts.put]
   - id: fixture-b
     name: ${watcherPath}
 `);
@@ -274,5 +283,167 @@ plugins:
     const emit3 = await request(app).post('/api/p/fixture-a/emit/99');
     expect(emit3.status).toBe(200);
     expect(readWatchLog(watchLog)).toHaveLength(2); // unchanged — B is gone.
+  });
+});
+
+/**
+ * SHR-259 end-to-end: a real third-party plugin, loaded off disk through the
+ * real `loadPlugins()`, registers a `task.launch` policy hook and refuses a
+ * launch — plus the two halves of the grant model (undeclared is denied; an
+ * acknowledged grant works) and the audit trail a refusal leaves behind.
+ *
+ * This is the "the seam is real" test: nothing in `server/` registers a policy
+ * hook, so if this passes, the only thing that can have denied the launch is
+ * plugin code that came from outside core.
+ */
+function fixtureGuardSource(opts: { deny?: string; patchModel?: string }): string {
+  const body = opts.deny
+    ? `return { deny: ${JSON.stringify(opts.deny)} };`
+    : `return { patch: { model: ${JSON.stringify(opts.patchModel)} } };`;
+  return `
+export function apply(ctx) {
+  ctx.policy.intercept('task.launch', async (intent) => {
+    ${body}
+  });
+}
+`;
+}
+
+describe('plugin runtime integration: ctx.policy + capability grants (SHR-259)', () => {
+  it('refuses a plugin that calls ctx.policy without the grant, naming plugin and capability', async () => {
+    const fixturePath = writeModule('fixture-ungranted.mjs', fixtureGuardSource({ deny: 'nope' }));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: ungranted
+    name: ${fixturePath}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0].id).toBe('ungranted');
+    expect(report.failed[0].phase).toBe('apply');
+    expect(report.failed[0].error).toContain('plugin "ungranted"');
+    expect(report.failed[0].error).toContain('policy.intercept');
+    expect(report.failed[0].error).toContain('grants: [policy.intercept]');
+
+    // Denied means denied: no hook reached the table, so the gate stays open.
+    const outcome = await evaluatePolicy('task.launch', { taskId: 'nope', data: {} });
+    expect(outcome.allowed).toBe(true);
+  });
+
+  it('denies a task.launch with the plugin reason and records it as a fact and in task history', async () => {
+    const task = insertTestTask();
+    const fixturePath = writeModule(
+      'fixture-spendcap.mjs',
+      fixtureGuardSource({ deny: 'monthly cap reached' }),
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: spendcap
+    name: ${fixturePath}
+    grants: [policy.intercept]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+    expect(report.grants?.spendcap).toEqual(['policy.intercept']);
+
+    const outcome = await evaluatePolicy('task.launch', {
+      taskId: task.id,
+      repoPath: task.repo_path,
+      data: { harnessId: 'claude-code', model: null, agent: null },
+    });
+
+    expect(outcome).toEqual({
+      allowed: false,
+      reason: 'monthly cap reached',
+      pluginId: 'spendcap',
+    });
+
+    // Recorded as a fact — machine-readable audit.
+    const facts = await readFacts(task.id, { type: 'core:policy.decision' });
+    expect(facts).toHaveLength(1);
+    expect(facts[0].payload).toMatchObject({
+      point: 'task.launch',
+      pluginId: 'spendcap',
+      decision: 'deny',
+      reason: 'monthly cap reached',
+    });
+
+    // ...and in the task's own history, which is what a human actually sees.
+    const updates = listTaskUpdates(task.id);
+    const policyRow = updates.find((u) => u.kind === 'policy');
+    expect(policyRow).toBeDefined();
+    expect(policyRow?.body).toContain('spendcap');
+    expect(policyRow?.body).toContain('monthly cap reached');
+
+    // Unmounting the plugin takes the refusal with it.
+    const unloaded = await unloadPlugin('spendcap');
+    expect(unloaded.ok).toBe(true);
+    const afterUnmount = await evaluatePolicy('task.launch', { taskId: task.id, data: {} });
+    expect(afterUnmount.allowed).toBe(true);
+  });
+
+  it('rewrites the model on the way through', async () => {
+    const task = insertTestTask();
+    const fixturePath = writeModule(
+      'fixture-router.mjs',
+      fixtureGuardSource({ patchModel: 'claude-haiku-4-5-20251001' }),
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: router
+    name: ${fixturePath}
+    grants: [policy.intercept]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+
+    const outcome = await evaluatePolicy('task.launch', {
+      taskId: task.id,
+      data: { harnessId: 'claude-code', model: 'claude-opus-5', agent: null },
+    });
+
+    expect(outcome.allowed).toBe(true);
+    expect(outcome.allowed && outcome.data.model).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('withholds a grant added to an already-acknowledged row until it is approved', async () => {
+    const fixturePath = writeModule('fixture-widen.mjs', fixtureGuardSource({ deny: 'nope' }));
+    const narrow = `
+plugins:
+  - id: widen
+    name: ${fixturePath}
+    grants: [facts.put]
+`;
+    // First boot acknowledges whatever the row declares — the user added it.
+    const manifestPath = writeManifest(narrow);
+    const first = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    // `facts.put` alone is not enough for this fixture's apply(), so it fails —
+    // what matters here is the ledger it left behind.
+    expect(first.failed[0]?.error).toContain('policy.intercept');
+
+    resetMountedPlugins();
+
+    // Now the row asks for more. The added grant is withheld, not silently taken.
+    writeManifest(`
+plugins:
+  - id: widen
+    name: ${fixturePath}
+    grants: [facts.put, policy.intercept]
+`);
+    const second = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(second.pendingGrants?.widen).toEqual(['policy.intercept']);
+    expect(second.failed[0]?.error).toContain('policy.intercept');
+
+    // Acknowledge it the way `octomux plugins approve` does, and it takes effect.
+    acknowledgeGrants(manifestPath, 'widen', ['facts.put', 'policy.intercept']);
+    resetMountedPlugins();
+    const third = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(third.failed).toEqual([]);
+    expect(third.pendingGrants).toBeUndefined();
   });
 });

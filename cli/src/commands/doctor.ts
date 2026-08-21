@@ -21,11 +21,20 @@ import type { LoadReport } from '@octomux/plugin-api';
  * `loadPlugins()` resolves — so every report from a running server carries a
  * real `routeCounts`. Declared locally here only so this file type-checks
  * against `LoadReport` without importing the intersection type.
+ *
+ * `grants`/`pendingGrants` (SHR-259) are the identical story: `loadPlugins()`
+ * (`server/plugins/loader.ts`) now writes both onto the report it returns —
+ * `grants` is every plugin's EFFECTIVE capability set this boot, `pending
+ * Grants` is what a widened-but-unacknowledged row had withheld. Both are
+ * absent on a report persisted by an older build, which is exactly why they
+ * are optional here rather than required.
  */
 type LoadReportWithMeta = LoadReport & {
   manifestError?: string;
   loadedAt?: string;
   routeCounts?: Record<string, number>;
+  grants?: Record<string, string[]>;
+  pendingGrants?: Record<string, string[]>;
 };
 
 // A `failed[].error` string comes straight from a plugin's own thrown Error —
@@ -142,6 +151,22 @@ export function registerDoctor(program: Command): void {
           console.log(
             `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms${routesSuffix}`,
           );
+          // An older report has no `grants` key at all — omit the line
+          // entirely rather than print a misleading "none", same convention
+          // as `routeCounts` above.
+          const granted = report.grants?.[p.id];
+          if (granted !== undefined) {
+            const grantsText = granted.length > 0 ? granted.map(sanitize).join(', ') : 'none';
+            console.log(`      grants: ${grantsText}`);
+          }
+          const pending = report.pendingGrants?.[p.id];
+          if (pending && pending.length > 0) {
+            console.log(
+              chalk.yellow(
+                `      ⚠ withheld (not acknowledged): ${pending.map(sanitize).join(', ')} — run: octomux plugins approve ${p.id}`,
+              ),
+            );
+          }
         }
       }
 

@@ -89,6 +89,18 @@ describe('TaskActivityPanel', () => {
     });
   });
 
+  it('renders policy updates with the policy label and author', async () => {
+    apiMock.getTaskUpdates.mockResolvedValue([
+      makeUpdate({ id: 'u5', kind: 'policy', body: 'denied task.launch: over budget' }),
+    ]);
+    renderWithRouter(<TaskActivityPanel taskId="task-1" />);
+    await waitFor(() => {
+      expect(screen.getByText('Policy')).toBeInTheDocument();
+      expect(screen.getByText('denied task.launch: over budget')).toBeInTheDocument();
+      expect(screen.getByText('policy')).toBeInTheDocument();
+    });
+  });
+
   it('calls getTaskUpdates with the task id', async () => {
     renderWithRouter(<TaskActivityPanel taskId="my-task-id" />);
     await waitFor(() => {

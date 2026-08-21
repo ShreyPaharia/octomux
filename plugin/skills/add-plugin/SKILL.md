@@ -59,15 +59,41 @@ plugins:
     integrity: sha512-... # optional — shape-validated only; not yet enforced against the tarball (see below)
     config: {} # optional, opaque, passed through — not read by the loader itself
     disabled: false # optional — omit or false = enabled
+    grants: [policy.intercept, facts.put] # optional — omit or [] = the plugin gets nothing
 ```
 
-Only those six keys are allowed on a row, and only `plugins` at the top level —
+Only those seven keys are allowed on a row, and only `plugins` at the top level —
 anything else fails to parse rather than being silently ignored. `name` must
 resolve safely: an npm package name or an absolute path, never a relative path, a
 URL scheme, or anything containing a NUL byte (`import()` natively resolves
 `data:`/`http(s):`/`file:` URLs, so this is a real security boundary, not just a
 shape check). YAML anchors/aliases (`&`/`*`) are rejected outright — a manifest
 has no legitimate use for them and they're a known expansion-bomb vector.
+
+## Reading `grants:` before you trust it
+
+`grants` is the plugin author's claim about which `ctx` methods their code
+calls — `workflows.register`, `integrations.register`, `harnesses.register`,
+`http.route`, `facts.define`, `facts.put`, `ui.panel`, `policy.intercept`. It's
+enforced (an undeclared call throws and the plugin fails to load), so the list
+is accurate about what the plugin's `ctx` calls can do. It says nothing about
+what the plugin's _other_ code can do — see "Security posture" above: no
+grant list confines a plugin, because it runs in-process with full privileges
+regardless of what it declares.
+
+**`policy.intercept` is the one worth reading twice.** Every other grant is
+additive — a plugin adds a workflow, a route, a fact. A plugin with
+`policy.intercept` can register a hook on `task.launch`, `harness.resume`,
+`review.publish`, or `integration.send` that denies the action outright or
+silently rewrites data on its way through (patching `model`, `verdict`, or
+`payload`). Read what the plugin's own docs say its hook does before granting
+it — a deny you didn't expect looks like a hung or rejected task, not an
+obvious plugin problem, and the fail-open contract means a _broken_ hook is
+invisible (see `create-plugin` for the guarantees a hook author is held to).
+
+A manifest row's grants only take effect after you've acknowledged them once
+(see "Acknowledging grants" below) — adding `policy.intercept` to an existing
+row's `grants:` list is not, by itself, enough to activate it.
 
 ## `octomux plugins list|disable|enable`
 
@@ -112,15 +138,24 @@ Report file last modified  2026-08-16T...
 
 Loaded (1)
   ✓ demo (octomux-plugin-demo@1.0.0) — 8.9ms
+      grants: policy.intercept, facts.put
+      ⚠ withheld (not acknowledged): ui.panel — run: octomux plugins approve demo
 
 Failed (0)
   none
 ```
 
-("Report generated" shows "unknown (older report)" today — the persisted report
-doesn't carry a `loadedAt` timestamp yet; that field is declared in `doctor.ts`
-for a follow-up but the loader doesn't write it. "Report file last modified"
-(the file's actual mtime) is the reliable timestamp until then.)
+`grants` under each loaded row is the effective set that plugin got _this
+boot_ — after the acknowledgement ledger, not just what `octomux.yml` says.
+The `withheld` line lists anything the row newly declared that's still
+pending acknowledgement; no line means nothing's waiting on you. A capability
+missing from both is one the row never declared — check `octomux.yml`, not
+`doctor`, for that. `octomux doctor --json` carries the same data as
+`report.grants[id]` / `report.pendingGrants[id]`.
+
+A row printed with `grants: none` declared nothing and can use no gated `ctx`
+method; a report written by an older build omits the line entirely rather than
+printing a misleading `none`.
 
 A `Failed` row names the phase — `resolve` (couldn't find/require the package),
 `import` (module loaded but threw or had no `apply()` export), or `apply` (threw
@@ -130,6 +165,25 @@ code.
 
 If `doctor` reports "No plugin load report … yet", octomux has never started
 against that data dir — start it once first.
+
+## Acknowledging widened grants
+
+Editing `grants:` in `octomux.yml` to add a capability to an already-installed
+plugin does not hand it over at the next boot. The set your ledger has already
+acknowledged lives in `plugin-grants.json` next to the manifest; anything a
+row declares beyond that is pending, and the registrar call it gates throws
+(load-report `phase: 'apply'` failure) until you approve it:
+
+```bash
+octomux plugins approve demo
+```
+
+This is the one moment a widened grant — especially `policy.intercept` — is a
+human decision rather than a config edit taking silent effect. A first-time
+install skips this: the first time a row appears in the ledger, whatever it
+declares is acknowledged automatically (you just added the row yourself).
+Narrowing `grants:` (removing a capability) also takes effect immediately, no
+approval needed — only widening is gated.
 
 ## Recovery when a plugin breaks boot
 

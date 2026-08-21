@@ -120,6 +120,97 @@ describe('octomux doctor', () => {
     expect(output).toContain('no-routes (no-routes-plugin@1.0.0) — 0.5ms\n');
   });
 
+  it('prints each loaded plugin\'s granted capabilities, and "grants: none" when the granted set is empty', async () => {
+    writeReport({
+      loaded: [
+        {
+          id: 'policy-bot',
+          name: 'policy-bot-plugin',
+          version: '1.0.0',
+          resolvedPath: '/x',
+          order: 0,
+          applyMs: 1.1,
+        },
+        {
+          id: 'quiet-plugin',
+          name: 'quiet-plugin',
+          version: '1.0.0',
+          resolvedPath: '/y',
+          order: 1,
+          applyMs: 0.5,
+        },
+      ],
+      failed: [],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+      grants: { 'policy-bot': ['policy.intercept', 'facts.put'], 'quiet-plugin': [] },
+    } as LoadReport);
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('grants: policy.intercept, facts.put');
+    expect(output).toContain('grants: none');
+  });
+
+  it('prints a pending-grants warning with the approve command, for a widened but unacknowledged grant', async () => {
+    writeReport({
+      loaded: [
+        {
+          id: 'widening-plugin',
+          name: 'widening-plugin',
+          version: '1.0.0',
+          resolvedPath: '/x',
+          order: 0,
+          applyMs: 1.1,
+        },
+      ],
+      failed: [],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+      grants: { 'widening-plugin': ['harnesses.register'] },
+      pendingGrants: { 'widening-plugin': ['policy.intercept'] },
+    } as LoadReport);
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).toContain('withheld (not acknowledged): policy.intercept');
+    expect(output).toContain('octomux plugins approve widening-plugin');
+  });
+
+  it('omits the grants line entirely for an older report with no grants field, rather than printing "none"', async () => {
+    writeReport({
+      loaded: [
+        {
+          id: 'old-report-plugin',
+          name: 'old-report-plugin',
+          version: '1.0.0',
+          resolvedPath: '/x',
+          order: 0,
+          applyMs: 1.1,
+        },
+      ],
+      failed: [],
+      manifestPath: '/fake/octomux.yml',
+      safeMode: false,
+    });
+
+    vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
+
+    const program = makeProgram();
+    await program.parseAsync(['node', 'octomux', 'doctor']);
+
+    const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(output).not.toContain('grants:');
+  });
+
   it('reports JSON mode with the raw persisted report', async () => {
     const report: LoadReport = {
       loaded: [],

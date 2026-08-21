@@ -8,6 +8,8 @@ import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
 import { resetProviders, getProvider, CORE_PROVIDER_KINDS } from '../integrations/registry.js';
 import { subscribeServerEvents } from '../events.js';
+import { evaluatePolicy, resetPolicy } from './policy.js';
+import { resetPluginGrants } from './grants.js';
 import type { PluginContext } from '@octomux/plugin-api';
 
 // `workflows/registry.ts` has no resetWorkflows() (deliberate — presets.ts
@@ -53,6 +55,8 @@ beforeEach(() => {
   resetFacts();
   resetHarnesses();
   resetProviders();
+  resetPolicy();
+  resetPluginGrants();
 });
 
 describe('getPluginUnloadability', () => {
@@ -77,9 +81,17 @@ describe('getPluginUnloadability', () => {
 });
 
 describe('unmountPlugin', () => {
-  it('releases routes, ui, workflow kinds, harnesses, and providers, and runs ctx.effect() in reverse', async () => {
+  it('releases routes, ui, policy hooks, workflow kinds, harnesses, and providers, and runs ctx.effect() in reverse', async () => {
     const pluginId = 'lc-full';
-    const ctx = createPluginContext(pluginId);
+    const ctx = createPluginContext(pluginId, [
+      'http.route',
+      'workflows.register',
+      'harnesses.register',
+      'integrations.register',
+      'facts.define',
+      'ui.panel',
+      'policy.intercept',
+    ]);
 
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
     ctx.workflows.register({ kind: 'mine', displayName: 'Mine', surfaces: ['feed'] });
@@ -87,6 +99,7 @@ describe('unmountPlugin', () => {
     ctx.integrations.register(fakeProvider('fake'));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+    ctx.policy.intercept('task.launch', () => ({ deny: 'no' }));
 
     const order: string[] = [];
     ctx.effect(() => {
@@ -101,6 +114,7 @@ describe('unmountPlugin', () => {
     expect(getHarness(`${pluginId}:fake`).id).toBe(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
+    expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(false);
 
     const report = await unmountPlugin(pluginId, ctx);
 
@@ -108,6 +122,7 @@ describe('unmountPlugin', () => {
     expect(report.failures).toEqual([]);
     expect(report.released.routes).toBe(1);
     expect(report.released.uiContributions).toBe(1);
+    expect(report.released.policyHooks).toBe(1);
     expect(report.released.workflowKinds).toEqual([`${pluginId}:mine`]);
     expect(report.released.harnessIds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
@@ -119,6 +134,9 @@ describe('unmountPlugin', () => {
     expect(() => getHarness(`${pluginId}:fake`)).toThrow();
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(false);
+    // The policy hook stopped firing — the point falls back to the fast
+    // "no hooks registered" path and allows through.
+    expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(true);
 
     // ctx.effect() ran in reverse registration order.
     expect(order).toEqual(['second', 'first']);
@@ -156,6 +174,7 @@ describe('unmountPlugin', () => {
     expect(report.released).toEqual({
       routes: 0,
       uiContributions: 0,
+      policyHooks: 0,
       workflowKinds: [],
       harnessIds: [],
       providerKinds: [],
@@ -173,7 +192,7 @@ describe('unmountPlugin', () => {
 
   it('broadcasts plugin:ui-updated after every unmount', async () => {
     const pluginId = 'lc-broadcast';
-    const ctx = createPluginContext(pluginId);
+    const ctx = createPluginContext(pluginId, ['harnesses.register']);
     ctx.harnesses.register(fakeHarness('v1'));
 
     const events: unknown[] = [];

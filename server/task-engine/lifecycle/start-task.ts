@@ -26,6 +26,7 @@ import {
   applyOrchestratorMcpConfig,
 } from '../launch.js';
 import { runSetup } from '../setup/index.js';
+import { enforcePolicy } from '../../plugins/policy.js';
 
 const logger = childLogger('task-engine/lifecycle');
 
@@ -135,6 +136,7 @@ async function prepareFirstAgentLaunch(
   task: Task,
   setup: import('../setup/types.js').SetupResult,
   harness: import('../../harnesses/index.js').Harness,
+  modelOverride: string | null,
 ): Promise<FirstAgentLaunchParams> {
   const agentId = nanoid(12);
   const agentName = task.agent ?? null;
@@ -157,7 +159,7 @@ async function prepareFirstAgentLaunch(
     sessionId: sessionIdForLaunch,
     agent: agentName,
     flags,
-    model: (task as any).model ?? null,
+    model: modelOverride,
     workspacePath: setup.worktreePath,
   });
   const startupCmd = buildAgentStartupCommand({
@@ -235,8 +237,22 @@ export async function startTask(task: Task): Promise<void> {
     'createTask: start',
   );
 
-  let stage = 'validate';
+  let stage = 'policy';
   try {
+    const originalModel = (task as any).model ?? null;
+    const decided = await enforcePolicy('task.launch', {
+      taskId: id,
+      repoPath: task.repo_path,
+      data: { harnessId: task.harness_id, model: originalModel, agent: task.agent ?? null },
+    });
+    const modelOverride = typeof decided.model === 'string' ? decided.model : originalModel;
+    if (modelOverride !== originalModel) {
+      logger.info(
+        { task_id: id, operation: 'policy', from: originalModel, to: modelOverride },
+        'createTask: policy patched model',
+      );
+    }
+
     stage = 'mode_setup';
     const setup = await timed(id, 'mode_setup', () => runSetup(task));
 
@@ -246,7 +262,7 @@ export async function startTask(task: Task): Promise<void> {
     stage = 'launch_agent';
     const harness = getHarness(task.harness_id);
     const { agentId, hookToken, sessionIdForDb, startupCmd } = await timed(id, 'launch_agent', () =>
-      prepareFirstAgentLaunch(id, task, setup, harness),
+      prepareFirstAgentLaunch(id, task, setup, harness, modelOverride),
     );
 
     stage = 'tmux_session';

@@ -18,6 +18,7 @@ import {
 import { buildAgentStartupCommand, launchAgentWindow, prepareResumeLaunch } from '../launch.js';
 import { cleanupLinkedSessions } from '../sessions.js';
 import { checkDirty } from '../git.js';
+import { enforcePolicy } from '../../plugins/policy.js';
 
 const logger = childLogger('task-engine/lifecycle');
 
@@ -82,6 +83,7 @@ export async function relaunchStoppedAgents(
   session: string,
   cwd: string,
   prompt?: string,
+  modelOverride?: string | null,
 ): Promise<number> {
   const agents = listStoppedAgents(task.id);
   let sessionCreated = false;
@@ -93,7 +95,7 @@ export async function relaunchStoppedAgents(
         (task as { schedule_id?: string | null }).schedule_id,
       ),
     });
-    const taskModel = (task as any).model ?? null;
+    const taskModel = modelOverride !== undefined ? modelOverride : ((task as any).model ?? null);
     const baseCmd = prepareResumeLaunch({ agent, harness, flags, model: taskModel, cwd });
     // Deliver the resume prompt through the first agent's startup command
     // (positional arg) — race-free, unlike send-keys against a booting TUI.
@@ -147,11 +149,29 @@ export async function resumeTask(task: Task, opts?: { prompt?: string }): Promis
   );
 
   try {
+    // Gates only the resume verb. `respawn-agent.ts` (fresh agent, loop iterations)
+    // and `add-agent.ts` (new window on a running task) are different verbs — they
+    // propagate errors straight to their HTTP/loop callers rather than through
+    // `tasks.error`, so they are not wired to this gate here.
+    const originalModel = (task as any).model ?? null;
+    const decided = await enforcePolicy('harness.resume', {
+      taskId: task.id,
+      repoPath: task.repo_path,
+      data: { harnessId: task.harness_id, model: originalModel, prompt: opts?.prompt ?? null },
+    });
+    const modelOverride = typeof decided.model === 'string' ? decided.model : originalModel;
+
     await validateResumeTask(task);
     await prepareResumeSession(task, session);
     const cwd = task.worktree!;
     await bootstrapResumeHooks(task, cwd, session);
-    const recoveredAgents = await relaunchStoppedAgents(task, session, cwd, opts?.prompt);
+    const recoveredAgents = await relaunchStoppedAgents(
+      task,
+      session,
+      cwd,
+      opts?.prompt,
+      modelOverride,
+    );
 
     logger.info(
       { task_id: task.id, operation: 'resumeTask', recovered_agents: recoveredAgents },
