@@ -34,31 +34,52 @@ runtime yet either — it's reserved for a future compatibility check.
 
 ```ts
 export interface PluginContext {
-  readonly id: string; // this row's bare manifest id
+  readonly id: string; // manifest row id (bare, unqualified)
   readonly logger: PluginLogger;
   readonly settings: PluginSettingsScope;
   readonly kv: PluginKv;
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly compute: ComputeRegistrar;
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
   readonly collections: CollectionsRegistrar;
-  readonly ui: UiRegistrar;
-  readonly catalog: CatalogReader;
-  readonly fanout: FanOutApi;
-  effect(dispose: () => void | Promise<void>): void;
-  readonly compute: ComputeRegistrar;
+  readonly artifacts: ArtifactsApi;
   readonly agents: AgentRunner;
+  readonly ui: UiRegistrar;
+  readonly policy: PolicyRegistrar;
   readonly surfaces: SurfaceRegistrar;
+  readonly fanout: FanOutApi;
+  readonly catalog: CatalogReader;
+  effect(dispose: () => void | Promise<void>): void;
 }
 ```
 
-`http`, `facts`, `ui`, and `effect` aren't documented here yet — that's other
-tickets' debt. `catalog` is below, `collections` after it.
-
 One context is built per manifest row (`createPluginContext(row.id)` in
-`context.ts`) and handed only to that row's `apply()`/`reconcile()`.
+`context.ts`) and handed only to that row's `apply()`/`reconcile()`. Every
+member:
+
+| Member                                                             | What it does                                                     |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| [`ctx.logger`](#ctxlogger)                                         | structured logging — ungated                                     |
+| [`ctx.settings`](#ctxsettings)                                     | this plugin's own settings blob — ungated                        |
+| [`ctx.kv`](#ctxkv)                                                 | opaque key/value storage — throws on every call today            |
+| [`ctx.workflows`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a cron-schedulable workflow kind                       |
+| [`ctx.integrations`](#ctxworkflows--ctxintegrations--ctxharnesses) | registers an outbound integration provider                       |
+| [`ctx.harnesses`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a coding-agent harness                                 |
+| [`ctx.compute`](#ctxcompute)                                       | registers where a task's worktree/processes live                 |
+| [`ctx.http`](#ctxhttp)                                             | registers a route at `/api/p/<pluginId>/...`                     |
+| [`ctx.facts`](#ctxfacts)                                           | task-scoped, append-only observation log                         |
+| [`ctx.collections`](#ctxcollections)                               | durable, keyed, schema-validated records                         |
+| [`ctx.artifacts`](#ctxartifacts)                                   | files written into a task's worktree                             |
+| [`ctx.agents`](#ctxagents)                                         | runs a headless, structured-output agent session                 |
+| [`ctx.ui`](#ctxui)                                                 | declarative panel bindings, never components                     |
+| [`ctx.policy`](#ctxpolicy)                                         | the one member that can deny a core action                       |
+| [`ctx.surfaces`](#ctxsurfaces)                                     | registers a place octomux presents itself to a human             |
+| [`ctx.fanout`](#ctxfanout)                                         | runs a step per item, with retries and a host-enforced cap       |
+| [`ctx.catalog`](#ctxcatalog)                                       | reads what's installed — every plugin's registrations, plus core |
+| [`ctx.effect()`](#ctxeffect)                                       | registers your own teardown, run in reverse order on unmount     |
 
 ### `ctx.logger`
 
@@ -205,6 +226,61 @@ The eight bold-"yes" functions are exactly `HARNESS_REQUIRED_FN_FIELDS` in
 hot path (task launch, hook install/uninstall, settings validate/merge, flag
 resolution).
 
+### `ctx.http`
+
+```ts
+interface HttpRegistrar {
+  route(method: HttpMethod, path: string, handler: PluginRouteHandler): void;
+}
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+type PluginRouteHandler = (req: PluginRequest, res: PluginResponse) => void | Promise<void>;
+interface PluginRequest {
+  readonly params: Record<string, string>;
+  readonly query: Record<string, unknown>;
+  readonly body: unknown;
+  readonly headers: Record<string, string | string[] | undefined>;
+}
+interface PluginResponse {
+  status(code: number): PluginResponse;
+  json(body: unknown): void;
+}
+```
+
+Routes are DATA in a lookup table (`server/plugins/http-registry.ts`), not an
+Express `Router` — that is the whole reason hot reload is possible at all.
+`WorkflowType.apiRouter` hands a plugin a real `Router`, and express 5 cannot
+unmount one; a route registered here is a row that ONE permanently-mounted
+parent router looks up (`createPluginParentRouter()`, mounted at `/api/p` by
+`server/api.ts`), so removing a plugin just deletes its rows — nothing was
+ever mounted.
+
+A plugin declares a path relative to its own namespace: `ctx.http.route('GET',
+'/coverage/:task', handler)` serves at `/api/p/<pluginId>/coverage/:task`.
+Dispatch is a hand-rolled segment matcher, not `path-to-regexp` — **first
+match wins with no specificity ranking**, so register a literal route
+(`/coverage/latest`) before a param route that would otherwise shadow it
+(`/coverage/:task`).
+
+`PluginRequest`/`PluginResponse` are deliberately not express's own types — a
+types-only package must not depend on express, and the host owns the adapter.
+`headers` is lowercased, the way express normalizes them — without it a
+plugin route has no way to authenticate a caller at all.
+
+```js
+ctx.http.route('GET', '/coverage/:task', (req, res) => {
+  res.status(200).json({ pct: lookupCoverage(req.params.task) });
+});
+```
+
+Gate: `http.route`. Unmount: every route this plugin registered is dropped
+(`unregisterPluginRoutes`).
+
+**Read the warning.** A route handler receives the raw request headers,
+including the remote-mode auth token of whoever called it, and `/api/p/*`
+sits behind `remoteAuthMiddleware` like every other API route — nothing
+sandboxes what a handler does with that header.
+
 ### `ctx.catalog`
 
 ```ts
@@ -236,6 +312,73 @@ never includes yourself, even in a single-plugin manifest; it includes
 siblings that finished mounting earlier (manifest order) and always includes
 `core`. Call it later — a route handler, a `run`, anything that executes
 after `apply()` finishes — to see yourself.
+
+### `ctx.facts`
+
+```ts
+interface FactsRegistrar {
+  define(def: FactTypeDefinition): void;
+  put(taskId: string, localType: string, payload: unknown): Promise<void>;
+  read(taskId: string, opts?: FactQuery): Promise<Fact[]>;
+  watch(qualifiedType: string, onFact: (fact: Fact) => void): () => void;
+}
+interface FactTypeDefinition {
+  type: string; // BARE local type. The host qualifies it to `<pluginId>:<type>`.
+  schema: Record<string, unknown>; // JSON Schema for the payload — also drives ctx.ui.
+}
+interface FactQuery {
+  type?: string; // Qualified fact type to filter on.
+  sinceSeq?: number; // Only facts with `seq` strictly greater than this.
+}
+interface Fact {
+  seq: number;
+  taskId: string;
+  type: string; // Qualified — `core:diff`, `coverage-bot:coverage`.
+  payload: unknown;
+  createdAt: string;
+}
+```
+
+A typed, task-scoped, append-only log every plugin can write to and read
+from. Before this the only wire between plugin types was `HookEnvelope`:
+seven fixed event names, outbound only, fire-and-forget, with no read path at
+all. This is an observation log, not event sourcing — tasks remain the
+source of truth.
+
+`define()` declares a BARE local type; the host qualifies it to
+`<pluginId>:<type>` (`qualify()`), so a plugin can add `coverage-bot:coverage`
+and can never overwrite `core:diff`. Core itself publishes exactly two fact
+types today — `core:review.published` and `core:policy.decision`
+(`CORE_FACT_TYPES`, `server/plugins/facts.ts`) — a plugin reads those, never
+writes them.
+
+`put(taskId, localType, payload)` validates `payload` against the type's
+schema and rejects a violation with the plugin/type named in the error.
+`read(taskId, opts?)` is **unscoped** — every plugin's facts on that task,
+not just this one's own, same discipline as `ctx.collections.query`.
+`watch(qualifiedType, cb)` takes a QUALIFIED type and returns an unsubscribe
+that is also auto-disposed on unmount.
+
+```js
+ctx.facts.define({
+  type: 'coverage',
+  schema: { type: 'object', required: ['pct'], properties: { pct: { type: 'number' } } },
+});
+await ctx.facts.put(taskId, 'coverage', { pct: 87.4 });
+const all = await ctx.facts.read(taskId);
+```
+
+Gates: `facts.define`, `facts.put`. `read`/`watch` are ungated.
+
+Unmount drops this plugin's fact **type definitions**, never facts already
+written — those die with their task, not with the plugin. Watchers this
+plugin registered via `ctx.facts.watch` are auto-unsubscribed; a _sibling_
+plugin's watcher on one of this plugin's types is deliberately left running.
+`unregisterPluginFacts` can only reach watchers registered by the plugin
+unmounting — a reload (not an unload) redefines the same qualified type
+moments later, so tearing down every watcher on it would silently kill a
+sibling's live subscription with no error and no log
+(`server/plugins/facts.ts`).
 
 ### `ctx.collections`
 
@@ -323,6 +466,53 @@ ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
 A fact-bound panel renders that task's facts; a collection-bound panel renders
 the collection's records, with no task involved. Records reach the SPA over
 `GET /api/plugin-collections/<qualified-name>`.
+
+### `ctx.artifacts`
+
+```ts
+interface ArtifactsApi {
+  write(taskId: string, artifact: ArtifactInput): Promise<ArtifactEntry>;
+  list(taskId: string): Promise<ArtifactEntry[]>;
+}
+interface ArtifactInput {
+  name: string; // `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` — no separators, no `..`
+  mime: string; // e.g. `text/markdown`, `application/json`, `image/svg+xml`
+  body: string;
+}
+interface ArtifactEntry {
+  pluginId: string; // artifacts are namespaced by the writing plugin
+  name: string;
+  mime: string;
+  size: number; // utf8 byte length of the body
+  updatedAt: string; // `YYYY-MM-DD HH:MM:SS` UTC — sqlite `datetime('now')` shape
+  url: string; // `/api/tasks/<taskId>/artifacts/<pluginId>/<name>`
+}
+```
+
+A METHOD on `ctx`, not a registrar — nobody needs a different artifact
+implementation, they need to write one. `write(taskId, {name, mime, body})`
+drops a file at `<worktree>/.octomux/artifacts/<pluginId>/<name>`, with
+metadata in a sibling `index.json` (since `mime` isn't recoverable from the
+filesystem alone). Rejects if the task has no worktree yet. `name` must match
+`[A-Za-z0-9][A-Za-z0-9._-]{0,127}` — no path separators, no `..`.
+
+Artifacts land in the task's git worktree — they diff, and they outlive both
+the plugin and a DB wipe. There is no unmount teardown: an artifact is output
+a plugin already produced, not a live registration. `list(taskId)` is
+**unscoped**, like `facts.read` — every plugin's artifacts on that task, not
+just this one's own. `server/services/run-detail.ts` surfaces them on
+`GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
+further core change.
+
+```js
+await ctx.artifacts.write(taskId, {
+  name: 'report.md',
+  mime: 'text/markdown',
+  body: '# Coverage report\n\n87.4%',
+});
+```
+
+Gate: `artifacts.write`. `list` is ungated.
 
 ## `ctx.compute`
 
@@ -564,6 +754,132 @@ Expose one yourself with `ctx.http.route` if you want a button.
 Until `ctx.collections` lands, a `{ collection }` source throws with a message
 saying so — pass `{ items }` in the meantime.
 
+### `ctx.policy`
+
+```ts
+interface PolicyRegistrar {
+  intercept(point: PolicyPoint, hook: PolicyHook): void;
+}
+type PolicyPoint = 'task.launch' | 'harness.resume' | 'review.publish' | 'integration.send';
+interface PolicyIntent {
+  readonly point: PolicyPoint;
+  readonly taskId?: string; // present for task-scoped points
+  readonly repoPath?: string;
+  readonly data: Readonly<Record<string, unknown>>; // earlier hooks' patches already applied
+}
+type PolicyDecision =
+  | void
+  | { deny: string; patch?: never }
+  | { patch: Record<string, unknown>; deny?: never };
+type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<PolicyDecision>;
+```
+
+The one member of `ctx` that can say **no**, not just add. Every other
+registrar is additive — a workflow, a route, a fact, a panel. `intercept`
+runs a hook between "a run wants to start" and "a run starts," and that hook
+may deny it with a reason or patch it on the way through.
+
+| point              | `data` keys                           | patchable |
+| ------------------ | ------------------------------------- | --------- |
+| `task.launch`      | `harnessId`, `model`, `agent`         | `model`   |
+| `harness.resume`   | `harnessId`, `model`, `prompt`        | `model`   |
+| `review.publish`   | `verdict`, `bodyLength`               | `verdict` |
+| `integration.send` | `integrationKind`, `event`, `payload` | `payload` |
+
+Hooks for a point run in registration order. The **first `deny` short-circuits**
+— later hooks never run. A `patch` is merged into `intent.data` and the next
+hook sees the patched values; a key a call site doesn't list as patchable
+above is ignored, since a patch is a request and core decides what it
+honours. A hook that throws or exceeds the host timeout (5s,
+`POLICY_HOOK_TIMEOUT_MS` in `server/plugins/policy.ts`) is logged and treated
+as no opinion — **fails open**, so a crashing plugin can't wedge every
+launch in the install.
+
+A deny or a patch on a task-scoped intent is recorded twice: a
+`core:policy.decision` fact (via `ctx.facts`) and a `task_updates` row of
+kind `policy`, which shows up in the task's Activity panel. Each write is
+best-effort — a failed audit write is logged and never reverses the decision
+that already happened.
+
+There is deliberately no `task.merge` point: core octomux never merges a PR
+(`server/poller/merged-pr.ts` only _observes_ merges that already happened on
+GitHub), so there's no call site to gate.
+
+```js
+ctx.policy.intercept('task.launch', (intent) => {
+  if (intent.data.harnessId === 'cursor' && isOffHours()) {
+    return { deny: 'cursor tasks are paused outside business hours' };
+  }
+});
+```
+
+Gate: `policy.intercept`. Unmount: every hook this plugin registered is
+removed (`unregisterPluginPolicy`).
+
+**Not containment.** A deny is a coordination and audit signal, not a
+security boundary — a plugin runs in-process with the DB handle, every
+credential, and `process.env`, and nothing stops it from calling the same
+functions core calls and bypassing its own hook entirely.
+
+### `ctx.ui`
+
+```ts
+interface UiRegistrar {
+  panel(binding: UiPanelBinding): void;
+}
+type UiSlot =
+  | 'task.panel'
+  | 'task.badge'
+  | 'board.card'
+  | 'nav.section'
+  | 'run.detail'
+  | 'settings.card';
+type UiRenderer = 'stat' | 'table' | 'timeline' | 'badge' | 'markdown' | 'json' | 'diff' | 'log';
+
+interface UiFactPanelBinding {
+  slot: UiSlot;
+  as: UiRenderer | string; // unknown renderer degrades to `json`, never a blank
+  value?: string;
+  delta?: string;
+  title?: string;
+  fact: string; // BARE local fact type — qualified like `facts.define`
+  collection?: never;
+}
+interface UiCollectionPanelBinding {
+  slot: UiSlot;
+  as: UiRenderer | string;
+  value?: string;
+  delta?: string;
+  title?: string;
+  collection: string; // BARE local collection name — qualified like `collections.define`
+  fact?: never;
+}
+type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
+```
+
+Declarative BINDINGS, never components. A plugin ships zero browser
+JavaScript and needs no build step — a binding names a slot, a renderer, and
+a fact type or collection; the client owns every renderer and looks it up by
+name. There is deliberately no `ctx.ui.component()` and no custom sidebar:
+that ceiling is what keeps a panel written today renderable on a surface
+that doesn't exist yet — see `ctx.surfaces` below.
+
+`UiPanelBinding` is a union: exactly one of `fact` (bare local fact type) or
+`collection` (bare local collection name). `registerPluginUiPanel`
+(`server/plugins/ui-registry.ts`) rejects a binding that sets neither or
+both. An unknown `as` renderer name is not rejected at registration — the
+client (or a `ctx.surfaces` implementation) degrades it to `json` rather
+than dropping the panel.
+
+```js
+ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
+```
+
+Gate: `ui.panel`. Unmount: every contribution this plugin registered is
+removed (`unregisterPluginUi`) — the panel vanishes with no restart.
+Bindings are served to the client at `GET /api/plugin-ui/contributions`.
+
 ## `ctx.surfaces`
 
 ```ts
@@ -681,6 +997,44 @@ Slack, plain text for CLI/Telegram, Discord-flavoured markdown for a Discord
 surface. Returning `undefined` means "nothing to show for this panel" and it
 is omitted, not rendered as an empty block.
 
+### `ctx.effect()`
+
+```ts
+effect(dispose: () => void | Promise<void>): void;
+```
+
+Registers a teardown callback, run in **reverse** registration order when the
+plugin unmounts — the Cordis model, so a later effect never observes an
+earlier one already gone (`disposePluginContext()`, `server/plugins/context.ts`).
+
+Everything registered _through_ `ctx` — a workflow kind, a route, a fact
+type, a policy hook — is already tracked and undone automatically by the
+matching `unregisterPlugin*` call (`server/plugins/lifecycle.ts`).
+`ctx.effect()` covers what the plugin owns **outside** `ctx`: a
+`setInterval`, a filesystem watcher, an open socket. Anything not routed
+through `ctx` and not registered as an effect cannot be tracked and will not
+be released — a real limit of the model, not an oversight.
+
+```js
+const interval = setInterval(pollUpstream, 60_000);
+ctx.effect(() => clearInterval(interval));
+```
+
+One effect throwing does not strand the rest — `disposePluginContext` runs
+every callback and returns the failures for the caller to log, rather than
+stopping at the first one.
+
+Ungated, but `assertLive`-guarded: calling it after the plugin's own
+`apply()` already overran its timeout budget throws, naming the plugin.
+
+Two things settle on their own rather than being torn down by `effect`: an
+in-flight `ctx.agents.run()` keeps going after unmount (bounded by its own
+`timeoutMs`, default 5 min) since disposing the process handle happens in
+`runAgentSession`'s own `finally`; and an in-flight `ctx.fanout` run is
+**aborted** without awaiting its handlers (a handler may be a multi-minute
+agent session) — items it was mid-way through go back to `pending` for a
+later `{ resume: runId }`.
+
 ## Manifest (`octomux.yml`)
 
 ```ts
@@ -691,6 +1045,7 @@ interface PluginRow {
   integrity?: string; // parsed as a string; NEVER VERIFIED against the tarball
   config?: Record<string, unknown>; // not read by anything in this package — see note below
   disabled?: boolean;
+  grants?: PluginCapability[]; // see "Capability grants" below — absent/empty grants nothing
 }
 interface PluginManifest {
   plugins: PluginRow[];
@@ -702,7 +1057,7 @@ boundary. Rejected outright (whole manifest fails, zero plugins loaded, never
 a boot crash):
 
 - any top-level key other than `plugins`
-- any row key other than `id`, `name`, `version`, `integrity`, `config`, `disabled`
+- any row key other than `id`, `name`, `version`, `integrity`, `config`, `disabled`, `grants`
 - `id` not matching `^[a-z0-9][a-z0-9-]*$`, or a duplicate `id`
 - `name` that isn't a valid npm package name shape (scoped or unscoped) or an
   absolute filesystem path — this blocks `data:`/`http(s):`/`file:`/relative/
@@ -716,6 +1071,99 @@ a boot crash):
 `config` on a row is validated only for being a plain object if present —
 nothing in `server/plugins/` reads its contents; it exists for a plugin's own
 future use, not consumed by `ctx` today.
+
+## Capability grants
+
+A manifest row declares the `ctx` capabilities its plugin actually uses:
+
+```yaml
+plugins:
+  - id: coverage-bot
+    name: '@acme/octomux-coverage-bot'
+    grants: [facts.define, facts.put, ui.panel]
+```
+
+### Deny by default
+
+A row with **no `grants:` key gets nothing**. The first gated call throws,
+`apply()` fails, and the row lands in `LoadReport.failed` with
+`phase: 'apply'` (`assertGranted`, `server/plugins/grants.ts`). This is the
+error every plugin author hits first — for example a row that omitted
+`ui.panel`:
+
+```
+plugin "coverage-bot": capability "ui.panel" is not granted. Add it to the plugin's row in octomux.yml:
+    grants: [ui.panel]
+```
+
+There is no warn-and-continue path — a warning nobody reads is not a
+decision.
+
+### Every capability
+
+All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
+`PluginCapability` in `@octomux/plugin-api`):
+
+| Capability              | Gates                         | Undone on unmount?                                      |
+| ----------------------- | ----------------------------- | ------------------------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`    | yes                                                     |
+| `integrations.register` | `ctx.integrations.register()` | yes                                                     |
+| `harnesses.register`    | `ctx.harnesses.register()`    | yes                                                     |
+| `compute.register`      | `ctx.compute.register()`      | yes                                                     |
+| `http.route`            | `ctx.http.route()`            | yes                                                     |
+| `facts.define`          | `ctx.facts.define()`          | yes — the type definition; facts written survive        |
+| `facts.put`             | `ctx.facts.put()`             | n/a — a write, not a registration                       |
+| `collections.define`    | `ctx.collections.define()`    | yes — the definition; records survive                   |
+| `collections.write`     | `ctx.collections.put()`       | n/a — a write, not a registration                       |
+| `ui.panel`              | `ctx.ui.panel()`              | yes                                                     |
+| `artifacts.write`       | `ctx.artifacts.write()`       | n/a — files land in the worktree and outlive the plugin |
+| `policy.intercept`      | `ctx.policy.intercept()`      | yes                                                     |
+| `agents.run`            | `ctx.agents.run()`            | n/a — an in-flight run settles on its own               |
+| `fanout.run`            | `ctx.fanout.run()`            | n/a — an in-flight run is aborted, not "undone"         |
+| `surfaces.register`     | `ctx.surfaces.register()`     | yes                                                     |
+
+### What's ungated, and why
+
+Reads: `ctx.logger`, `ctx.settings`, `ctx.catalog.list`, `ctx.facts.read`,
+`ctx.facts.watch`, `ctx.collections.query`, `ctx.collections.watch`,
+`ctx.artifacts.list`, `ctx.fanout.status`/`ctx.fanout.list`, `ctx.effect()`.
+None of these pick a behavior or produce a side effect worth a human's
+second look — a plugin reading what's installed, what a task's facts say, or
+a fan-out run's status isn't the thing capability grants exist to flag.
+(`ctx.effect()` is ungated for a different reason: it registers _your own_
+teardown, not a host capability.)
+
+### Widen/approve
+
+The acknowledged grant set per row is persisted next to the manifest, in
+`plugin-grants.json` (`grantLedgerPath()`, `server/plugins/grants.ts`). A
+corrupt or missing ledger is treated as an empty one — never a boot failure,
+it just re-asks for acknowledgement. `resolveGrantsForRow` walks it on every
+boot:
+
+- row not in the ledger → first sight: grant everything declared, and record it
+- declared ⊆ acknowledged → narrowing (or unchanged) is free
+- declared ⊄ acknowledged → grant only the intersection; the newly added
+  grants are **pending and withheld** until `octomux plugins approve <id>`
+
+Why: an `npm update` that also edits `octomux.yml` must not hand a plugin
+`policy.intercept` without a human deciding to allow it. Widening never takes
+effect silently.
+
+`LoadReport.grants` (what each plugin actually got this boot) and
+`LoadReport.pendingGrants` (what's declared but withheld) are both keyed by
+plugin id. `octomux doctor` prints both — the granted capabilities under each
+loaded plugin, and a `⚠ withheld (not acknowledged)` line naming the pending
+ones plus the exact `octomux plugins approve <id>` command to run.
+
+### Not a sandbox
+
+A plugin runs **in-process**, with the DB handle, every credential, and
+`process.env` — it can do everything core can do without ever calling `ctx`.
+A grant confines nothing; it's a **coordination and audit mechanism**: it
+records what a plugin says it needs, enforces that claim at core's own seams,
+and makes it reviewable (`octomux doctor`). `octomux plugins approve` is an
+operator confirming intent, not a security check on the plugin's code.
 
 ## `LoadReport`
 
@@ -740,8 +1188,19 @@ interface LoadReport {
   }>;
   manifestPath: string;
   safeMode: boolean;
+  manifestError?: string; // set when the manifest itself failed to read/parse
+  loadedAt?: string; // ISO timestamp this report was produced
+  grants?: Record<string, PluginCapability[]>; // effective grants per plugin id, this boot
+  pendingGrants?: Record<string, PluginCapability[]>; // declared but withheld, per plugin id
 }
 ```
+
+`manifestError` distinguishes "zero plugins configured" from "boot couldn't
+even read the manifest." `loadedAt`, `grants`, and `pendingGrants` are all
+optional only so an older persisted report — or a fixture `LoadReport`
+literal — still type-checks; `octomux doctor` prints `unknown (older
+report)` for a missing `loadedAt` rather than failing. `grants`/
+`pendingGrants` are covered above under "Capability grants."
 
 There is no `routeCounts` field — `provides` (SHR-268) supersedes it: a route
 is just one more `route:METHOD /path` entry alongside a plugin's workflows,
@@ -776,10 +1235,42 @@ qualify('demo', 'changelog') === 'demo:changelog';
 
 ## Not seams
 
-Reading what is installed is a query, not an implementation choice — it
-never picks a behavior, so it doesn't get a registrar. `ctx.catalog` is the
-worked example: it's a plain read-only method on `ctx`, not
-`ctx.catalog.register()`, and there's no override path either. The same
-reasoning applies to anything else added later that is purely a read over
-state core already owns — it belongs on `ctx` directly, not behind a new
-registrar.
+Not everything core can do is a plugin seam. Something with exactly one
+right implementation, or that's a pure read over state core already owns,
+doesn't get a registrar — it goes straight on `ctx`, or nowhere at all.
+
+1. **Skills and agent roles.** They ship in the bundled plugin
+   (`plugin/skills/`, `plugin/agents/`) and reach launched agents via
+   `--plugin-dir` — single source, there is no repo or home tier (there used
+   to be one, and it never delivered anything to a running agent). Users' own
+   skills/subagents live in Claude Code's native `~/.claude/skills`,
+   `~/.claude/agents`, `<repo>/.claude/` — the harness reads those directly
+   and octomux neither manages nor lists them. See the root `CLAUDE.md`
+   §"Skills and agent roles."
+2. **MCP servers.** The harness owns MCP configuration; octomux does not
+   proxy or register it.
+3. **Models.** A model is a per-task/per-worker value (`tasks.model`,
+   `--model`, `applyModel(flags, model)`), not a registrable implementation.
+   A plugin influences it through `ctx.policy` (`task.launch` /
+   `harness.resume` can patch `model`), not through a registrar.
+4. **History / task lifecycle.** Tasks remain the source of truth.
+   `ctx.facts` is an observation log, not event sourcing — a plugin does not
+   get to redefine what a task is.
+5. **Artifacts.** A method on `ctx`, not a registrar (see
+   [`ctx.artifacts`](#ctxartifacts) above) — nobody needs a different
+   artifact implementation, they need to write one.
+6. **Catalog.** Reading what is installed (`ctx.catalog.list()`) is a query,
+   not an implementation choice: no `register()`, no override path.
+7. **Isolation.** A git worktree per run is octomux's guarantee, not a
+   preference — the public docs say so. `ctx.compute` decides only _where_
+   that worktree lives, never whether one exists. It is not a pluggable
+   isolation strategy.
+8. **Storage.** `ctx.facts` (task-scoped, dies with the task) and
+   `ctx.collections` (durable, keyed, schema-validated) are the two storage
+   shapes, and neither is a registrar — a plugin does not bring its own
+   storage engine. `ctx.kv` is declared on the type but **throws on every
+   call today**; the storage behind it hasn't landed.
+
+The rule that generalises all eight: a purely read-only view over state core
+already owns belongs on `ctx` directly, and something that has exactly one
+right implementation is not a choice worth registering.

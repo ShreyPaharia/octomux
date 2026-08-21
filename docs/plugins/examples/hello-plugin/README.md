@@ -22,7 +22,30 @@ Add a row to `~/.octomux/octomux.yml` (create the file if it doesn't exist):
 plugins:
   - id: hello
     name: octomux-plugin-hello
+    grants: [integrations.register]
 ```
+
+`ctx.integrations.register` requires the `integrations.register` capability
+grant — omit it and registration throws at boot, and the row lands in the
+load report as an `apply`-phase failure naming this plugin and the
+capability (`server/plugins/context.ts`, `server/plugins/grants.ts`).
+`ctx.catalog.list()` and `ctx.logger` need no grant at all — they're
+ungated.
+
+`kinds/hello.json` is a different story: it's read straight off disk by
+`server/workflows/presets.ts::loadPresets()` for any **enabled** manifest
+row, entirely outside `apply()`/`ctx` — no `grants:` entry unlocks or blocks
+it, since it never calls anything the grant system gates. So if you strip
+`grants: [integrations.register]` from the row above, `hello:hello` still
+shows up as a schedulable kind while `hello:notify` fails to register — a
+confusing half-loaded state where the preset "works" and the registrar
+doesn't. Keep the grant if you want `ctx.integrations.register` to succeed.
+
+If you later add another `ctx.*` call to this plugin that needs a grant not
+already declared, the new grant is withheld until you run `octomux plugins
+approve hello` (`server/plugins/grants.ts::resolveGrantsForRow`,
+`cli/src/commands/plugins.ts`) — the row's _existing_ grants keep working,
+only the addition is pending.
 
 For local development, point `name` at **this directory** (not `index.mjs`
 directly) — no npm install required:
@@ -31,6 +54,7 @@ directly) — no npm install required:
 plugins:
   - id: hello
     name: /absolute/path/to/docs/plugins/examples/hello-plugin
+    grants: [integrations.register]
 ```
 
 The loader `import()`s `name` as-is when it's absolute
