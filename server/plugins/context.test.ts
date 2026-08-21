@@ -115,6 +115,12 @@ const { listSurfaces, resetSurfaces, registerCoreSurfaces } = await import('../s
 const { resetPluginGrants } = await import('./grants.js');
 const { resetCollections } = await import('./collections.js');
 const { createTestDb } = await import('../test-helpers.js');
+const { putSecret } = await import('../secrets/store.js');
+const { resetSecretKey } = await import('../secrets/crypto.js');
+
+// A fixed base64 32-byte key so putSecret()/resolveSecrets() never touch a
+// real key file on disk — see the SHR-277 spec's test-setup note.
+const TEST_SECRET_KEY = 'ORG65/smQdAz8xkOi4nXC1uOwmHVRhSpuT4n8W5M+SQ=';
 
 /** Pipe pino output into an in-memory buffer of parsed JSON lines. */
 function captureLogs() {
@@ -160,6 +166,8 @@ beforeEach(() => {
   resetPluginGrants();
   resetCollections();
   createTestDb();
+  process.env.OCTOMUX_SECRET_KEY = TEST_SECRET_KEY;
+  resetSecretKey();
   registeredPolicyHooks.length = 0;
   fanoutCalls.length = 0;
   abortedFanOutPlugins.length = 0;
@@ -1072,5 +1080,54 @@ describe('ctx.fanout', () => {
     await expect(
       ctx.fanout.run({ name: 'enrich', source: { items: [] }, each: async () => 'ok' }),
     ).resolves.toEqual({ runId: 'run-1' });
+  });
+});
+
+describe('ctx.secrets (SHR-277)', () => {
+  it('list() works with NO grants declared (ungated) and returns names only', async () => {
+    putSecret('api-key', 'super-secret-value-123', 'demo');
+    const ctx = createPluginContext('secrets-list-plugin');
+
+    const names = await ctx.secrets.list();
+
+    expect(names).toEqual(['api-key']);
+    // Names only — nothing resembling the value leaked through.
+    for (const name of names) {
+      expect(name).not.toContain('super-secret-value-123');
+    }
+  });
+
+  it('resolve() throws without secrets.read, naming the plugin and the capability', async () => {
+    putSecret('api-key', 'super-secret-value-123');
+    const ctx = createPluginContext('secrets-resolve-nogrant');
+
+    await expect(ctx.secrets.resolve('${secret:api-key}')).rejects.toThrow(
+      /"secrets-resolve-nogrant"/,
+    );
+    await expect(ctx.secrets.resolve('${secret:api-key}')).rejects.toThrow(/"secrets\.read"/);
+  });
+
+  it('resolve() substitutes ${secret:NAME} when secrets.read IS granted', async () => {
+    putSecret('api-key', 'super-secret-value-123');
+    const ctx = createPluginContext('secrets-resolve-granted', ['secrets.read']);
+
+    await expect(ctx.secrets.resolve('Bearer ${secret:api-key}')).resolves.toBe(
+      'Bearer super-secret-value-123',
+    );
+  });
+
+  it('list() throws after the context is revoked (assertLive)', async () => {
+    const ctx = createPluginContext('secrets-list-revoked');
+    revokePluginContext(ctx);
+
+    await expect(ctx.secrets.list()).rejects.toThrow(/revoked/);
+  });
+
+  it('resolve() throws after the context is revoked (assertLive), even with the grant', async () => {
+    putSecret('api-key', 'super-secret-value-123');
+    const ctx = createPluginContext('secrets-resolve-revoked', ['secrets.read']);
+    revokePluginContext(ctx);
+
+    await expect(ctx.secrets.resolve('${secret:api-key}')).rejects.toThrow(/revoked/);
   });
 });

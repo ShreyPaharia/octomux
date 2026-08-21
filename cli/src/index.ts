@@ -36,6 +36,7 @@ import { registerLoopStartGroup } from './commands/loop-start-group.js';
 import { registerJudgeEmit } from './commands/judge-emit.js';
 import { registerPrExtractEmit } from './commands/pr-extract-emit.js';
 import { registerPlugins } from './commands/plugins.js';
+import { registerSecrets } from './commands/secrets.js';
 import { registerDoctor } from './commands/doctor.js';
 
 const program = new Command();
@@ -88,6 +89,7 @@ registerLoopStartGroup(program);
 registerJudgeEmit(program);
 registerPrExtractEmit(program);
 registerPlugins(program);
+registerSecrets(program);
 registerDoctor(program);
 
 program.hook('preAction', (thisCommand) => {

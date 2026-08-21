@@ -21,6 +21,7 @@ export interface PluginContext {
   readonly facts: FactsRegistrar;
   readonly collections: CollectionsRegistrar;
   readonly artifacts: ArtifactsApi;
+  readonly secrets: SecretsApi;
   readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
   readonly policy: PolicyRegistrar;
@@ -310,6 +311,25 @@ export interface ArtifactEntry {
   updatedAt: string;
   /** Path serving the content: `/api/tasks/<taskId>/artifacts/<pluginId>/<name>`. */
   url: string;
+}
+
+/**
+ * `ctx.secrets` — reference-by-name credentials (SHR-277).
+ *
+ * `list()` returns NAMES ONLY and is ungated, matching `facts.read` /
+ * `catalog.list`: knowing a credential exists is not the thing worth a second
+ * look. `resolve()` returns VALUES and is gated on `secrets.read` — a plugin
+ * that can enumerate every credential on the box by default would make the
+ * grants system decorative.
+ *
+ * There is no write path. A secret is written by a human (UI/CLI/API), never by
+ * a plugin.
+ */
+export interface SecretsApi {
+  list(): Promise<string[]>;
+  /** Substitutes `${secret:NAME}` in every string leaf of `value`. Requires
+   *  `secrets.read`. Call it at egress — never store or log the result. */
+  resolve<T>(value: T): Promise<T>;
 }
 
 export interface AgentRunOptions {
@@ -737,6 +757,10 @@ export interface FanOutItemStatus {
  * `collections.query` / `collections.watch` are ungated for the same reason
  * `facts.read` / `artifacts.list` are: reading what is installed or recorded
  * is not the thing worth a second look.
+ *
+ * `secrets.list()` (names only) is ungated for the same reason — knowing a
+ * credential exists is not the thing worth a second look. `secrets.resolve()`
+ * returns values, so it IS gated on `secrets.read`.
  */
 export type PluginCapability =
   | 'workflows.register'
@@ -753,7 +777,8 @@ export type PluginCapability =
   | 'policy.intercept'
   | 'agents.run'
   | 'fanout.run'
-  | 'surfaces.register';
+  | 'surfaces.register'
+  | 'secrets.read';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
 // concrete `WorkflowType` / `IntegrationProvider` / `Harness` bindings to the

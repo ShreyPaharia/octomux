@@ -1,82 +1,73 @@
-# SHR-275 — `ctx.collections`
-
-Commit `16b7846`. `bun run typecheck` / `format:check` / `lint` clean; full
-suite green (3663 + 1301 + 223, 0 fail).
-
 ## What shipped
 
-`ctx.agents.run({ input, outputSchema, model?, timeoutMs?, workspaceDir? })` → `Promise<T>`,
-gated on a new `agents.run` capability.
+A named secret store. Encrypted at rest, **never returned by any read API**, referenced
+by name from config, resolved only at egress, scrubbed from logs and run results.
 
-- **`packages/plugin-api/src/index.ts`** — `AgentRunOptions` + `AgentRunner`,
-  `readonly agents: AgentRunner` on `PluginContext`, `'agents.run'` on the
-  `PluginCapability` union. **No `PLUGIN_API_VERSION` bump** (decided: additive, and
-  SHR-273 added two capabilities the same week without one).
-- **`server/plugins/grants.ts`** — `'agents.run'` in `PLUGIN_CAPABILITIES`. Both places,
-  or the manifest validator rejects the grant name.
-- **`server/plugins/context.ts`** — a thin accessor over the existing `runAgentSession()`:
-  default harness (`getHarness(null)`) + `ptySubstrate`, exactly what
-  `services/session-vertical-service.ts` already does for scheduled kinds, minus the
-  `run:` option — so a plugin run stays DB-free and gets no `runs` row.
-  `workspaceDir` defaults to `fs.promises.mkdtemp()` and is removed in a `finally`;
-  a caller-supplied dir is used verbatim and left alone.
-- **Explicitly git-free.** No worktree, no branch, no tmux session. The empty scratch
-  dir is also a clean room — no CLAUDE.md, no repo, no project skills in the prompt.
-- **No concurrency cap**, per the ticket — SHR-276 (fan-out) owns the limiter and a
-  second one here would compete with it.
-- Docs: `CLAUDE.md`, `docs/plugins/api-reference.md`, `create-plugin` + `add-plugin`
-  SKILL.md.
+| Piece               | Where                                                                                                   |
+| ------------------- | ------------------------------------------------------------------------------------------------------- |
+| Table + repository  | `server/db/schema.ts` (`secrets`), `server/repositories/secrets.ts`                                     |
+| AES-256-GCM at rest | `server/secrets/crypto.ts` — key at `<octomuxRoot()>/secret.key` (0600), `OCTOMUX_SECRET_KEY` overrides |
+| Store / resolution  | `server/secrets/store.ts` — `${secret:NAME}` walk, mirrors `${env:VAR}`                                 |
+| Redaction           | `server/secrets/redact.ts` (zero imports, so `logger.ts` can use it)                                    |
+| HTTP                | `server/routes/secrets.ts` — `GET /api/secrets` (metadata), `PUT`/`DELETE /api/secrets/:name`           |
+| CLI                 | `octomux secrets list\|set\|rm` (`set --stdin`)                                                         |
+| Plugin API          | `ctx.secrets.list()` ungated, `ctx.secrets.resolve()` gated on `secrets.read`                           |
+| Form picker         | `secretRef: true` on a config schema property → `SchemaConfigForm.tsx` renders a picker                 |
 
-## Tests
+## The invariants, and where they're enforced
 
-`server/plugins/agent-runner.test.ts` (7, new) drives the **real** `runAgentSession` —
-only `getHarness` and `ptySubstrate` are stubbed, `fs` is real:
+1. **No value ever leaves over HTTP.** There is no `GET /api/secrets/:name`.
+   `listSecretRows()` doesn't even `SELECT value_enc`, so the metadata path cannot leak
+   a ciphertext through a careless spread. `getSecretValue()` is the single decrypt
+   path — not on a route, not on `ctx`.
+2. **Reference by name, resolve at the call that uses it.** `${secret:NAME}` is a
+   literal in config. An unknown name **throws** (where `${env:}` degrades to `''`):
+   sending an empty credential is a 401 three layers away.
+3. **Two core egress points only** — `hook-dispatcher.ts` (integration config) and
+   `compute/config.ts` (the `secrets` sub-object; `config` stays env-only because
+   `config` is the half that can reach the agent).
+4. **Deliberately NOT `prompt-interpolate.ts` / `resolveWorkflowConfig`.** Schedule
+   config feeds the agent's prompt via `{{configKey}}`. Resolving there hands the
+   credential to the agent — the exact failure this ticket exists to prevent.
+5. **Redaction at one choke point per egress.** `logger.ts` wraps its destination
+   streams with `withRedaction()`, so every `logger.*` line in the codebase is scrubbed
+   without call sites knowing; `finishRun()` does the same for `result_json`.
 
-1. result returned **unwrapped**, and the caller's `outputSchema` is what reaches the
-   generated submit-result MCP config
-2. `timeoutMs: 50` rejects with `/timed out/` and disposes the handle — no hang
-3. ephemeral dir: under `os.tmpdir()`, named `octomux-plugin-<id>-*`, empty at spawn,
-   gone after settle
-4. caller-supplied `workspaceDir` used verbatim and NOT deleted
-5. git-free (no `.git` in the spawn cwd)
-6. `disposePluginContext` returns in <150ms without waiting out an in-flight run's
-   timeout; the in-flight run still settles; a run started after disposal rejects
-7. no `runs` row written
+## Judgement calls worth challenging
 
-Plus grant-denial coverage in `context.test.ts` (the no-grants registrar sweep and the
-`it.each` one-grant table).
+- **Encryption at rest with a local key file.** Out-of-scope said no KMS/envelope. A
+  32-byte key next to the DB is ~40 lines of stdlib `crypto` and stops a copied
+  `tasks.db` or a backup from being a credential dump. An attacker with the filesystem
+  has both. Called that a fair trade for the ticket's title; disagree and it's one file
+  to delete.
+- **`${secret:NAME}` string wrapper over a schema-driven bare name.** Uniform
+  substitution works at every use site with no schema in hand. Cost: the placeholder
+  can reach a prompt as a literal (harmless — it's a name).
+- **`hook-dispatcher` now fails closed.** The agent's first pass fell back to the
+  unresolved config on a resolution error, i.e. posted the literal `${secret:X}` as a
+  credential. Changed to log + skip the send. That is a behaviour change to the
+  pre-existing catch, which previously also swallowed `${env:}` resolution failures.
+- **`REDACT_MIN_LENGTH = 8`.** Below that, scrubbing every occurrence would wreck the
+  logs. A 4-char secret that leaks was already a bad secret.
 
-Green: 3599 / 1294 / 223 pass, 0 fail. `typecheck`, `lint`, `format:check` clean.
+## Left out on purpose
 
-## Please challenge
+- **No Settings UI for creating a secret** — the picker is populated by whatever the
+  CLI or API wrote. CLI + picker was the tight scope; a Settings card is the obvious
+  next increment.
+- **No repository test for `server/repositories/secrets.ts`** — every one of its
+  functions is exercised through `server/secrets/store.test.ts`. A second suite would
+  restate the same assertions one layer down.
+- Per-user scoping, rotation automation, an audit log of resolutions, and a broker so a
+  plugin integration handler stops receiving cleartext (the pre-existing WAVE-3 gap).
 
-1. **`run()` IS gated on `assertLive`**, unlike `facts.put` / `artifacts.write`, which
-   deliberately are not. Reasoning: those flush output the plugin already earned;
-   this spawns a subprocess. Side effect — a context revoked by an `apply()` timeout
-   can no longer run agents. I think that's right; it is a deliberate divergence.
-2. **Disposal does not cancel an in-flight session**, only blocks new ones. In-flight
-   runs settle on their own (`runAgentSession` disposes the handle in a `finally`,
-   `timeoutMs` bounds the wait). Real cancellation needs an `AbortSignal` on
-   `runAgentSession` — judged out of scope, not forgotten.
-3. **No ceiling on `timeoutMs`.** A plugin can pass `Infinity` and pin a pty forever.
-   A plugin can also just spawn its own subprocess, so a cap here is theatre — but
-   say so if you'd rather have one.
+## Verification
 
-## Environment note (recurring, not caused by this change)
-
-This worktree had **no local `node_modules`**, so `@octomux/*` resolved up to the main
-checkout's `packages/`, and `bun run typecheck` silently validated against stale types —
-it reported "no exported member `AgentRunner`" long after the type existed. `bun install`
-in the worktree fixes it. SHR-261's artifact recorded the same trap; it keeps biting
-every worktree-based task.
-
-Also: there is no `octomux task rename` in the installed CLI, and
-`PATCH /api/tasks/:id` refuses with `Can only edit fields on draft tasks`, so the task
-title is unchanged (it was already accurate). `octomux task-summary` 404s — that route
-was retired on this branch, which is why this narrative lives here.
+`bun run typecheck`, `bun run format:check`, `bun run lint` all clean.
+`bun run test` — 3809 + 1308 + 231 pass, 0 fail.
 
 ## Summary
 
-_Updated 2026-08-21 15:49:09_
+_Updated 2026-08-21 18:30:46_
 
-Write: /Users/shreypaharia/Documents/Projects/octomux-agents/.worktrees/shr-272-ctx-agents-run-head…
+Bash: cat > .octomux/artifact.md <<'MD' # SHR-277 — secrets: a store that is not a plaintext config…

@@ -3,6 +3,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { FormSelect } from '@/components/ui/form-select';
+import { secretsApi } from '@/lib/api/secretsApi';
+import { useResource } from '@/lib/use-resource';
 
 interface SchemaProperty {
   type?: string;
@@ -12,6 +14,19 @@ interface SchemaProperty {
   minimum?: number;
   enum?: string[];
   format?: string;
+  /** Renders as a secret-name picker instead of a text input. The stored value
+   * is the wrapped `${secret:NAME}` form, resolved server-side only. Distinct
+   * from `secret: true` (server/integrations/mask.ts), which marks a field as
+   * holding a literal secret value, not a reference. */
+  secretRef?: boolean;
+}
+
+const SECRET_REF_RE = /^\$\{secret:(.+)\}$/;
+
+function unwrapSecretRef(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const match = SECRET_REF_RE.exec(value);
+  return match ? match[1] : '';
 }
 
 interface SchemaConfigFormProps {
@@ -36,6 +51,12 @@ export function defaultsFromSchema(schema: Record<string, unknown>): Record<stri
 export function SchemaConfigForm({ schema, value, onChange }: SchemaConfigFormProps) {
   const properties = (schema.properties ?? {}) as Record<string, SchemaProperty>;
   const entries = Object.entries(properties);
+  const hasSecretRef = entries.some(([, prop]) => prop.secretRef === true);
+  const { data: secretsData } = useResource(hasSecretRef ? 'secrets' : null, () =>
+    secretsApi.listSecrets(),
+  );
+  const secretNames = secretsData?.secrets.map((s) => s.name) ?? [];
+
   if (entries.length === 0) return null;
 
   return (
@@ -43,6 +64,43 @@ export function SchemaConfigForm({ schema, value, onChange }: SchemaConfigFormPr
       {entries.map(([key, prop]) => {
         const label = fieldLabel(key, prop);
         const current = value[key];
+
+        if (prop.secretRef === true) {
+          const selected = unwrapSecretRef(current);
+          return (
+            <div key={key} className="flex flex-col gap-1.5">
+              <Label htmlFor={`config-${key}`}>{label}</Label>
+              <FormSelect
+                id={`config-${key}`}
+                data-testid={`schedule-config-${key}`}
+                disabled={secretNames.length === 0}
+                value={selected}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  onChange({ ...value, [key]: name ? `\${secret:${name}}` : undefined });
+                }}
+              >
+                {secretNames.length === 0 ? (
+                  <option value="">
+                    No secrets — create one with: octomux secrets set &lt;name&gt;
+                  </option>
+                ) : (
+                  <>
+                    <option value="">— none —</option>
+                    {secretNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </>
+                )}
+              </FormSelect>
+              {prop.description ? (
+                <p className="text-[10px] text-muted-soft">{prop.description}</p>
+              ) : null}
+            </div>
+          );
+        }
 
         if (prop.type === 'integer' || prop.type === 'number') {
           return (
