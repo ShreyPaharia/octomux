@@ -607,20 +607,25 @@ export function listWatchedAgents(): Array<{
 
 /**
  * Find the notify target agent+session for a given notify_agent_id.
- * Returns window_index + tmux_session only when the target is non-stopped and its
- * task is running. Used by pollAgentWindows to deliver completion messages.
+ * Returns window_index + tmux_session + the target's own task_id only when
+ * the target is non-stopped and its task is running. Used by
+ * pollAgentWindows to deliver completion messages — task_id lets the caller
+ * hydrate the target's own Task for a compute-aware tmux send (the target
+ * task and the finishing worker task are not necessarily the same compute).
  */
 export function getNotifyAgentTarget(
   notifyAgentId: string,
-): { window_index: number; tmux_session: string } | undefined {
+): { window_index: number; tmux_session: string; task_id: string } | undefined {
   return getDb()
     .prepare(
-      `SELECT a.window_index, t.tmux_session
+      `SELECT a.window_index, t.tmux_session, a.task_id
        FROM workers a
        INNER JOIN tasks t ON a.task_id = t.id
        WHERE a.id = ? AND a.status != 'stopped' AND t.runtime_state = 'running'`,
     )
-    .get(notifyAgentId) as { window_index: number; tmux_session: string } | undefined;
+    .get(notifyAgentId) as
+    | { window_index: number; tmux_session: string; task_id: string }
+    | undefined;
 }
 
 // permission_prompts functions have moved to ./permission-prompts.ts

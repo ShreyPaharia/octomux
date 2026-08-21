@@ -1,5 +1,4 @@
 import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
 import { nanoid } from 'nanoid';
 import { getHarness } from '../../harnesses/index.js';
@@ -13,6 +12,8 @@ import {
   insertAgentWithNotify,
 } from '../../repositories/index.js';
 import { buildAgentStartupCommand, launchAgentWindow, computeFreshSessionIds } from '../launch.js';
+import { sessionFor } from '../../compute/index.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Worker, Task } from '../../types.js';
 import type { AddAgentOpts } from './types.js';
 
@@ -26,10 +27,11 @@ export interface ResolvedAddAgentOpts {
 }
 
 /** Validate skeleton path and resolve prompt/label/agent fields. */
-export function validateAndResolveAddAgentOpts(
+export async function validateAndResolveAddAgentOpts(
+  c: ComputeSession,
   task: Task,
   opts: AddAgentOpts = {},
-): ResolvedAddAgentOpts {
+): Promise<ResolvedAddAgentOpts> {
   const resolvedAgent = opts.agent ?? null;
   const activeAgents = listActiveAgents(task.id);
   const label = opts.label ?? `Agent ${activeAgents.length + 1}`;
@@ -37,10 +39,10 @@ export function validateAndResolveAddAgentOpts(
   let resolvedPrompt = opts.prompt;
   if (opts.skeleton) {
     const skeletonPath = path.join(task.worktree!, '.octomux', 'agents', `${opts.skeleton}.md`);
-    if (!fs.existsSync(skeletonPath)) {
+    const skeletonContent = await c.files.read(skeletonPath);
+    if (skeletonContent === null) {
       throw new Error(`skeleton not found: ${opts.skeleton} (expected at ${skeletonPath})`);
     }
-    const skeletonContent = fs.readFileSync(skeletonPath, 'utf-8') as string;
     resolvedPrompt = opts.prompt
       ? `${skeletonContent}\n\n# Task\n\n${opts.prompt}`
       : skeletonContent;
@@ -64,6 +66,7 @@ export interface PreparedAddAgentLaunch {
 
 /** Sync harness hooks/skills and build the startup command for a new agent window. */
 export async function prepareAddAgentLaunch(
+  c: ComputeSession,
   task: Task,
   resolved: ResolvedAddAgentOpts,
   opts: AddAgentOpts = {},
@@ -79,7 +82,7 @@ export async function prepareAddAgentLaunch(
   });
   const { sessionIdForDb, sessionIdForLaunch } = computeFreshSessionIds(harness);
 
-  await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken);
+  await harness.installHooks(task.worktree!, hookBaseUrl(), hookToken, c.files);
 
   const baseCmd = harness.buildLaunchCommand({
     sessionId: sessionIdForLaunch,
@@ -88,7 +91,7 @@ export async function prepareAddAgentLaunch(
     model: opts.model ?? (task as any).model ?? null,
     workspacePath: task.worktree!,
   });
-  const startupCmd = buildAgentStartupCommand({
+  const startupCmd = await buildAgentStartupCommand(c, {
     baseCmd,
     prompt: resolved.resolvedPrompt,
     worktreePath: task.worktree!,
@@ -99,8 +102,12 @@ export async function prepareAddAgentLaunch(
 }
 
 /** Launch a new tmux window for the agent. */
-export async function launchAddAgentWindow(task: Task, startupCmd: string): Promise<number> {
-  return launchAgentWindow({
+export async function launchAddAgentWindow(
+  c: ComputeSession,
+  task: Task,
+  startupCmd: string,
+): Promise<number> {
+  return launchAgentWindow(c, {
     session: task.tmux_session!,
     cwd: task.worktree!,
     startupCmd,
@@ -155,9 +162,10 @@ export async function addAgent(task: Task, opts: AddAgentOpts = {}): Promise<Wor
     'addAgent: start',
   );
 
-  const resolved = validateAndResolveAddAgentOpts(task, opts);
-  const prepared = await prepareAddAgentLaunch(task, resolved, opts);
-  const windowIndex = await launchAddAgentWindow(task, prepared.startupCmd);
+  const compute = await sessionFor(task);
+  const resolved = await validateAndResolveAddAgentOpts(compute, task, opts);
+  const prepared = await prepareAddAgentLaunch(compute, task, resolved, opts);
+  const windowIndex = await launchAddAgentWindow(compute, task, prepared.startupCmd);
   const agent = persistAddAgentRow(task, resolved, prepared, windowIndex);
 
   logger.info(

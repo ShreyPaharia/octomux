@@ -1,3 +1,4 @@
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task } from '../../types.js';
 
 export interface SetupResult {
@@ -8,4 +9,4 @@ export interface SetupResult {
   installHooksAt: string;
 }
 
-export type SetupFn = (task: Task) => Promise<SetupResult>;
+export type SetupFn = (c: ComputeSession, task: Task) => Promise<SetupResult>;

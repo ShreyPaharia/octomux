@@ -201,14 +201,19 @@ describe('terminal WebSocket', () => {
     const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
     await waitForSetup();
 
-    // Should attach to the linked session, not directly to session:windowIndex
+    // compute.spawn() takes a shell command string, so the pty is now
+    // launched as `$SHELL -c '<quoted tmux argv>'` rather than tmux
+    // directly — the underlying tmux invocation (binary, args, env) is
+    // still byte-identical, just wrapped. Parse the single-quoted argv back
+    // out of the command string to assert on it.
     const spawnCall = vi.mocked(nodePty.spawn).mock.calls[0];
-    expect(spawnCall[0]).toBe('tmux');
-    // tmuxSpawnSpec prepends '-S <sock>', so 'attach-session' is at index 2
-    expect(spawnCall[1]).toContain('attach-session');
+    expect(spawnCall[1]).toEqual(['-c', expect.any(String)]);
+    const command = (spawnCall[1] as string[])[1];
+    const tokens = [...command.matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    expect(tokens).toContain('attach-session');
     // The target should be the linked session name (contains '-v-'), not session:0
-    const attachIdx = (spawnCall[1] as string[]).indexOf('attach-session');
-    const target = (spawnCall[1] as string[])[attachIdx + 2]; // -t <target>
+    const attachIdx = tokens.indexOf('attach-session');
+    const target = tokens[attachIdx + 2]; // -t <target>
     expect(target).toContain(`${DEFAULTS.runningTask.tmux_session}-v-`);
     expect(target).not.toContain(':');
 
@@ -465,9 +470,13 @@ describe('terminal WebSocket', () => {
 
     mockExecFile.mockClear();
 
-    // Simulate PTY exit
-    const onExitCb = mockPty.onExit.mock.calls[0][0];
-    onExitCb({ exitCode: 0, signal: 0 });
+    // Simulate PTY exit. The ProcessHandle wrapper (substrate-pty.ts)
+    // registers its own internal onExit listener before terminal.ts
+    // registers its cleanup one, so a real exit event fires every
+    // registered listener, not just the first.
+    for (const [cb] of mockPty.onExit.mock.calls) {
+      cb({ exitCode: 0, signal: 0 });
+    }
 
     const code = await new Promise<number>((resolve) => {
       ws.on('close', (code) => resolve(code));

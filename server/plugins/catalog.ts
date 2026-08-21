@@ -15,6 +15,7 @@
 import { listWorkflows } from '../workflows/registry.js';
 import { listHarnesses } from '../harnesses/registry.js';
 import { listProviders } from '../integrations/registry.js';
+import { listCompute } from '../compute/registry.js';
 import { listPluginRoutes, RESERVED_ROUTE_PLUGIN_IDS } from './http-registry.js';
 import { listUiContributions } from './ui-registry.js';
 import { listPluginFactTypes, CORE_FACT_TYPES } from './facts.js';
@@ -35,6 +36,8 @@ export interface PluginRegistrations {
   workflowKinds: string[];
   harnessIds: string[];
   providerKinds: string[];
+  /** `ctx.compute.register()` kinds owned by this plugin (SHR-261). */
+  computeKinds: string[];
   /** `"METHOD /path"` entries, from `listPluginRoutes()`. */
   routes: string[];
   uiSlots: string[];
@@ -59,6 +62,9 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
       .filter((id) => belongsTo(pluginId, id)),
     providerKinds: listProviders()
       .map((p) => p.kind)
+      .filter((kind) => belongsTo(pluginId, kind)),
+    computeKinds: listCompute()
+      .map((c) => c.kind)
       .filter((kind) => belongsTo(pluginId, kind)),
     routes: listPluginRoutes(pluginId),
     uiSlots: listUiContributions()
@@ -98,6 +104,9 @@ function coreRegistrations(): PluginRegistrations {
       .filter(isCore),
     harnessIds: listHarnesses()
       .map((h) => h.id)
+      .filter(isCore),
+    computeKinds: listCompute()
+      .map((c) => c.kind)
       .filter(isCore),
     providerKinds: listProviders()
       .map((p) => p.kind)

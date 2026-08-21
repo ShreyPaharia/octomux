@@ -141,6 +141,8 @@ export interface Task {
   agent: string | null;
   /** Optional per-task model override (e.g. 'claude-sonnet-4-6'). Overrides global flag. */
   model: string | null;
+  /** Compute provider kind. NULL → `local` (the server's own machine). */
+  compute?: string | null;
   /** If set, poller sends a completion message to this task's active agent when this task finishes. */
   notify_task_id: string | null;
   /** Set when this task was created by a cron schedule run. */
@@ -255,6 +257,8 @@ export interface CreateTaskRequest {
   workflow_status?: WorkflowStatus;
   harness_id?: string;
   model?: string | null;
+  /** Compute provider kind. NULL → `local` (the server's own machine). */
+  compute?: string | null;
   notify_task_id?: string | null;
 }
 

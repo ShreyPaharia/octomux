@@ -1,8 +1,5 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
 import { childLogger } from '../logger.js';
-import { execTmux } from '../tmux-bin.js';
+import { sessionFor, releaseSession } from '../compute/index.js';
 import type { Task, Worker } from '../types.js';
 import {
   setRuntimeState,
@@ -26,8 +23,6 @@ import { cleanupLinkedSessions } from './sessions.js';
 
 const logger = childLogger('task-engine/cleanup');
 
-const execFile = promisify(execFileCb);
-
 export async function closeTask(task: Task): Promise<void> {
   logger.info(
     { task_id: task.id, operation: 'closeTask', run_mode: task.run_mode },
@@ -47,10 +42,12 @@ export async function closeTask(task: Task): Promise<void> {
     'closeTask: DB marked task closed + agents stopped',
   );
 
+  const compute = await sessionFor(task);
+
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
       logger.info(
         { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session },
         'closeTask: tmux session killed',
@@ -70,6 +67,12 @@ export async function closeTask(task: Task): Promise<void> {
     }
   }
 
+  // No `destroy` — closeTask preserves the worktree (and, for a remote
+  // provider, the compute itself) so a later resume can re-attach. Only
+  // `deleteTask` tears the box down; here we just drop octomux's in-process
+  // handle on it.
+  await releaseSession(task.id);
+
   logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: complete');
 }
 
@@ -82,10 +85,12 @@ export async function closeTask(task: Task): Promise<void> {
 export async function softDeleteTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: start');
 
+  const compute = await sessionFor(task);
+
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
     } catch (err) {
       if (!isTmuxTargetMissing(err)) {
         logger.warn(
@@ -108,11 +113,13 @@ export async function deleteTask(task: Task): Promise<void> {
     'deleteTask: start',
   );
 
+  const compute = await sessionFor(task);
+
   // Kill tmux first — applies to every mode
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
       logger.info(
         { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session },
         'deleteTask: tmux session killed',
@@ -136,7 +143,8 @@ export async function deleteTask(task: Task): Promise<void> {
     case 'new': {
       if (task.worktree) {
         try {
-          await execFile('git', [
+          await compute.exec([
+            'git',
             '-C',
             task.repo_path,
             'worktree',
@@ -157,7 +165,7 @@ export async function deleteTask(task: Task): Promise<void> {
       }
       if (task.branch) {
         try {
-          await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]);
+          await compute.exec(['git', '-C', task.repo_path, 'branch', '-D', task.branch]);
           logger.info(
             { task_id: task.id, operation: 'deleteTask', branch: task.branch },
             'deleteTask: branch deleted',
@@ -180,7 +188,7 @@ export async function deleteTask(task: Task): Promise<void> {
       // is nothing extra to guard here.)
       const dir = task.worktree || task.repo_path;
       try {
-        await getHarness(task.harness_id).uninstallHooks(dir);
+        await getHarness(task.harness_id).uninstallHooks(dir, compute.files);
         logger.info(
           { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode, dir },
           'deleteTask: hook config removed from user-owned path',
@@ -196,7 +204,7 @@ export async function deleteTask(task: Task): Promise<void> {
     case 'scratch': {
       const dir = task.worktree || scratchDirFor(task.id);
       try {
-        fs.rmSync(dir, { recursive: true, force: true });
+        await compute.files.rm(dir, { recursive: true });
         logger.info(
           { task_id: task.id, operation: 'deleteTask', scratch_dir: dir },
           'deleteTask: scratch dir removed',
@@ -227,6 +235,11 @@ export async function deleteTask(task: Task): Promise<void> {
     }
   }
 
+  // `destroy: true` — deleteTask is the full-teardown path, so a remote
+  // provider must actually tear the box down here, not just drop the cache
+  // entry (which would leak the remote compute forever).
+  await releaseSession(task.id, { destroy: true });
+
   logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
 }
 
@@ -243,8 +256,11 @@ export async function stopAgent(task: Task, agent: Worker): Promise<void> {
 
   resolveAgentPermissionPrompts(agent.id);
 
-  await execTmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
-    (err) => {
+  const compute = await sessionFor(task);
+
+  await compute
+    .tmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`])
+    .catch((err) => {
       if (isTmuxTargetMissing(err)) {
         logger.debug(
           { task_id: task.id, agent_id: agent.id, operation: 'stopAgent' },
@@ -256,8 +272,7 @@ export async function stopAgent(task: Task, agent: Worker): Promise<void> {
           'stopAgent: kill-window failed',
         );
       }
-    },
-  );
+    });
 
   stopAgentRepo(agent.id);
 

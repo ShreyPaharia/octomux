@@ -141,6 +141,53 @@ branch `agents/<id>`. Each **worker** = tmux window within the session.
 `startTask` logs a `duration_ms` per stage (`stage_timing: true`); `bun run
 bench:task-create` reports the breakdown. `git worktree add` dominates.
 
+## Compute providers
+
+**Where a task runs is a decision, not a call site.** `server/compute/` is the seam
+that decides where a task's git worktree lives and where its processes run. `local`
+(the server's own machine) is the default and is what every existing task uses.
+
+**This is NOT a pluggable isolation strategy.** A git worktree per run is octomux's
+guarantee, not a preference — the public docs say so. This seam decides _where that
+worktree lives_, nothing more. Don't reintroduce an isolation strategy behind it.
+
+- `ComputeProvider` = `{ kind, create(task, ctx), resume?(task, ctx) }`.
+  `ComputeSession` = `{ kind, taskId, repoPath, exec, tmux, spawn, files, dispose }`.
+  Both in `server/compute/types.ts`; registry in `registry.ts` mirrors
+  `harnesses/registry.ts` (`DEFAULT_COMPUTE_KIND = 'local'`, `CORE_COMPUTE_KINDS`
+  frozen before any plugin loads).
+- `sessionFor(task)` (`server/compute/index.ts`) is the single entry point — cached
+  per `task.id`, so any code already holding a `Task` gets a session in one `await`.
+  `localSession` is the task-free server machine; pass it **explicitly** at call
+  sites that legitimately read the server's own checkout (diff reads, comment
+  hashing, repo probes). An implicit local default is exactly the bug this seam
+  exists to remove, so there isn't one.
+- The migration rule, if you're touching the task engine: `execTmux(x)` →
+  `compute.tmux(x)`, `execFile('git', …)` → `compute.exec(['git', …])`, `fs.*Sync`
+  → `await compute.files.*`, pty attach → `compute.spawn({ command })`.
+  `task.repo_path` stays the repo's _identity_ (DB key, log field); `compute.repoPath`
+  is where it physically is.
+- Per-task selection: `tasks.compute TEXT` (NULL → `local`, no backfill needed),
+  `POST /api/tasks { compute }`, `octomux create-task --compute <kind>` (generated
+  from `taskCreateInputSchema`, no CLI file to edit), `settings.defaultComputeKind`
+  and `settings.compute[kind]`.
+- Credentials are brokered at the boundary: `computeConfigFor(kind)`
+  (`server/compute/config.ts`) splits `settings.compute[kind]` into `config` and a
+  `secrets` sub-object, expanding `${env:VAR}` in both, and hands the result to
+  `provider.create()` **only**. The agent's environment, its launched command, and
+  its worktree never see a broker secret.
+- A plugin registers one with `ctx.compute.register({ kind, create })` and gets
+  `ctx.host` (`exec`/`spawnPty` on the server) plus `ctx.execBackedFiles(exec)` — the
+  only runtime capabilities handed across the types-only `@octomux/plugin-api`
+  boundary, and enough to write a remote provider with no host imports and no new
+  dependencies. Worked example: `docs/plugins/examples/ssh-compute/`.
+- **Known gaps — do not describe as working:** `resume()` is called but the host
+  cannot yet tell "reattach after restart" from "first create", so it falls back to
+  `create` (see the comment in `sessionFor`); `hop-agent` refuses to move an agent
+  between tasks on different compute kinds rather than silently launching fresh;
+  `server/chats.ts` and `server/orchestrator/**` are deliberately outside the seam
+  (no `Task` — chats and conductor conversations are task-free) and always run local.
+
 ## Per-task model override
 
 `tasks.model TEXT` column. Propagated through:
@@ -239,8 +286,9 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes six registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes seven registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
+`ctx.compute.register()` (see "Compute providers" above),
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()` — plus
 `ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
 (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.

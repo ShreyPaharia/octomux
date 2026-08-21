@@ -1,6 +1,7 @@
 import Database from '../../sqlite.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from '../../bun-test.js';
 import type { Task } from '../../types.js';
+import type { ComputeFiles, ComputeSession } from '../../compute/types.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ vi.mock('fs', (importOriginal) => {
     writeFileSync: vi.fn(),
     readFileSync: vi.fn(),
     unlinkSync: vi.fn(),
+    chmodSync: vi.fn(),
   };
   return { ...mocked, default: mocked };
 });
@@ -94,6 +96,58 @@ const { runSetup } = await import('./index.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
 const { preflightNoneMode } = await import('../../preflight.js');
+const { localExec } = await import('../../compute/index.js');
+
+// ─── Fake ComputeSession ─────────────────────────────────────────────────────
+// `exec` reuses the real `localExec` so it drives the same mocked
+// `child_process.execFile` the git-argv assertions below rely on. `files`
+// wraps the mocked sync `fs` functions above in the async `ComputeFiles`
+// shape so tests keep asserting against those same mocks.
+
+function makeFakeFiles(): ComputeFiles {
+  return {
+    async exists(p) {
+      return fs.existsSync(p);
+    },
+    async mkdirp(p) {
+      fs.mkdirSync(p, { recursive: true });
+    },
+    async read(p) {
+      try {
+        return fs.readFileSync(p, 'utf-8') as string;
+      } catch {
+        return null;
+      }
+    },
+    async write(p, content, opts) {
+      fs.writeFileSync(p, content, opts?.mode !== undefined ? { mode: opts.mode } : undefined);
+    },
+    async chmod(p, mode) {
+      fs.chmodSync(p, mode);
+    },
+    async copy(src, dst) {
+      fs.copyFileSync(src, dst);
+    },
+    async rm(p) {
+      fs.unlinkSync(p);
+    },
+  };
+}
+
+function makeSession(repoPath: string): ComputeSession {
+  return {
+    kind: 'test',
+    taskId: 'test',
+    repoPath,
+    exec: localExec,
+    tmux: async () => ({ stdout: '', stderr: '' }),
+    spawn: async () => {
+      throw new Error('not exercised in setup tests');
+    },
+    files: makeFakeFiles(),
+    async dispose() {},
+  };
+}
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -127,26 +181,27 @@ describe('setupNew', () => {
     id: 'test-task-01',
     run_mode: 'new',
   } as Task;
+  const session = makeSession('/tmp/test-repo');
 
   it('returns worktreePath inside .worktrees', async () => {
-    const result = await setupNew(baseTask);
+    const result = await setupNew(session, baseTask);
     expect(result.worktreePath).toContain('.worktrees');
     expect(result.worktreePath.startsWith('/tmp/test-repo')).toBe(true);
   });
 
   it('returns the branch name', async () => {
-    const result = await setupNew(baseTask);
+    const result = await setupNew(session, baseTask);
     expect(result.branch).toBeTruthy();
     expect(result.branch).toContain('agents/');
   });
 
   it('returns a non-null baseSha', async () => {
-    const result = await setupNew(baseTask);
+    const result = await setupNew(session, baseTask);
     expect(result.baseSha).toBe('abcdef0000000000000000000000000000000000');
   });
 
   it('does not spawn format or lint commands', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     // format_command and lint_command from repo_configs are no longer read during setup;
     // the format/lint preflight was removed to unblock agent launch immediately.
     const shCalls = countExecCalls(vi.mocked(execFile), { cmd: 'sh' });
@@ -154,7 +209,7 @@ describe('setupNew', () => {
   });
 
   it('does not make a preflight formatting commit', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     const commitCall = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['commit', '-m', 'chore: fix pre-existing formatting'],
@@ -163,12 +218,12 @@ describe('setupNew', () => {
   });
 
   it('sets installHooksAt to worktreePath', async () => {
-    const result = await setupNew(baseTask);
+    const result = await setupNew(session, baseTask);
     expect(result.installHooksAt).toBe(result.worktreePath);
   });
 
   it('validates the git repo', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['rev-parse', '--is-inside-work-tree'],
@@ -177,7 +232,7 @@ describe('setupNew', () => {
   });
 
   it('creates a worktree with git worktree add', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['worktree', 'add'],
@@ -186,7 +241,7 @@ describe('setupNew', () => {
   });
 
   it('creates worktree with -b flag for new branch', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['worktree', 'add', '-b'],
@@ -196,13 +251,13 @@ describe('setupNew', () => {
 
   it('respects custom branch name from task', async () => {
     const task = { ...baseTask, branch: 'feat/my-custom-branch' };
-    const result = await setupNew(task);
+    const result = await setupNew(session, task);
     expect(result.branch).toBe('feat/my-custom-branch');
   });
 
   it('appends baseBranch as start point when provided', async () => {
     const task = { ...baseTask, base_branch: 'develop' };
-    await setupNew(task);
+    await setupNew(session, task);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['worktree', 'add', 'develop'],
@@ -211,7 +266,7 @@ describe('setupNew', () => {
   });
 
   it('copies settings.local.json when it exists', async () => {
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     expect(vi.mocked(fs.copyFileSync)).toHaveBeenCalled();
   });
 
@@ -219,13 +274,13 @@ describe('setupNew', () => {
     vi.mocked(fs.existsSync).mockImplementation((p: any) => {
       return !String(p).includes('settings.local.json');
     });
-    await setupNew(baseTask);
+    await setupNew(session, baseTask);
     expect(vi.mocked(fs.copyFileSync)).not.toHaveBeenCalled();
   });
 
   it('throws when repo path does not exist', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    await expect(setupNew(baseTask)).rejects.toThrow('does not exist');
+    await expect(setupNew(session, baseTask)).rejects.toThrow('does not exist');
   });
 });
 
@@ -238,29 +293,30 @@ describe('setupExisting', () => {
     worktree: '/tmp/test-repo/.worktrees/existing',
     run_mode: 'existing',
   } as Task;
+  const session = makeSession('/tmp/test-repo');
 
   it('throws when worktree is not set', async () => {
     const task = { ...baseTask, worktree: null };
-    await expect(setupExisting(task as Task)).rejects.toThrow('requires a worktree path');
+    await expect(setupExisting(session, task as Task)).rejects.toThrow('requires a worktree path');
   });
 
   it('throws when worktree does not exist on disk', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    await expect(setupExisting(baseTask)).rejects.toThrow('does not exist');
+    await expect(setupExisting(session, baseTask)).rejects.toThrow('does not exist');
   });
 
   it('returns worktreePath = task.worktree', async () => {
-    const result = await setupExisting(baseTask);
+    const result = await setupExisting(session, baseTask);
     expect(result.worktreePath).toBe(baseTask.worktree);
   });
 
   it('returns a baseSha from rev-parse', async () => {
-    const result = await setupExisting(baseTask);
+    const result = await setupExisting(session, baseTask);
     expect(result.baseSha).toBe('abcdef0000000000000000000000000000000000');
   });
 
   it('calls git rev-parse --is-inside-work-tree to validate the worktree', async () => {
-    await setupExisting(baseTask);
+    await setupExisting(session, baseTask);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['rev-parse', '--is-inside-work-tree'],
@@ -269,12 +325,12 @@ describe('setupExisting', () => {
   });
 
   it('resolves branch from rev-parse --abbrev-ref HEAD', async () => {
-    const result = await setupExisting(baseTask);
+    const result = await setupExisting(session, baseTask);
     expect(result.branch).toBe('main');
   });
 
   it('sets installHooksAt to worktreePath', async () => {
-    const result = await setupExisting(baseTask);
+    const result = await setupExisting(session, baseTask);
     expect(result.installHooksAt).toBe(result.worktreePath);
   });
 });
@@ -288,9 +344,10 @@ describe('setupNone', () => {
     run_mode: 'none',
     base_branch: null,
   } as Task;
+  const session = makeSession('/tmp/test-repo');
 
   it('validates the git repo', async () => {
-    await setupNone(baseTask);
+    await setupNone(session, baseTask);
     const call = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
       argsInclude: ['rev-parse', '--is-inside-work-tree'],
@@ -299,17 +356,17 @@ describe('setupNone', () => {
   });
 
   it('returns worktreePath = task.repo_path', async () => {
-    const result = await setupNone(baseTask);
+    const result = await setupNone(session, baseTask);
     expect(result.worktreePath).toBe(baseTask.repo_path);
   });
 
   it('returns a baseSha from rev-parse', async () => {
-    const result = await setupNone(baseTask);
+    const result = await setupNone(session, baseTask);
     expect(result.baseSha).toBe('abcdef0000000000000000000000000000000000');
   });
 
   it('sets installHooksAt to repo_path', async () => {
-    const result = await setupNone(baseTask);
+    const result = await setupNone(session, baseTask);
     expect(result.installHooksAt).toBe(baseTask.repo_path);
   });
 
@@ -334,12 +391,12 @@ describe('setupNone', () => {
       return undefined as any;
     }) as any);
 
-    await expect(setupNone(baseTask)).rejects.toThrow('dirty checkout');
+    await expect(setupNone(session, baseTask)).rejects.toThrow('dirty checkout');
   });
 
   it('runs preflight when target branch provided', async () => {
     const task = { ...baseTask, base_branch: 'main' };
-    await setupNone(task);
+    await setupNone(session, task);
     // preflightNoneMode is called with (repoPath, targetBranch, task.id) for defense-in-depth
     expect(preflightNoneMode).toHaveBeenCalledWith('/tmp/test-repo', 'main', task.id);
   });
@@ -357,7 +414,7 @@ describe('setupNone', () => {
       dirty: null,
     });
 
-    await expect(setupNone(task)).rejects.toThrow('preflight failed');
+    await expect(setupNone(session, task)).rejects.toThrow('preflight failed');
   });
 
   it('does not checkout when already on target branch', async () => {
@@ -373,7 +430,7 @@ describe('setupNone', () => {
       dirty: null,
     });
 
-    await setupNone(task);
+    await setupNone(session, task);
 
     const checkoutCall = findExecCall(vi.mocked(execFile), {
       cmd: 'git',
@@ -391,14 +448,15 @@ describe('setupScratch', () => {
     id: 'scratch-task-01',
     run_mode: 'scratch',
   } as Task;
+  const session = makeSession('/tmp/test-repo');
 
   it('returns a worktreePath under scratch dir', async () => {
-    const result = await setupScratch(baseTask);
+    const result = await setupScratch(session, baseTask);
     expect(result.worktreePath).toContain('scratch-task-01');
   });
 
   it('creates the scratch directory', async () => {
-    await setupScratch(baseTask);
+    await setupScratch(session, baseTask);
     expect(vi.mocked(fs.mkdirSync)).toHaveBeenCalledWith(
       expect.stringContaining('scratch-task-01'),
       { recursive: true },
@@ -406,22 +464,22 @@ describe('setupScratch', () => {
   });
 
   it('returns null branch', async () => {
-    const result = await setupScratch(baseTask);
+    const result = await setupScratch(session, baseTask);
     expect(result.branch).toBeNull();
   });
 
   it('returns null baseBranch', async () => {
-    const result = await setupScratch(baseTask);
+    const result = await setupScratch(session, baseTask);
     expect(result.baseBranch).toBeNull();
   });
 
   it('returns null baseSha', async () => {
-    const result = await setupScratch(baseTask);
+    const result = await setupScratch(session, baseTask);
     expect(result.baseSha).toBeNull();
   });
 
   it('sets installHooksAt to the scratch dir', async () => {
-    const result = await setupScratch(baseTask);
+    const result = await setupScratch(session, baseTask);
     expect(result.installHooksAt).toBe(result.worktreePath);
   });
 });
@@ -429,10 +487,12 @@ describe('setupScratch', () => {
 // ─── runSetup dispatcher ──────────────────────────────────────────────────────
 
 describe('runSetup', () => {
+  const session = makeSession(DEFAULTS.task.repo_path);
+
   it('dispatches to setupNew for run_mode=new', async () => {
     const task: Task = { ...DEFAULTS.task, run_mode: 'new' } as Task;
     insertTask(db, task);
-    const result = await runSetup(task);
+    const result = await runSetup(session, task);
     expect(result.worktreePath).toContain('.worktrees');
   });
 
@@ -443,7 +503,7 @@ describe('runSetup', () => {
       worktree: '/tmp/existing-worktree',
     } as Task;
     insertTask(db, task);
-    const result = await runSetup(task);
+    const result = await runSetup(session, task);
     expect(result.worktreePath).toBe('/tmp/existing-worktree');
   });
 
@@ -469,20 +529,20 @@ describe('runSetup', () => {
     }) as any);
     const task: Task = { ...DEFAULTS.task, run_mode: 'none', base_branch: null } as Task;
     insertTask(db, task);
-    const result = await runSetup(task);
+    const result = await runSetup(session, task);
     expect(result.worktreePath).toBe(DEFAULTS.task.repo_path);
   });
 
   it('dispatches to setupScratch for run_mode=scratch', async () => {
     const task: Task = { ...DEFAULTS.task, id: 'scratch-x', run_mode: 'scratch' } as Task;
     insertTask(db, task);
-    const result = await runSetup(task);
+    const result = await runSetup(session, task);
     expect(result.branch).toBeNull();
     expect(result.baseSha).toBeNull();
   });
 
   it('throws for unknown run_mode', async () => {
     const task: Task = { ...DEFAULTS.task, run_mode: 'unknown' as any } as Task;
-    await expect(runSetup(task)).rejects.toThrow('unknown run_mode');
+    await expect(runSetup(session, task)).rejects.toThrow('unknown run_mode');
   });
 });

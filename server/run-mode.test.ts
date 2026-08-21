@@ -8,15 +8,49 @@ vi.mock('fs', (importOriginal) => {
   const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
-    existsSync: vi.fn(() => true),
+    existsSync: vi.fn((_p?: string) => true),
     mkdirSync: vi.fn(),
     copyFileSync: vi.fn(),
     writeFileSync: vi.fn(),
+    readFileSync: vi.fn(),
     unlinkSync: vi.fn(),
     rmSync: vi.fn(),
     readdirSync: vi.fn(() => [] as any),
   };
-  return { ...mocked, default: mocked };
+  // `server/compute/local.ts`'s `localFiles` (what the task engine and
+  // `gcScratchDirs` now go through via `ComputeSession.files`) uses
+  // `fs.promises`, not the sync surface above. Shim the async methods onto
+  // the sync mocks so per-test existsSync/readFileSync/rmSync overrides
+  // still apply, and so tests stop hitting the real filesystem.
+  const enoent = (p: string) => {
+    const err = new Error(`ENOENT: no such file or directory, '${p}'`) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    return err;
+  };
+  const promises = {
+    access: vi.fn(async (p: string) => {
+      if (!mocked.existsSync(p)) throw enoent(String(p));
+    }),
+    mkdir: vi.fn(async (p: string, opts?: object) => {
+      mocked.mkdirSync(p, opts);
+    }),
+    readFile: vi.fn(async (p: string, enc?: string) => {
+      const result = mocked.readFileSync(p, enc);
+      if (result === undefined) throw enoent(String(p));
+      return result;
+    }),
+    writeFile: vi.fn(async (p: string, content: string, opts?: object) => {
+      mocked.writeFileSync(p, content, opts);
+    }),
+    chmod: vi.fn(async () => {}),
+    cp: vi.fn(async (src: string, dst: string) => {
+      mocked.copyFileSync(src, dst);
+    }),
+    rm: vi.fn(async (p: string, opts?: object) => {
+      mocked.rmSync(p, opts);
+    }),
+  };
+  return { ...mocked, promises, default: { ...mocked, promises } };
 });
 
 vi.mock('./hook-settings.js', () => ({

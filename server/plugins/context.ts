@@ -13,6 +13,7 @@ import { qualify } from './qualify.js';
 import { registerPluginWorkflow } from '../workflows/registry.js';
 import { registerProvider } from '../integrations/registry.js';
 import { registerHarness } from '../harnesses/registry.js';
+import { registerCompute } from '../compute/registry.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { registerPluginUiPanel } from './ui-registry.js';
@@ -25,6 +26,7 @@ import type {
   WorkflowRegistrar,
   IntegrationRegistrar,
   HarnessRegistrar,
+  ComputeRegistrar,
   HttpRegistrar,
   FactsRegistrar,
   ArtifactsApi,
@@ -32,6 +34,7 @@ import type {
   PluginWorkflow,
   PluginIntegrationProvider,
   PluginHarness,
+  PluginCompute,
   Fact,
   FactQuery,
   FactTypeDefinition,
@@ -42,6 +45,7 @@ import type {
 import type { WorkflowType } from '../workflows/types.js';
 import type { IntegrationProvider } from '../integrations/types.js';
 import type { Harness } from '../harnesses/types.js';
+import type { ComputeProvider } from '../compute/types.js';
 
 /**
  * Pulls a registrar's declared local id off the plugin-supplied payload and
@@ -225,6 +229,23 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  const compute: ComputeRegistrar = {
+    register(p: PluginCompute) {
+      assertLive('compute.register');
+      const localKind = requireLocalId(p, 'kind', 'compute.register');
+      // `create` is guarded because `sessionFor()` dereferences it
+      // unconditionally on every task launch — same reasoning as the harness
+      // required-fn fields above. `resume` is optional: the host falls back
+      // to `create()` when it's absent.
+      requireFunctionField(p, 'create', 'compute.register');
+      requireOptionalFunctionField(p, 'resume', 'compute.register');
+      registerCompute({
+        ...(p as unknown as ComputeProvider),
+        kind: qualify(id, localKind),
+      });
+    },
+  };
+
   const http: HttpRegistrar = {
     route(method: HttpMethod, path: string, handler: PluginRouteHandler) {
       assertLive('http.route');
@@ -320,6 +341,7 @@ export function createPluginContext(id: string): PluginContext {
     workflows,
     integrations,
     harnesses,
+    compute,
     http,
     facts,
     artifacts,

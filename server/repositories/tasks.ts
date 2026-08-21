@@ -34,6 +34,7 @@ const TASK_WRITABLE_COLUMNS = new Set([
   'worktree_id',
   'agent',
   'model',
+  'compute',
   'notify_task_id',
   'harness_id',
   'source',
@@ -310,6 +311,10 @@ export interface InsertTaskInput {
   agent?: string | null;
   harness_id?: string;
   model?: string | null;
+  /** Compute provider kind. Stays NULL when unset — sessionFor() resolves NULL to
+   *  DEFAULT_COMPUTE_KIND, so a NULL row keeps following the default rather than
+   *  freezing to the current default's value at insert time. */
+  compute?: string | null;
   notify_task_id?: string | null;
   source?: string | null;
   pr_url?: string | null;
@@ -329,8 +334,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, compute, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -343,6 +348,9 @@ export function insertTask(input: InsertTaskInput): string {
       input.agent ?? null,
       input.harness_id ?? 'claude-code',
       input.model ?? null,
+      // NULL, not DEFAULT_COMPUTE_KIND — see the doc comment on
+      // InsertTaskInput.compute.
+      input.compute ?? null,
       input.notify_task_id ?? null,
       input.source ?? null,
       input.pr_url ?? null,

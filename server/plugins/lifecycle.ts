@@ -4,7 +4,8 @@
  * runs its `ctx.effect()` teardown stack.
  *
  * Order: routes -> facts -> ui -> the four registries (workflow kinds,
- * harnesses, providers) -> `ctx.effect()` callbacks. Each step is isolated —
+ * harnesses, compute providers, integration providers) -> `ctx.effect()`
+ * callbacks. Each step is isolated —
  * one failing step is logged and skipped, never thrown, so a bad teardown
  * can't strand the rest of the sequence (matches the loader's own
  * per-plugin isolation policy).
@@ -18,6 +19,7 @@ import { unregisterPluginUi } from './ui-registry.js';
 import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
 import { unregisterHarness } from '../harnesses/registry.js';
+import { unregisterCompute } from '../compute/registry.js';
 import { unregisterProvider } from '../integrations/registry.js';
 import { pluginRegistrations } from './catalog.js';
 import type { PluginContext } from '@octomux/plugin-api';
@@ -34,6 +36,7 @@ export interface UnmountReleased {
   uiContributions: number;
   workflowKinds: string[];
   harnessIds: string[];
+  computeKinds: string[];
   providerKinds: string[];
   factTypes: string[];
   /** `ctx.effect()` callbacks that ran (successfully or not). */
@@ -140,6 +143,10 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     await step(pluginId, failures, `harness:${id}`, () => unregisterHarness(id));
   }
 
+  for (const kind of registered.computeKinds) {
+    await step(pluginId, failures, `compute:${kind}`, () => unregisterCompute(kind));
+  }
+
   for (const kind of registered.providerKinds) {
     await step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
   }
@@ -155,6 +162,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     uiContributions: registered.uiSlots.length,
     workflowKinds,
     harnessIds: registered.harnessIds,
+    computeKinds: registered.computeKinds,
     providerKinds: registered.providerKinds,
     factTypes: registered.factTypes,
     effects: effectFailures.length,

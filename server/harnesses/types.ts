@@ -1,4 +1,5 @@
 import type { OctomuxSettings } from '../settings.js';
+import type { ComputeFiles } from '../compute/types.js';
 
 const AGENT_NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
 // Forbidden shell metacharacters: backtick, `;`, `|`, `&`, `>`, `<`, newline,
@@ -67,15 +68,33 @@ export interface Harness {
   buildLaunchCommand(opts: HarnessLaunchOpts): string;
   buildResumeCommand(opts: HarnessResumeOpts): string;
   buildContinueCommand(opts: HarnessResumeOpts): string | null;
-  installHooks(worktreePath: string, baseUrl: string, hookToken: string): Promise<void>;
+  /**
+   * Write octomux's hook wiring into a directory. `files` is the file facade
+   * for the machine the workspace actually lives on — for a task pinned to a
+   * remote compute provider, the caller passes that session's `ComputeFiles`
+   * (`(await sessionFor(task)).files`) so the config lands on the box the
+   * agent runs on, not on the octomux server's own disk. Optional and
+   * defaults to `localFiles` (the server's own filesystem, i.e. today's
+   * behavior) so a plugin-supplied harness written against the old
+   * three-arg shape still compiles and still works unchanged on local
+   * compute.
+   */
+  installHooks(
+    worktreePath: string,
+    baseUrl: string,
+    hookToken: string,
+    files?: ComputeFiles,
+  ): Promise<void>;
   /**
    * Remove octomux's hook wiring from a directory. Called on teardown for paths
    * octomux does NOT own (run_mode `existing`/`none`), which survive deleteTask
    * — otherwise the config outlives the worker row whose token it carries and
    * every later session in that directory 401s on every hook. Must leave the
    * user's own hooks and permissions intact, and no-op when nothing is there.
+   * `files` follows the same rule as `installHooks`: the compute the
+   * directory actually lives on, defaulting to `localFiles`.
    */
-  uninstallHooks(dirPath: string): Promise<void>;
+  uninstallHooks(dirPath: string, files?: ComputeFiles): Promise<void>;
   /**
    * Optional post-launch hook called after the launch command is sent to the
    * tmux pane. Used by harnesses with an interactive first-run gate (e.g.

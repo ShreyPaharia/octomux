@@ -66,6 +66,8 @@ const { registerHarness, getHarness, listHarnesses, resetHarnesses, freezeCoreHa
   await import('../harnesses/registry.js');
 const { writeTaskArtifact: mockWriteTaskArtifact, listTaskArtifacts: mockListTaskArtifacts } =
   await import('../artifact-task.js');
+const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreCompute } =
+  await import('../compute/registry.js');
 
 /** Pipe pino output into an in-memory buffer of parsed JSON lines. */
 function captureLogs() {
@@ -100,6 +102,7 @@ beforeEach(() => {
   resetHarnesses();
   vi.mocked(mockWriteTaskArtifact).mockReset();
   vi.mocked(mockListTaskArtifacts).mockReset();
+  resetCompute();
 });
 
 describe('ctx.logger', () => {
@@ -312,6 +315,59 @@ describe('ctx.harnesses', () => {
   });
 });
 
+describe('ctx.compute', () => {
+  it('qualifies a local compute kind', () => {
+    const ctx = createPluginContext('demo-compute');
+    ctx.compute.register({ kind: 'foo', create: async () => ({}) as unknown });
+
+    expect(listCompute().map((p) => p.kind)).toContain(qualify('demo-compute', 'foo'));
+    expect(() => getCompute('foo')).toThrow(/unknown compute/i); // never registered bare
+  });
+
+  it('throws when the payload is missing a local "kind"', () => {
+    const ctx = createPluginContext('demo-compute-2');
+    expect(() => ctx.compute.register({ create: async () => ({}) as unknown })).toThrow(/kind/);
+  });
+
+  it('cannot land on a core compute kind, frozen or not', () => {
+    registerCompute({
+      kind: 'local',
+      create: async () => ({}) as unknown,
+    } as never);
+    freezeCoreCompute();
+    const ctx = createPluginContext('attacker');
+
+    ctx.compute.register({ kind: 'local', create: async () => ({}) as unknown });
+
+    expect(listCompute().map((p) => p.kind)).toContain('attacker:local');
+    expect(listCompute().filter((p) => p.kind === 'local')).toHaveLength(1);
+  });
+
+  it('throws when required function field "create" is missing', () => {
+    const ctx = createPluginContext('shape-compute');
+    expect(() => ctx.compute.register({ kind: 'x' })).toThrow(/create/);
+    expect(() => getCompute(qualify('shape-compute', 'x'))).toThrow(/unknown compute/i);
+  });
+
+  it('throws when "create" is present but not a function', () => {
+    const ctx = createPluginContext('shape-compute-2');
+    expect(() => ctx.compute.register({ kind: 'x', create: 'nope' })).toThrow(/create/);
+  });
+
+  it('allows omitting the optional "resume" field', () => {
+    const ctx = createPluginContext('shape-compute-3');
+    ctx.compute.register({ kind: 'x', create: async () => ({}) as unknown });
+    expect(getCompute(qualify('shape-compute-3', 'x'))).toBeDefined();
+  });
+
+  it('throws when "resume" is present but not a function', () => {
+    const ctx = createPluginContext('shape-compute-4');
+    expect(() =>
+      ctx.compute.register({ kind: 'x', create: async () => ({}) as unknown, resume: 'nope' }),
+    ).toThrow(/resume/);
+  });
+});
+
 describe('workflow + provider payload shape guards (F2)', () => {
   const provider = () => ({
     kind: 'thing',
@@ -385,6 +441,9 @@ describe('revokePluginContext (F3)', () => {
     revokePluginContext(ctx);
 
     expect(() => ctx.harnesses.register(harness())).toThrow(/revoked/);
+    expect(() => ctx.compute.register({ kind: 'k', create: async () => ({}) as unknown })).toThrow(
+      /revoked/,
+    );
     expect(() => ctx.workflows.register({ kind: 'k' })).toThrow(/revoked/);
     expect(() =>
       ctx.integrations.register({
@@ -396,6 +455,7 @@ describe('revokePluginContext (F3)', () => {
     ).toThrow(/revoked/);
 
     expect(listHarnesses().map((h) => h.id)).not.toContain('slowplug:late');
+    expect(listCompute().map((p) => p.kind)).not.toContain('slowplug:k');
     expect(getWorkflow(qualify('slowplug', 'k'))).toBeUndefined();
     expect(getProvider(qualify('slowplug', 'k'))).toBeUndefined();
   });

@@ -345,7 +345,11 @@ describe('pollStatuses', () => {
 
     await pollStatuses();
 
+    // sendMessageToAgent now takes the notified task's own ComputeSession as
+    // its first arg (SHR-261/266 compute seam) — assert on the local
+    // session's identity rather than its full shape.
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', taskId: 'lead-task-01' }),
       'octomux-agent-lead-01',
       1,
       expect.stringContaining('worker-task-01'),
@@ -1056,7 +1060,9 @@ describe('pollReviewerRequests', () => {
     await pollReviewerRequests();
 
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
-    const [session, windowIdx, message] = vi.mocked(sendMessageToAgent).mock.calls[0];
+    // sendMessageToAgent(compute, session, windowIndex, message) — compute
+    // session is now the leading argument (SHR-261/266 compute split).
+    const [, session, windowIdx, message] = vi.mocked(sendMessageToAgent).mock.calls[0];
     expect(session).toBe('octomux-agent-running-review');
     expect(windowIdx).toBe(0);
     expect(message).toContain('Re-review requested');
@@ -1255,7 +1261,7 @@ describe('pollReviewerRequests', () => {
     await pollReviewerRequests();
 
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
-    const message = vi.mocked(sendMessageToAgent).mock.calls[0][2] as string;
+    const message = vi.mocked(sendMessageToAgent).mock.calls[0][3] as string;
     expect(message).toContain('Head unchanged');
     expect(message).toContain('/review-artifact');
     const row = db
@@ -1828,7 +1834,10 @@ describe('pollAgentWindows', () => {
 
     await pollStatuses();
 
+    // sendMessageToAgent's first arg is now the notify TARGET's own
+    // ComputeSession (orch-task-01), not the finishing worker's.
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', taskId: 'orch-task-01' }),
       'octomux-agent-orch-task-01',
       1,
       expect.stringContaining('worker-agent-01'),

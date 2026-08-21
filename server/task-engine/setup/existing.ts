@@ -1,27 +1,24 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
 import { revParseHead } from '../git.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task } from '../../types.js';
 import type { SetupResult } from './types.js';
 
-const execFile = promisify(execFileCb);
-
-export async function setupExisting(task: Task): Promise<SetupResult> {
+export async function setupExisting(c: ComputeSession, task: Task): Promise<SetupResult> {
   const worktreePath = task.worktree;
   if (!worktreePath) {
     throw new Error('existing mode requires a worktree path');
   }
-  if (!fs.existsSync(worktreePath)) {
+  if (!(await c.files.exists(worktreePath))) {
     throw new Error(`existing worktree does not exist: ${worktreePath}`);
   }
-  await execFile('git', ['-C', worktreePath, 'rev-parse', '--is-inside-work-tree']);
+  await c.exec(['git', '-C', worktreePath, 'rev-parse', '--is-inside-work-tree']);
 
-  const baseSha = await revParseHead(worktreePath);
+  const baseSha = await revParseHead(c, worktreePath);
 
   let branch: string | null = null;
   try {
-    const { stdout } = await execFile('git', [
+    const { stdout } = await c.exec([
+      'git',
       '-C',
       worktreePath,
       'rev-parse',
@@ -36,7 +33,8 @@ export async function setupExisting(task: Task): Promise<SetupResult> {
 
   let baseBranch: string | null = null;
   try {
-    const { stdout } = await execFile('git', [
+    const { stdout } = await c.exec([
+      'git',
       '-C',
       worktreePath,
       'rev-parse',

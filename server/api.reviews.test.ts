@@ -148,7 +148,14 @@ describe('POST /api/tasks/:id/review-runs', () => {
     ).run();
     const res = await request(app).post('/api/tasks/task-rev1/review-runs').send();
     expect(res.status).toBe(202);
-    expect(sendMessageToAgent).toHaveBeenCalledWith('tmux-rev1', 0, expect.any(String));
+    // Leading arg is the task's ComputeSession (the seam); assert it's the
+    // task's own session, then keep the original target/message assertions.
+    expect(sendMessageToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', taskId: 'task-rev1' }),
+      'tmux-rev1',
+      0,
+      expect.any(String),
+    );
   });
 
   it('returns 409 if a run is already running', async () => {

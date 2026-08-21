@@ -13,6 +13,16 @@ export interface OctomuxSettings {
   editor: EditorChoice;
   defaultHarnessId: string;
   harnesses: Record<string, Record<string, unknown>>;
+  /** Compute provider kind used when a task doesn't override it. Default 'local'. */
+  defaultComputeKind: string;
+  /**
+   * Per-compute-provider config blob, keyed by kind. Opaque to the host at
+   * this layer — a provider has no `validateSettings` (unlike harnesses).
+   * Values may hold `${env:VAR}` placeholders; use `computeConfigFor()` to
+   * read a resolved copy. A nested `secrets` object holds keys that must
+   * never reach the agent — see `computeConfigFor()`.
+   */
+  compute: Record<string, Record<string, unknown>>;
   /**
    * Per-plugin settings, keyed by plugin id. Opaque to the host — octomux
    * never schema-checks a plugin's blob (unlike harnesses' validateSettings)
@@ -90,6 +100,8 @@ export const DEFAULT_SETTINGS: OctomuxSettings = {
   editor: 'nvim',
   defaultHarnessId: 'claude-code',
   harnesses: {},
+  defaultComputeKind: 'local',
+  compute: {},
   plugins: {},
 };
 
@@ -157,10 +169,15 @@ export async function getSettings(): Promise<OctomuxSettings> {
     _deprecatedWarnEmitted = true;
   }
 
+  const compute = (parsed.compute as Record<string, Record<string, unknown>>) ?? {};
+
   return {
     editor: (parsed.editor as EditorChoice) ?? DEFAULT_SETTINGS.editor,
     defaultHarnessId: (parsed.defaultHarnessId as string) ?? DEFAULT_SETTINGS.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultComputeKind:
+      (parsed.defaultComputeKind as string) ?? DEFAULT_SETTINGS.defaultComputeKind,
+    compute,
     plugins,
     defaultTracker:
       parsed.defaultTracker === 'jira' || parsed.defaultTracker === 'linear'
@@ -288,6 +305,16 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     }
   }
 
+  const mergedCompute = { ...current.compute };
+  if (patch.compute) {
+    for (const [kind, blob] of Object.entries(patch.compute)) {
+      // No `validateSettings` on ComputeProvider (unlike harnesses) — preserve
+      // verbatim, same as plugin config below. setOwn guards the caller-
+      // controlled `kind` key against the __proto__ hazard documented above.
+      setOwn(mergedCompute, kind, blob);
+    }
+  }
+
   const mergedPlugins = { ...current.plugins };
   if (patch.plugins) {
     for (const [id, blob] of Object.entries(patch.plugins)) {
@@ -313,6 +340,8 @@ export async function updateSettings(patch: Partial<OctomuxSettings>): Promise<O
     editor: patch.editor ?? current.editor,
     defaultHarnessId: patch.defaultHarnessId ?? current.defaultHarnessId,
     harnesses: mergedHarnesses,
+    defaultComputeKind: patch.defaultComputeKind ?? current.defaultComputeKind,
+    compute: mergedCompute,
     plugins: mergedPlugins,
     defaultTracker:
       patch.defaultTracker !== undefined ? patch.defaultTracker : current.defaultTracker,

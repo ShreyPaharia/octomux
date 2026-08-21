@@ -1,4 +1,5 @@
 import { getRemoteOriginUrl } from '../task-engine/git.js';
+import { localSession } from '../compute/index.js';
 
 /** Parse a git remote URL into `owner/repo` (nameWithOwner) form. Returns null if non-GitHub. */
 export function parseNameWithOwner(remoteUrl: string): string | null {
@@ -17,7 +18,11 @@ const repoNwoCache = new Map<string, string>();
 export async function repoNameWithOwner(repoPath: string): Promise<string | null> {
   const cached = repoNwoCache.get(repoPath);
   if (cached) return cached;
-  const remoteUrl = await getRemoteOriginUrl(repoPath);
+  // `repoPath` here is always the base repo checkout (`worktrees.repo_path` /
+  // `task.repo_path` as identity), which lives on the server's own disk and
+  // is the source every task's worktree/clone is created from — even for a
+  // task on remote compute. Reading its origin remote is legitimately local.
+  const remoteUrl = await getRemoteOriginUrl(localSession, repoPath);
   if (!remoteUrl) return null;
   const nwo = parseNameWithOwner(remoteUrl);
   if (nwo) repoNwoCache.set(repoPath, nwo);

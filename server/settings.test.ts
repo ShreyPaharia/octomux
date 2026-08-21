@@ -97,6 +97,7 @@ const {
   getStoredCapabilityGateEnabled,
   DEFAULT_SETTINGS,
 } = await import('./settings.js');
+const { computeConfigFor } = await import('./compute/config.js');
 const { default: fs } = await import('fs');
 
 const mockFs = vi.mocked(fs.promises);
@@ -660,4 +661,70 @@ describe('settings.plugins', () => {
       expect(await getPluginSettings('constructor')).toEqual({ real: true });
     });
   });
+});
+
+// Lives in this file rather than beside `compute/config.ts` because it needs
+// this suite's settings-file fs mock; the module under test is
+// `server/compute/config.ts`.
+describe('computeConfigFor', () => {
+  const ENV_KEY = 'OCTOMUX_TEST_COMPUTE_SECRET';
+  const original = process.env[ENV_KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = original;
+  });
+
+  it('resolves a ${env:VAR} placeholder under secrets, and the raw placeholder never appears in config', async () => {
+    process.env[ENV_KEY] = 'shh-token';
+    mockFs.readFile.mockResolvedValue(
+      JSON.stringify({
+        ...DEFAULT_SETTINGS,
+        compute: {
+          ssh: {
+            host: 'example.com',
+            secrets: { apiKey: `\${env:${ENV_KEY}}` },
+          },
+        },
+      }),
+    );
+
+    const result = await computeConfigFor('ssh');
+
+    expect(result.secrets).toEqual({ apiKey: 'shh-token' });
+    expect(result.config).toEqual({ host: 'example.com' });
+    // The resolved secret value must never land in `config`, and the raw
+    // placeholder string must never survive into either half.
+    expect(JSON.stringify(result.config)).not.toContain('shh-token');
+    expect(JSON.stringify(result.config)).not.toContain('${env:');
+    expect(JSON.stringify(result.secrets)).not.toContain('${env:');
+  });
+
+  it('also expands ${env:VAR} placeholders inside config (non-secret) values', async () => {
+    process.env[ENV_KEY] = 'region-1';
+    mockFs.readFile.mockResolvedValue(
+      JSON.stringify({
+        ...DEFAULT_SETTINGS,
+        compute: { ssh: { region: `\${env:${ENV_KEY}}` } },
+      }),
+    );
+
+    const result = await computeConfigFor('ssh');
+    expect(result.config).toEqual({ region: 'region-1' });
+  });
+
+  it('returns empty config/secrets for a kind with no stored blob', async () => {
+    mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+    const result = await computeConfigFor('local');
+    expect(result).toEqual({ config: {}, secrets: {} });
+  });
+
+  it.each(['constructor', '__proto__', 'prototype'])(
+    'computeConfigFor("%s") reads {} rather than walking the prototype chain',
+    async (kind) => {
+      mockFs.readFile.mockResolvedValue(JSON.stringify(DEFAULT_SETTINGS));
+      const result = await computeConfigFor(kind);
+      expect(result).toEqual({ config: {}, secrets: {} });
+    },
+  );
 });

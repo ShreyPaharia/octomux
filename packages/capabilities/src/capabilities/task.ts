@@ -95,6 +95,7 @@ export const taskCreateInputSchema = createTaskInputSchema.extend({
   draft: z.boolean().optional().describe('Create as a draft (idle) task'),
   agent: z.string().optional().nullable().describe('Agent persona name'),
   harness_id: z.string().optional().describe('Harness id (default: claude-code)'),
+  compute: z.string().optional().describe('Compute provider kind (default: local)'),
   workflow_status: workflowStatusEnum.optional().describe('Initial workflow_status override'),
   depends_on: z
     .string()

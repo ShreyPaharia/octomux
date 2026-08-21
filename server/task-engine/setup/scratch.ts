@@ -1,11 +1,11 @@
-import fs from 'fs';
 import { scratchDirFor } from '../reconcile.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task } from '../../types.js';
 import type { SetupResult } from './types.js';
 
-export async function setupScratch(task: Task): Promise<SetupResult> {
+export async function setupScratch(c: ComputeSession, task: Task): Promise<SetupResult> {
   const dir = scratchDirFor(task.id);
-  fs.mkdirSync(dir, { recursive: true });
+  await c.files.mkdirp(dir);
 
   return {
     worktreePath: dir,

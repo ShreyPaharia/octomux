@@ -1,15 +1,18 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, type Pty } from './pty.js';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
 import { getTask, getChatAgentTmuxSession } from './repositories/index.js';
-import { execTmux, tmuxSpawnSpec } from './tmux-bin.js';
+import { tmuxSpawnSpec } from './tmux-bin.js';
+import { shellQuoteSingle } from './shell-quote.js';
+import { sessionFor, localSession } from './compute/index.js';
+import type { ComputeSession } from './compute/types.js';
+import type { ProcessHandle } from './agent-session/substrate.js';
 import { installHeartbeat } from './ws-heartbeat.js';
 
 interface TerminalConnection {
   ws: WebSocket;
-  pty: Pty;
+  pty: ProcessHandle;
 }
 
 const connections = new Map<string, TerminalConnection[]>();
@@ -45,22 +48,32 @@ export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head
   return true;
 }
 
-function attachToTmuxSession(
+async function attachToTmuxSession(
   ws: WebSocket,
+  compute: ComputeSession,
   tmuxTarget: string,
   connKey: string,
   closeReason: string,
   linkedSession?: string,
   pendingMessages?: (Buffer | string)[],
-): void {
-  let pty: Pty;
+): Promise<void> {
+  // The provider owns tmux binary + socket resolution in general, but the
+  // interactive pty attach only has a shell-command spawn surface
+  // (`compute.spawn`), not an argv one — so build the attach argv the same
+  // way `compute.tmux` would resolve it locally and quote it into a command
+  // string. For `local` this ends up running the exact same tmux binary,
+  // socket, and env that `tmuxSpawnSpec` produced before this migration.
+  const spec = tmuxSpawnSpec(['attach-session', '-t', tmuxTarget]);
+  const command = [spec.file, ...spec.args].map(shellQuoteSingle).join(' ');
+
+  let pty: ProcessHandle;
   try {
-    const spec = tmuxSpawnSpec(['attach-session', '-t', tmuxTarget]);
-    pty = spawn(spec.file, spec.args, {
-      name: 'xterm-256color',
+    pty = await compute.spawn({
+      command,
+      cwd: compute.repoPath,
+      env: spec.env as Record<string, string>,
       cols: 120,
       rows: 30,
-      env: spec.env as Record<string, string>,
     });
   } catch {
     ws.close(4005, closeReason);
@@ -95,10 +108,11 @@ function attachToTmuxSession(
   let paused = false;
 
   const forceRepaint = () => {
-    execTmux(['list-clients', '-t', tmuxTarget, '-F', '#{client_name}'])
+    compute
+      .tmux(['list-clients', '-t', tmuxTarget, '-F', '#{client_name}'])
       .then(({ stdout }) => {
         const client = stdout.trim().split('\n')[0];
-        if (client) return execTmux(['refresh-client', '-t', client]);
+        if (client) return compute.tmux(['refresh-client', '-t', client]);
       })
       .catch(() => {});
   };
@@ -139,7 +153,7 @@ function attachToTmuxSession(
       try {
         const parsed = JSON.parse(msg);
         if (parsed.type === 'resize' && parsed.cols && parsed.rows) {
-          pty.resize(parsed.cols, parsed.rows);
+          pty.resize?.(parsed.cols, parsed.rows);
           return;
         }
         if (parsed.type === 'pause') {
@@ -179,7 +193,7 @@ function attachToTmuxSession(
 
   const cleanupLinkedSession = () => {
     if (linkedSession) {
-      execTmux(['kill-session', '-t', linkedSession]).catch(() => {});
+      compute.tmux(['kill-session', '-t', linkedSession]).catch(() => {});
     }
   };
 
@@ -187,7 +201,7 @@ function attachToTmuxSession(
   ws.on('close', () => {
     if (retryTimer) clearTimeout(retryTimer);
     if (!ptyExited) {
-      pty.kill();
+      pty.dispose();
     }
     cleanupLinkedSession();
     const conns = connections.get(connKey);
@@ -225,6 +239,8 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
     return;
   }
 
+  const compute = await sessionFor(task);
+
   // Create a grouped session so each viewer has independent window selection.
   // Without this, all clients attached to the same session share the active window,
   // meaning switching tabs in one browser would affect all other viewers.
@@ -238,21 +254,17 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   // paint it into the alternate screen first; tmux's attach opens with
   // `\e[?1049h\e[H\e[J` + a full repaint of the same content, so the handoff is
   // a same-frame overwrite rather than a flash of empty screen.
-  const snapshot = execTmux([
-    'capture-pane',
-    '-p',
-    '-e',
-    '-t',
-    `${task.tmux_session}:${windowIndex}`,
-  ]).then(
-    ({ stdout }) => stdout,
-    () => null,
-  );
+  const snapshot = compute
+    .tmux(['capture-pane', '-p', '-e', '-t', `${task.tmux_session}:${windowIndex}`])
+    .then(
+      ({ stdout }) => stdout,
+      () => null,
+    );
 
   let pane: string | null;
   try {
     [, pane] = await Promise.all([
-      execTmux([
+      compute.tmux([
         'new-session',
         '-d',
         '-t',
@@ -275,7 +287,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   // session clamps window size to the smallest client. Kept out of the chain
   // above because `aggressive-resize` is a window option and a tmux build that
   // rejects it on a session target would abort the commands that do matter.
-  execTmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
+  compute.tmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
 
   if (pane && ws.readyState === WebSocket.OPEN) {
     ws.send(`\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`);
@@ -284,6 +296,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   const connKey = `${taskId}:${windowIndex}`;
   attachToTmuxSession(
     ws,
+    compute,
     linkedSession,
     connKey,
     'Failed to attach to tmux session',
@@ -298,7 +311,15 @@ function handleChatConnection(ws: WebSocket, chatId: string): void {
     ws.close(4004, 'Chat not found');
     return;
   }
-  attachToTmuxSession(ws, row.tmux_session, `chat:${chatId}`, `Failed to attach to chat session`);
+  // Chats have no Task by design (they're not task-backed sessions), so this
+  // always stays on the local machine's own compute — never `sessionFor`.
+  attachToTmuxSession(
+    ws,
+    localSession,
+    row.tmux_session,
+    `chat:${chatId}`,
+    `Failed to attach to chat session`,
+  );
 }
 
 export function getActiveConnections(): Map<string, TerminalConnection[]> {
@@ -309,7 +330,7 @@ export function cleanupAllConnections(): void {
   for (const [, conns] of connections) {
     for (const { ws, pty } of conns) {
       try {
-        pty.kill();
+        pty.dispose();
       } catch {
         // already dead
       }

@@ -1,27 +1,24 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
 import path from 'path';
-import fs from 'fs';
 import { childLogger } from '../../logger.js';
 import { computeMergeBase } from '../../git-commits.js';
 import { validateRepo, revParseHead, addWorktreeWithBranch, slugifyTitle } from '../git.js';
 import { writeAgentLocalSettings, DISABLED_PLUGINS_IN_WORKTREES } from '../launch.js';
+import type { ComputeSession } from '../../compute/types.js';
 import type { Task } from '../../types.js';
 import type { SetupResult } from './types.js';
 
-const execFile = promisify(execFileCb);
 const logger = childLogger('task-engine/setup/new');
 
-export async function setupNew(task: Task): Promise<SetupResult> {
-  await validateRepo(task.repo_path);
+export async function setupNew(c: ComputeSession, task: Task): Promise<SetupResult> {
+  await validateRepo(c, c.repoPath);
 
   const slug = slugifyTitle(task.title, task.id);
   const branch = task.branch || `agents/${slug}`;
   const worktreeDir = task.branch || slug;
-  const worktreePath = path.join(task.repo_path, '.worktrees', worktreeDir);
+  const worktreePath = path.join(c.repoPath, '.worktrees', worktreeDir);
 
-  const worktreeBaseDir = path.join(task.repo_path, '.worktrees');
-  fs.mkdirSync(worktreeBaseDir, { recursive: true });
+  const worktreeBaseDir = path.join(c.repoPath, '.worktrees');
+  await c.files.mkdirp(worktreeBaseDir);
 
   // `worktree add -b <branch>` creates a NEW branch and fails if it already
   // exists (e.g. left over from a prior task — octomux preserves branches on
@@ -29,7 +26,8 @@ export async function setupNew(task: Task): Promise<SetupResult> {
   // into the new worktree instead; otherwise fall back to a unique branch name
   // so task creation never dies on a name collision.
   const finalBranch = await addWorktreeWithBranch(
-    task.repo_path,
+    c,
+    c.repoPath,
     worktreePath,
     branch,
     task.base_branch,
@@ -43,13 +41,7 @@ export async function setupNew(task: Task): Promise<SetupResult> {
   if (task.source === 'auto_review' && task.pr_head_sha) {
     if (task.pr_number) {
       try {
-        await execFile('git', [
-          '-C',
-          task.repo_path,
-          'fetch',
-          'origin',
-          `pull/${task.pr_number}/head`,
-        ]);
+        await c.exec(['git', '-C', c.repoPath, 'fetch', 'origin', `pull/${task.pr_number}/head`]);
       } catch (err) {
         logger.warn(
           { task_id: task.id, operation: 'createTask', err },
@@ -58,7 +50,7 @@ export async function setupNew(task: Task): Promise<SetupResult> {
       }
     }
     try {
-      await execFile('git', ['-C', worktreePath, 'reset', '--hard', task.pr_head_sha]);
+      await c.exec(['git', '-C', worktreePath, 'reset', '--hard', task.pr_head_sha]);
     } catch (err) {
       logger.warn(
         { task_id: task.id, operation: 'createTask', err },
@@ -71,27 +63,27 @@ export async function setupNew(task: Task): Promise<SetupResult> {
   let baseSha: string;
   if (task.source === 'auto_review' && task.pr_head_sha && task.base_branch) {
     try {
-      baseSha = await computeMergeBase(task.repo_path, task.base_branch, task.pr_head_sha);
+      baseSha = await computeMergeBase(c.repoPath, task.base_branch, task.pr_head_sha);
     } catch (err) {
       logger.warn(
         { task_id: task.id, operation: 'createTask', err },
         'createTask: git merge-base failed, falling back to rev-parse',
       );
-      baseSha = await revParseHead(task.repo_path, baseRef);
+      baseSha = await revParseHead(c, c.repoPath, baseRef);
     }
   } else {
-    baseSha = await revParseHead(task.repo_path, baseRef);
+    baseSha = await revParseHead(c, c.repoPath, baseRef);
   }
 
   // Copy .claude/settings.local.json if it exists
-  const settingsSrc = path.join(task.repo_path, '.claude', 'settings.local.json');
+  const settingsSrc = path.join(c.repoPath, '.claude', 'settings.local.json');
   const settingsDst = path.join(worktreePath, '.claude', 'settings.local.json');
-  if (fs.existsSync(settingsSrc)) {
-    fs.mkdirSync(path.dirname(settingsDst), { recursive: true });
-    fs.copyFileSync(settingsSrc, settingsDst);
+  if (await c.files.exists(settingsSrc)) {
+    await c.files.mkdirp(path.dirname(settingsDst));
+    await c.files.copy(settingsSrc, settingsDst);
   }
 
-  writeAgentLocalSettings(worktreePath);
+  await writeAgentLocalSettings(c, worktreePath);
   logger.info(
     {
       task_id: task.id,

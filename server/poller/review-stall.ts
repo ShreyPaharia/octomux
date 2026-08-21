@@ -1,4 +1,6 @@
 import { childLogger } from '../logger.js';
+import { sessionFor } from '../compute/index.js';
+import { getTask } from '../repositories/tasks.js';
 import { execTmux } from '../tmux-bin.js';
 import { sendMessageToAgent } from '../tmux-input.js';
 import { countPendingByTask } from '../repositories/permission-prompts.js';
@@ -52,7 +54,10 @@ export async function pollReviewStalls(): Promise<void> {
     }
 
     try {
-      await sendMessageToAgent(task.tmux_session, agent.window_index, stallNudge(task.id));
+      const full = getTask(task.id);
+      if (!full) continue;
+      const compute = await sessionFor(full);
+      await sendMessageToAgent(compute, task.tmux_session, agent.window_index, stallNudge(task.id));
     } catch (err) {
       logger.warn(
         { task_id: task.id, agent_id: agent.id, err: (err as Error).message },

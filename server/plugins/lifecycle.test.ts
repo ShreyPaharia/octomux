@@ -6,6 +6,7 @@ import { resetPluginUi, listUiContributions } from './ui-registry.js';
 import { resetFacts } from './facts.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
+import { resetCompute, getCompute, CORE_COMPUTE_KINDS } from '../compute/registry.js';
 import { resetProviders, getProvider, CORE_PROVIDER_KINDS } from '../integrations/registry.js';
 import { subscribeServerEvents } from '../events.js';
 import type { PluginContext } from '@octomux/plugin-api';
@@ -47,11 +48,19 @@ function fakeProvider(kind: string): Record<string, unknown> {
   };
 }
 
+function fakeCompute(kind: string): Record<string, unknown> {
+  return {
+    kind,
+    create: async () => ({}) as unknown,
+  };
+}
+
 beforeEach(() => {
   resetPluginRoutes();
   resetPluginUi();
   resetFacts();
   resetHarnesses();
+  resetCompute();
   resetProviders();
 });
 
@@ -77,13 +86,14 @@ describe('getPluginUnloadability', () => {
 });
 
 describe('unmountPlugin', () => {
-  it('releases routes, ui, workflow kinds, harnesses, and providers, and runs ctx.effect() in reverse', async () => {
+  it('releases routes, ui, workflow kinds, harnesses, compute providers, and providers, and runs ctx.effect() in reverse', async () => {
     const pluginId = 'lc-full';
     const ctx = createPluginContext(pluginId);
 
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
     ctx.workflows.register({ kind: 'mine', displayName: 'Mine', surfaces: ['feed'] });
     ctx.harnesses.register(fakeHarness('fake'));
+    ctx.compute.register(fakeCompute('fake'));
     ctx.integrations.register(fakeProvider('fake'));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
@@ -99,6 +109,7 @@ describe('unmountPlugin', () => {
     expect(listPluginRoutes(pluginId)).toEqual(['GET /thing']);
     expect(getWorkflow(`${pluginId}:mine`)).toBeDefined();
     expect(getHarness(`${pluginId}:fake`).id).toBe(`${pluginId}:fake`);
+    expect(getCompute(`${pluginId}:fake`).kind).toBe(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
 
@@ -110,6 +121,7 @@ describe('unmountPlugin', () => {
     expect(report.released.uiContributions).toBe(1);
     expect(report.released.workflowKinds).toEqual([`${pluginId}:mine`]);
     expect(report.released.harnessIds).toEqual([`${pluginId}:fake`]);
+    expect(report.released.computeKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
     expect(report.released.effects).toBe(0);
@@ -118,6 +130,7 @@ describe('unmountPlugin', () => {
     expect(listPluginRoutes(pluginId)).toEqual([]);
     expect(getWorkflow(`${pluginId}:mine`)).toBeUndefined();
     expect(() => getHarness(`${pluginId}:fake`)).toThrow();
+    expect(() => getCompute(`${pluginId}:fake`)).toThrow();
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(false);
 
@@ -159,37 +172,19 @@ describe('unmountPlugin', () => {
       uiContributions: 0,
       workflowKinds: [],
       harnessIds: [],
+      computeKinds: [],
       providerKinds: [],
       factTypes: [],
       effects: 0,
     });
   });
 
-  it('snapshots what a plugin registered BEFORE any teardown step runs, so `released` stays accurate even though every step below mutates the same registries the snapshot read', async () => {
-    const pluginId = 'lc-snapshot';
-    const ctx = createPluginContext(pluginId);
-
-    ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-    ctx.harnesses.register(fakeHarness('h'));
-    ctx.integrations.register(fakeProvider('p'));
-    ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
-    ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
-
-    const report = await unmountPlugin(pluginId, ctx);
-
-    expect(report.failures).toEqual([]);
-    expect(report.released.routes).toBe(1);
-    expect(report.released.uiContributions).toBe(1);
-    expect(report.released.harnessIds).toEqual([`${pluginId}:h`]);
-    expect(report.released.providerKinds).toEqual([`${pluginId}:p`]);
-    expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
-  });
-
-  it('core harness/provider ids are never touched, even if somehow prefixed the same as a plugin', () => {
-    // Guard lives in the registries themselves (unregisterHarness/unregisterProvider) —
-    // this just pins that unmountPlugin's harness/provider sweep only ever
-    // targets `<pluginId>:` prefixed ids, which core ids never are.
+  it('core harness/compute/provider ids are never touched, even if somehow prefixed the same as a plugin', () => {
+    // Guard lives in the registries themselves (unregisterHarness/unregisterCompute/
+    // unregisterProvider) — this just pins that unmountPlugin's sweeps only ever
+    // target `<pluginId>:` prefixed ids, which core ids never are.
     expect(CORE_HARNESS_IDS.some((id) => id.includes(':'))).toBe(false);
+    expect(CORE_COMPUTE_KINDS.some((k) => k.includes(':'))).toBe(false);
     expect(CORE_PROVIDER_KINDS.some((k) => k.includes(':'))).toBe(false);
   });
 

@@ -18,6 +18,7 @@ import {
 import { getTask, insertRun } from '../../repositories/index.js';
 import { startTask } from '../../task-engine/index.js';
 import { sendMessageToAgent } from '../../tmux-input.js';
+import { sessionFor } from '../../compute/index.js';
 import { findFirstActiveAgent } from '../../repositories/workers.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
@@ -232,7 +233,8 @@ export async function triggerReviewRun(task: Task): Promise<void> {
 
   const agent = findFirstActiveAgent(task.id);
   if (agent && task.tmux_session) {
-    await sendMessageToAgent(task.tmux_session, agent.window_index, manualReRunNudge());
+    const compute = await sessionFor(task);
+    await sendMessageToAgent(compute, task.tmux_session, agent.window_index, manualReRunNudge());
   }
 }
 

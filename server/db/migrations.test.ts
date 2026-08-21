@@ -33,6 +33,12 @@ describe('runMigrations (isolated)', () => {
     for (const col of TASKS_TABLE_COLUMNS) {
       expect(taskCols).toContain(col);
     }
+    // Compute provider kind (SHR-266). Nullable — NULL means `local`.
+    expect(taskCols).toContain('compute');
+    const computeCol = (
+      db.pragma('table_info(tasks)') as Array<{ name: string; notnull: number }>
+    ).find((c) => c.name === 'compute');
+    expect(computeCol?.notnull).toBe(0);
     expect(taskCols).not.toContain('status');
     expect(taskCols).not.toContain('current_summary');
     expect(taskCols).not.toContain('current_summary_updated_at');

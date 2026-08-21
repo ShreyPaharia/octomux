@@ -1,7 +1,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
-import { execTmux } from '../tmux-bin.js';
+import { sessionFor } from '../compute/index.js';
 import { getSettings } from '../settings.js';
 import type { Task, UserTerminal } from '../types.js';
 import {
@@ -23,6 +23,9 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
   const editor = settings.editor;
 
   if (editor === 'vscode' || editor === 'cursor') {
+    // `code`/`cursor` launch a GUI editor on the operator's own desktop, not
+    // on the task's compute — there is no "remote vscode" here, so this stays
+    // on the local machine (plain execFile) regardless of task.compute.
     const cmd = editor === 'vscode' ? 'code' : 'cursor';
     await execFile(cmd, [task.worktree!]);
     return { editor, windowIndex: null };
@@ -32,13 +35,15 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     return { editor, windowIndex: task.user_window_index };
   }
 
-  const windowIndex = await tmuxWindowSubstrate.launchWindow({
+  const compute = await sessionFor(task);
+
+  const windowIndex = await tmuxWindowSubstrate.launchWindow(compute, {
     session: task.tmux_session!,
     cwd: task.worktree!,
     fresh: false,
   });
 
-  await execTmux(['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'nvim .', 'Enter']);
+  await compute.tmux(['send-keys', '-t', `${task.tmux_session}:${windowIndex}`, 'nvim .', 'Enter']);
 
   updateTaskFields(task.id, { user_window_index: windowIndex });
 
@@ -46,7 +51,9 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
 }
 
 export async function createShellTerminal(task: Task): Promise<UserTerminal> {
-  const windowIndex = await tmuxWindowSubstrate.launchWindow({
+  const compute = await sessionFor(task);
+
+  const windowIndex = await tmuxWindowSubstrate.launchWindow(compute, {
     session: task.tmux_session!,
     cwd: task.worktree!,
     fresh: false,
@@ -59,8 +66,9 @@ export async function createShellTerminal(task: Task): Promise<UserTerminal> {
 }
 
 export async function closeShellTerminal(task: Task, terminal: UserTerminal): Promise<void> {
-  await execTmux(['kill-window', '-t', `${task.tmux_session}:${terminal.window_index}`]).catch(
-    () => {},
-  );
+  const compute = await sessionFor(task);
+  await compute
+    .tmux(['kill-window', '-t', `${task.tmux_session}:${terminal.window_index}`])
+    .catch(() => {});
   deleteUserTerminal(terminal.id);
 }
