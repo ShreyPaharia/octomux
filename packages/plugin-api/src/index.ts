@@ -18,6 +18,7 @@ export interface PluginContext {
   readonly harnesses: HarnessRegistrar;
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
+  readonly artifacts: ArtifactsApi;
   readonly ui: UiRegistrar;
   /**
    * Registers a teardown callback run when this plugin unmounts, in reverse
@@ -141,6 +142,45 @@ export interface Fact {
   type: string;
   payload: unknown;
   createdAt: string;
+}
+
+/**
+ * `ctx.artifacts` — files a run produced: a review report, a coverage summary,
+ * a generated diagram. Written into the task's worktree under
+ * `.octomux/artifacts/<pluginId>/<name>`, alongside the narrative
+ * `.octomux/artifact.md`.
+ *
+ * Deliberately a METHOD ON ctx, not a registrar. Nobody needs a different
+ * artifact implementation; they need to write one. There is no
+ * `artifacts.register()` and there will not be.
+ */
+export interface ArtifactsApi {
+  /** Writes (or overwrites) one artifact for a task. Rejects if the task has
+   *  no worktree yet. */
+  write(taskId: string, artifact: ArtifactInput): Promise<ArtifactEntry>;
+  /** Every artifact on the task, from EVERY plugin — same unscoped read as
+   *  `facts.read`. Empty when the task has no worktree. */
+  list(taskId: string): Promise<ArtifactEntry[]>;
+}
+export interface ArtifactInput {
+  /** Bare filename. `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`, no separators, no `..`. */
+  name: string;
+  /** e.g. `text/markdown`, `application/json`, `image/svg+xml`. */
+  mime: string;
+  body: string;
+}
+export interface ArtifactEntry {
+  /** Manifest row id of the writing plugin — artifacts are namespaced by it,
+   *  so two plugins can both write `report.md`. */
+  pluginId: string;
+  name: string;
+  mime: string;
+  /** utf8 byte length of the body. */
+  size: number;
+  /** `YYYY-MM-DD HH:MM:SS` UTC — same shape as sqlite `datetime('now')`. */
+  updatedAt: string;
+  /** Path serving the content: `/api/tasks/<taskId>/artifacts/<pluginId>/<name>`. */
+  url: string;
 }
 
 /**

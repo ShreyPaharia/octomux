@@ -38,6 +38,19 @@ vi.mock('fs', (importOriginal) => {
 // failed 11 tests in registry.test.ts. `bun run test:server`'s `--parallel`
 // flag hid this by isolating each file into its own process.)
 
+// context.ts imports ../artifact-task.js statically (for ctx.artifacts), so
+// this mock must also be registered before context.ts is pulled in — same
+// reason as the fs mock above. Mocking the direct dependency (not the DB
+// layer it wraps) mirrors how the ctx.facts tests below would mock ./facts.js.
+// `toArtifactEntry` is NOT stubbed — it's the pure record->wire-shape mapper
+// that owns the url format these tests assert. Stubbing it would leave them
+// asserting the mock instead of the real thing.
+vi.mock('../artifact-task.js', (importOriginal) => ({
+  ...(importOriginal() as Record<string, unknown>),
+  writeTaskArtifact: vi.fn(),
+  listTaskArtifacts: vi.fn(),
+}));
+
 // context.ts imports settings.js statically, which in turn reaches the real
 // fs module through the mock above — that mock must be registered before
 // context.ts is pulled in. bun's mock.module doesn't hoist, so this must be
@@ -51,6 +64,8 @@ const { registerProvider, getProvider, resetProviders, freezeCoreProviders } =
   await import('../integrations/registry.js');
 const { registerHarness, getHarness, listHarnesses, resetHarnesses, freezeCoreHarnesses } =
   await import('../harnesses/registry.js');
+const { writeTaskArtifact: mockWriteTaskArtifact, listTaskArtifacts: mockListTaskArtifacts } =
+  await import('../artifact-task.js');
 
 /** Pipe pino output into an in-memory buffer of parsed JSON lines. */
 function captureLogs() {
@@ -83,6 +98,8 @@ beforeEach(() => {
   fileContent = undefined;
   resetProviders();
   resetHarnesses();
+  vi.mocked(mockWriteTaskArtifact).mockReset();
+  vi.mocked(mockListTaskArtifacts).mockReset();
 });
 
 describe('ctx.logger', () => {
@@ -375,5 +392,136 @@ describe('revokePluginContext (F3)', () => {
 
     alive.harnesses.register(harness());
     expect(listHarnesses().map((h) => h.id)).toContain('aliveplug:late');
+  });
+});
+
+describe('ctx.artifacts', () => {
+  it("write() forwards to writeTaskArtifact with the plugin's OWN id, not a caller-supplied one", async () => {
+    vi.mocked(mockWriteTaskArtifact).mockReturnValue({
+      pluginId: 'artifact-plugin',
+      name: 'report.md',
+      mime: 'text/markdown',
+      size: 5,
+      updatedAt: '2026-08-21 00:00:00',
+    });
+    const ctx = createPluginContext('artifact-plugin');
+
+    const entry = await ctx.artifacts.write('task-1', {
+      // Nothing on ArtifactInput lets a caller name a plugin id, but even a
+      // stray extra field must not leak through as one.
+      pluginId: 'someone-else',
+      name: 'report.md',
+      mime: 'text/markdown',
+      body: 'hello',
+    } as never);
+
+    expect(mockWriteTaskArtifact).toHaveBeenCalledWith(
+      'task-1',
+      'artifact-plugin',
+      expect.objectContaining({ name: 'report.md', mime: 'text/markdown', body: 'hello' }),
+    );
+    expect(entry).toEqual({
+      pluginId: 'artifact-plugin',
+      name: 'report.md',
+      mime: 'text/markdown',
+      size: 5,
+      updatedAt: '2026-08-21 00:00:00',
+      url: '/api/tasks/task-1/artifacts/artifact-plugin/report.md',
+    });
+  });
+
+  it('builds the url with percent-encoding for a taskId/name needing it', async () => {
+    vi.mocked(mockWriteTaskArtifact).mockReturnValue({
+      pluginId: 'artifact-plugin',
+      name: 'my report.md',
+      mime: 'text/markdown',
+      size: 5,
+      updatedAt: '2026-08-21 00:00:00',
+    });
+    const ctx = createPluginContext('artifact-plugin');
+
+    const entry = await ctx.artifacts.write('task/1', {
+      name: 'my report.md',
+      mime: 'text/markdown',
+      body: 'hello',
+    });
+
+    expect(entry.url).toBe('/api/tasks/task%2F1/artifacts/artifact-plugin/my%20report.md');
+  });
+
+  it('list() forwards to listTaskArtifacts and maps every record to an entry with a url', async () => {
+    vi.mocked(mockListTaskArtifacts).mockReturnValue([
+      {
+        pluginId: 'plugin-a',
+        name: 'a.json',
+        mime: 'application/json',
+        size: 2,
+        updatedAt: '2026-08-21 00:00:00',
+      },
+      {
+        pluginId: 'plugin-b',
+        name: 'b.md',
+        mime: 'text/markdown',
+        size: 3,
+        updatedAt: '2026-08-21 00:01:00',
+      },
+    ]);
+    const ctx = createPluginContext('reader-plugin');
+
+    const entries = await ctx.artifacts.list('task-2');
+
+    expect(mockListTaskArtifacts).toHaveBeenCalledWith('task-2');
+    // Unscoped: both plugin-a's and plugin-b's artifacts come back, not just
+    // this context's own plugin id.
+    expect(entries).toEqual([
+      {
+        pluginId: 'plugin-a',
+        name: 'a.json',
+        mime: 'application/json',
+        size: 2,
+        updatedAt: '2026-08-21 00:00:00',
+        url: '/api/tasks/task-2/artifacts/plugin-a/a.json',
+      },
+      {
+        pluginId: 'plugin-b',
+        name: 'b.md',
+        mime: 'text/markdown',
+        size: 3,
+        updatedAt: '2026-08-21 00:01:00',
+        url: '/api/tasks/task-2/artifacts/plugin-b/b.md',
+      },
+    ]);
+  });
+
+  it('write() still works on a REVOKED context — deliberate, not a bug: same reasoning as facts.put, do not gate this on assertLive', async () => {
+    vi.mocked(mockWriteTaskArtifact).mockReturnValue({
+      pluginId: 'revoked-plugin',
+      name: 'report.md',
+      mime: 'text/markdown',
+      size: 5,
+      updatedAt: '2026-08-21 00:00:00',
+    });
+    const ctx = createPluginContext('revoked-plugin');
+    revokePluginContext(ctx);
+
+    const entry = await ctx.artifacts.write('task-3', {
+      name: 'report.md',
+      mime: 'text/markdown',
+      body: 'hello',
+    });
+
+    expect(entry.pluginId).toBe('revoked-plugin');
+    expect(mockWriteTaskArtifact).toHaveBeenCalled();
+  });
+
+  it('propagates a writeTaskArtifact rejection (no worktree) as a rejected promise, not a swallowed no-op', async () => {
+    vi.mocked(mockWriteTaskArtifact).mockImplementation(() => {
+      throw new Error('task "task-4" has no worktree — cannot write artifact');
+    });
+    const ctx = createPluginContext('artifact-plugin-2');
+
+    await expect(
+      ctx.artifacts.write('task-4', { name: 'report.md', mime: 'text/markdown', body: 'hello' }),
+    ).rejects.toThrow(/no worktree/);
   });
 });

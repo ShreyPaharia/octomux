@@ -56,15 +56,49 @@ only place your plugin's own code executes at boot.
 
 ## `ctx` — what you get
 
-| Member             | Shape                                     | Notes                                                                                                                                 |
-| ------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.id`           | `string`                                  | your manifest row's bare `id`, e.g. `"demo"`                                                                                          |
-| `ctx.logger`       | `{debug,info,warn,error}(obj, msg?)`      | structured logger, prefixed `plugin:<id>`                                                                                             |
-| `ctx.settings`     | `{get(), update(patch)}` — both **async** | your own opaque blob under `settings.json`'s `plugins.<id>`; never schema-checked                                                     |
-| `ctx.kv`           | `{get,set,del,list}`                      | **every method throws today** — `ctx.kv.<method>() is not available … plugin storage task has not landed yet`. Don't build on it yet. |
-| `ctx.workflows`    | `{register(wf)}`                          | see below                                                                                                                             |
-| `ctx.integrations` | `{register(p)}`                           | see below                                                                                                                             |
-| `ctx.harnesses`    | `{register(h)}`                           | see below                                                                                                                             |
+| Member             | Shape                                                                | Notes                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.id`           | `string`                                                             | your manifest row's bare `id`, e.g. `"demo"`                                                                                          |
+| `ctx.logger`       | `{debug,info,warn,error}(obj, msg?)`                                 | structured logger, prefixed `plugin:<id>`                                                                                             |
+| `ctx.settings`     | `{get(), update(patch)}` — both **async**                            | your own opaque blob under `settings.json`'s `plugins.<id>`; never schema-checked                                                     |
+| `ctx.kv`           | `{get,set,del,list}`                                                 | **every method throws today** — `ctx.kv.<method>() is not available … plugin storage task has not landed yet`. Don't build on it yet. |
+| `ctx.workflows`    | `{register(wf)}`                                                     | see below                                                                                                                             |
+| `ctx.integrations` | `{register(p)}`                                                      | see below                                                                                                                             |
+| `ctx.harnesses`    | `{register(h)}`                                                      | see below                                                                                                                             |
+| `ctx.http`         | `{route(method, path, handler)}`                                     | serves at `/api/p/<id><path>`; handler gets `{params, query, body, headers}` / `{status, json}`, not express objects                  |
+| `ctx.facts`        | `{define,put,read,watch}`                                            | task-scoped append-only observation log; your types are qualified `<id>:<type>`                                                       |
+| `ctx.ui`           | `{panel(binding)}`                                                   | declarative binding onto a fact type — never a component; the client owns every renderer                                              |
+| `ctx.artifacts`    | `{write(taskId, {name, mime, body}), list(taskId)}` — both **async** | files your run produced. NOT a registrar — see below                                                                                  |
+| `ctx.effect`       | `(dispose) => void`                                                  | teardown callback, run in reverse registration order when your plugin unmounts                                                        |
+
+## `ctx.artifacts` — writing output
+
+A plugin that produces a file (a review report, a coverage summary, a generated
+diagram) writes it here:
+
+```js
+await ctx.artifacts.write(taskId, {
+  name: 'coverage.md', // bare filename, [A-Za-z0-9][A-Za-z0-9._-]{0,127}
+  mime: 'text/markdown',
+  body: '# Coverage\n\n92%\n',
+});
+```
+
+- It lands at `<worktree>/.octomux/artifacts/<your-id>/<name>` — inside the task's
+  git worktree, so it diffs and survives a DB wipe.
+- The `<your-id>` segment is always your manifest row id. You cannot write into
+  another plugin's namespace, and two plugins can both write `report.md`.
+- It shows up in the run detail view automatically. You register nothing to make
+  that happen.
+- `list(taskId)` returns EVERY plugin's artifacts on that task, not just yours —
+  same unscoped read as `ctx.facts.read`.
+- `write()` **rejects** if the task has no worktree yet, or if `name`/`mime` fail
+  validation, or the body is over 5 MB. It is not fire-and-forget: await it.
+- Artifacts are files, so they outlive your plugin — unmounting does not delete
+  them. They die with the task.
+
+This is a method on `ctx`, not a registrar. There is no `ctx.artifacts.register()`
+and there will not be: nobody needs a different artifact implementation.
 
 ## Choosing a registrar
 

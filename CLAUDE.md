@@ -242,8 +242,16 @@ tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built b
 `createPluginContext()` in `server/plugins/context.ts`) exposes six registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()` — plus
-`ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings` (async get/update, scoped to
-`settings.plugins[id]`), and `ctx.kv`.
+`ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
+(async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
+`ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
+artifact implementation, they need to write one. `write(taskId, {name, mime, body})` drops a file
+at `<worktree>/.octomux/artifacts/<pluginId>/<name>` (metadata in a sibling `index.json`, since
+`mime` isn't recoverable from the filesystem) and `list(taskId)` reads back every plugin's
+artifacts on that task, unscoped, exactly like `facts.read`. `server/services/run-detail.ts`
+surfaces them on `GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
+further core change. Files land in the task's git worktree — they diff, and they outlive both
+the plugin and a DB wipe.
 Types are pinned in `@octomux/plugin-api` (`packages/plugin-api/src/index.ts`) — **types only**,
 nothing runtime crosses that package boundary, because under `bun build --compile` a plugin has
 no host `node_modules` tree to import a runtime value from even by accident.
