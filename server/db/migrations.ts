@@ -1303,6 +1303,36 @@ export function runMigrations(instance: Database): void {
     );
   `);
 
+  // ── ctx.kv — plugin-private durable scratch (2026-08-22, SHR-263) ─────────
+  // Not plugin_collections with a nullable schema, and not plugin_facts: this
+  // is opaque per-plugin blob storage, never queryable and never validated
+  // against a schema, where a collection is schema-validated and unscoped for
+  // reads, and a fact is a task-scoped append-only log. Different API
+  // (get/put/delete/list by exact key or prefix, no where/orderBy language),
+  // different consumer (a plugin's own private scratch, never read by
+  // another plugin), same reasoning as ruling R1 that split facts from
+  // collections in the first place — don't collapse three shapes into one
+  // table just because they're all "plugin storage".
+  //
+  // `owner` is the crash-recovery hook: a plugin stamps its mount id into
+  // `owner` before starting a multi-step operation against a key and clears
+  // it (back to NULL) when the operation settles. A row still carrying a
+  // DIFFERENT mount's id on the next boot is, by definition, an operation
+  // that never finished — `listKvEntriesOwnedByOthers` is how a plugin finds
+  // that debris after a crash. No extra index: every lookup and prefix scan
+  // filters on `plugin_id`, the leading column of the PRIMARY KEY.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_kv (
+      plugin_id  TEXT NOT NULL,
+      key        TEXT NOT NULL,
+      value      TEXT NOT NULL DEFAULT 'null',
+      owner      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (plugin_id, key)
+    );
+  `);
+
   // ── fan-out: run a step per item (2026-08-21, SHR-276) ──────────────────────
   // Own tables rather than reusing `runs` — `runs` is one row per workflow
   // execution with a single `result_json` blob, but the whole point of fan-out

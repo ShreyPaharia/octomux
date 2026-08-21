@@ -392,9 +392,11 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
   `http.route`, `facts.define`, `facts.put`, `collections.define`, `collections.write`,
-  `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`,
-  `surfaces.register`.
-  `ctx.logger`, `ctx.effect`) are ungated. A row with no
+  `kv.write`, `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`,
+  `surfaces.register`, `secrets.read`. Reads and self-owned members (`ctx.facts.read`,
+  `ctx.collections.query`, `ctx.kv.get`/`list`/`interrupted`, `ctx.catalog.list`,
+  `ctx.secrets.list`, `ctx.artifacts.list`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are
+  ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
   row's grants is withheld until acknowledged: the granted set is tracked per row in
@@ -418,6 +420,22 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   something that outlives a task. Records reach the SPA via
   `GET /api/plugin-collections/:qualifiedName`.
   Not `ctx.kv` (SHR-263) — kv is opaque blobs, this is queryable records.
+- **`ctx.kv`** — the plugin-private half of durable plugin storage (SHR-263), backed by its
+  own `plugin_kv` table (PK `(plugin_id, key)`), not `ctx.collections`: opaque blobs, no
+  schema, no query language, and reads are scoped to the writing plugin — nothing else can
+  see them through `ctx`. Also carries the crash-recovery pair: `begin(key, value)` stamps
+  an in-flight operation with this mount's id, `end(key)` clears it, `interrupted()` returns
+  every checkpoint stamped by a DIFFERENT mount — a crash, or a hot reload mid-operation.
+  Calling `interrupted()` first in `apply()` is the plugin-side analogue of core's own
+  `recoverTasks()` (`server/task-engine/reconcile.ts`) / `rehydrateConversations()`
+  (`server/index.ts`): the recovery point is the plugin's own `apply()`, core runs no
+  separate boot pass for it. Unlike every registration a plugin makes through `ctx`, kv
+  state is NOT undone on unmount — a hot reload re-runs `apply()` expecting its checkpoints
+  still there, and crash recovery that lost its checkpoints in the crash it exists to
+  recover from would be pointless. Deleting kv state is only ever explicit. Gate: `kv.write`
+  on `set`/`del`/`begin`/`end`; `get`/`list`/`interrupted` are ungated reads. Governs `ctx`
+  only — a plugin can read/write the `plugin_kv` table directly like any other table. No
+  size cap, no TTL, no eviction.
 - **`ctx.fanout`** — run a step **per item**, not per schedule fire. `run({ name, source, each })`
   maps a handler over an item source: `{ items }` (a plain array), `{ collection, query }` (a
   `ctx.collections` query — SHR-275; the resolver is injected via `setCollectionResolver()`, and
@@ -460,8 +478,7 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   express 5 cannot unmount a Router. In dev only, local-path manifest rows are watched and
   reloaded on save. There is no `plugins add`/install command — getting a package onto disk
   (`npm install --prefix ~/.octomux <pkg>`) is on the user today.
-- **Known gaps — do not describe as working:** `ctx.kv` throws on every call (`plugin_kv`
-  storage hasn't landed); `PluginRow.integrity` is parsed and typechecked but never verified
+- **Known gaps — do not describe as working:** `PluginRow.integrity` is parsed and typechecked but never verified
   against the resolved tarball; harness command builders still return a shell **string**, not
   argv (the injection-safety burden the plan assigns to argv conversion hasn't landed); a
   plugin integration provider's `handler` receives the **resolved** secret in cleartext

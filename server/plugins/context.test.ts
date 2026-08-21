@@ -184,6 +184,7 @@ const ALL_CAPS = [
   'facts.put',
   'collections.define',
   'collections.write',
+  'kv.write',
   'ui.panel',
   'policy.intercept',
 ] as const;
@@ -237,25 +238,110 @@ describe('ctx.settings', () => {
 });
 
 describe('ctx.kv', () => {
-  it('get throws a clear "not available" error', () => {
-    const ctx = createPluginContext('kv-plugin');
-    expect(() => ctx.kv.get('key')).toThrow(/not available/i);
-    expect(() => ctx.kv.get('key')).toThrow(/kv-plugin/);
+  it('round-trips a value through set → get without the kv.write grant blocking a read', () => {
+    const ctx = createPluginContext('kv-plugin', ['kv.write']);
+    ctx.kv.set('key', { n: 1 });
+    expect(ctx.kv.get('key')).toEqual({ n: 1 });
   });
 
-  it('set throws a clear "not available" error', () => {
+  it('get on a missing key is undefined', () => {
     const ctx = createPluginContext('kv-plugin');
-    expect(() => ctx.kv.set('key', 1)).toThrow(/not available/i);
+    expect(ctx.kv.get('key')).toBeUndefined();
   });
 
-  it('del throws a clear "not available" error', () => {
-    const ctx = createPluginContext('kv-plugin');
-    expect(() => ctx.kv.del('key')).toThrow(/not available/i);
+  it('del removes the key', () => {
+    const ctx = createPluginContext('kv-plugin', ['kv.write']);
+    ctx.kv.set('key', 1);
+    ctx.kv.del('key');
+    expect(ctx.kv.get('key')).toBeUndefined();
   });
 
-  it('list throws a clear "not available" error', () => {
-    const ctx = createPluginContext('kv-plugin');
-    expect(() => ctx.kv.list()).toThrow(/not available/i);
+  it('list reflects set/del', () => {
+    const ctx = createPluginContext('kv-plugin', ['kv.write']);
+    ctx.kv.set('a', 1);
+    ctx.kv.set('b', 2);
+    expect(ctx.kv.list()).toEqual([
+      { key: 'a', value: 1 },
+      { key: 'b', value: 2 },
+    ]);
+  });
+
+  it('is isolated per plugin id', () => {
+    const ctxA = createPluginContext('kv-plugin-a', ['kv.write']);
+    const ctxB = createPluginContext('kv-plugin-b', ['kv.write']);
+    ctxA.kv.set('k', 'a-value');
+    expect(ctxB.kv.get('k')).toBeUndefined();
+  });
+
+  it('set, del, begin, end throw without the kv.write grant', () => {
+    const ctx = createPluginContext('kv-nogrant');
+    expect(() => ctx.kv.set('key', 1)).toThrow(/not granted/);
+    expect(() => ctx.kv.del('key')).toThrow(/not granted/);
+    expect(() => ctx.kv.begin('key', 1)).toThrow(/not granted/);
+    expect(() => ctx.kv.end('key')).toThrow(/not granted/);
+  });
+
+  it('set, del, begin, end succeed with the kv.write grant', () => {
+    const ctx = createPluginContext('kv-grant', ['kv.write']);
+    expect(() => ctx.kv.set('key', 1)).not.toThrow();
+    expect(() => ctx.kv.begin('job', { step: 1 })).not.toThrow();
+    expect(() => ctx.kv.end('job')).not.toThrow();
+    expect(() => ctx.kv.del('key')).not.toThrow();
+  });
+
+  it('get, list, interrupted work ungated (no grant needed)', () => {
+    const ctx = createPluginContext('kv-reader');
+    expect(() => ctx.kv.get('key')).not.toThrow();
+    expect(() => ctx.kv.list()).not.toThrow();
+    expect(() => ctx.kv.interrupted()).not.toThrow();
+  });
+
+  describe('crash recovery (begin/end/interrupted)', () => {
+    it('a fresh context (new mount) sees a checkpoint left by a previous mount', async () => {
+      const first = createPluginContext('kv-crash', ['kv.write']);
+      first.kv.begin('job:1', { step: 'fetch' });
+      await disposePluginContext(first);
+
+      const second = createPluginContext('kv-crash', ['kv.write']);
+      const interrupted = second.kv.interrupted();
+      expect(interrupted).toHaveLength(1);
+      expect(interrupted[0]).toMatchObject({ key: 'job:1', value: { step: 'fetch' } });
+      expect(typeof interrupted[0].startedAt).toBe('string');
+    });
+
+    it('the same context does not see its own in-flight mark as interrupted', () => {
+      const ctx = createPluginContext('kv-crash-self', ['kv.write']);
+      ctx.kv.begin('job:1', { step: 'fetch' });
+      expect(ctx.kv.interrupted()).toEqual([]);
+    });
+
+    it('end clears the mark so no later mount sees it', () => {
+      const first = createPluginContext('kv-crash-end', ['kv.write']);
+      first.kv.begin('job:1', { step: 'fetch' });
+      first.kv.end('job:1');
+
+      const second = createPluginContext('kv-crash-end', ['kv.write']);
+      expect(second.kv.interrupted()).toEqual([]);
+      expect(second.kv.get('job:1')).toBeUndefined();
+    });
+
+    it('a plain set settles an in-flight mark on that key', () => {
+      const first = createPluginContext('kv-crash-set', ['kv.write']);
+      first.kv.begin('job:1', { step: 'fetch' });
+      first.kv.set('job:1', { step: 'done' });
+
+      const second = createPluginContext('kv-crash-set', ['kv.write']);
+      expect(second.kv.interrupted()).toEqual([]);
+    });
+  });
+
+  it('state survives a simulated unmount: dispose then a fresh context still reads it back', async () => {
+    const ctx = createPluginContext('kv-survives-unmount', ['kv.write']);
+    ctx.kv.set('sticky', { seen: true });
+    await disposePluginContext(ctx);
+
+    const reborn = createPluginContext('kv-survives-unmount');
+    expect(reborn.kv.get('sticky')).toEqual({ seen: true });
   });
 });
 
@@ -788,6 +874,10 @@ describe('grant checks (SHR-259)', () => {
       /not granted/,
     );
     expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
+    expect(() => ctx.kv.set('x', 1)).toThrow(/not granted/);
+    expect(() => ctx.kv.del('x')).toThrow(/not granted/);
+    expect(() => ctx.kv.begin('x', 1)).toThrow(/not granted/);
+    expect(() => ctx.kv.end('x')).toThrow(/not granted/);
     expect(() => ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' })).toThrow(
       /not granted/,
     );
@@ -818,7 +908,7 @@ describe('grant checks (SHR-259)', () => {
     await expect(ctx.artifacts.list('task-1')).rejects.not.toThrow(/not granted/);
   });
 
-  it('reads (facts.read, facts.watch, collections.query, collections.watch) and self-owned members (settings, kv, logger, effect) stay ungated', () => {
+  it('reads (facts.read, facts.watch, collections.query, collections.watch, kv.get/list/interrupted) and self-owned members (settings, logger, effect) stay ungated', () => {
     const ctx = createPluginContext('nogrants3');
     expect(() => ctx.facts.read('task-1')).not.toThrow();
     expect(() => ctx.facts.watch('other:type', () => {})).not.toThrow();
@@ -826,7 +916,10 @@ describe('grant checks (SHR-259)', () => {
     expect(() => ctx.collections.watch('other:things', () => {})).not.toThrow();
     expect(() => ctx.effect(() => {})).not.toThrow();
     expect(typeof ctx.settings.get).toBe('function');
-    expect(typeof ctx.kv.get).toBe('function'); // throws for its own "not available" reason, not a grant
+    // kv READS stay ungated even though kv WRITES are gated on kv.write.
+    expect(() => ctx.kv.get('key')).not.toThrow();
+    expect(() => ctx.kv.list()).not.toThrow();
+    expect(() => ctx.kv.interrupted()).not.toThrow();
   });
 
   it.each([
@@ -902,6 +995,7 @@ describe('grant checks (SHR-259)', () => {
         result.catch(() => {});
       },
     ],
+    ['kv.write', (ctx: ReturnType<typeof createPluginContext>) => ctx.kv.set('x', 1)],
   ])('a call granted only "%s" is allowed through, everything else stays denied', (cap, call) => {
     const ctx = createPluginContext('onegrant', [cap as (typeof ALL_CAPS)[number]]);
     expect(() => call(ctx)).not.toThrow();

@@ -10,6 +10,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { getPluginSettings, updatePluginSettings } from '../settings.js';
 import { qualify } from './qualify.js';
@@ -21,6 +22,7 @@ import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { defineCollection, putRecord, queryCollection, watchCollection } from './collections.js';
+import { kvGet, kvSet, kvDel, kvList, kvBegin, kvEnd, kvInterrupted } from './kv.js';
 import { listSecrets, resolveSecrets } from '../secrets/store.js';
 import { registerPluginUiPanel } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
@@ -162,22 +164,6 @@ const HARNESS_REQUIRED_FN_FIELDS = [
   'validateSettings',
 ] as const;
 
-/** Builds the `ctx.kv` stub. Every method throws — W1-D (plugin storage) hasn't landed. */
-function createKv(id: string): PluginKv {
-  const notAvailable = (method: string): never => {
-    throw new Error(
-      `ctx.kv.${method}() is not available for plugin "${id}" — ` +
-        'the plugin storage task has not landed yet',
-    );
-  };
-  return {
-    get: () => notAvailable('get'),
-    set: () => notAvailable('set'),
-    del: () => notAvailable('del'),
-    list: () => notAvailable('list'),
-  };
-}
-
 /**
  * Maps a live `PluginContext` to the closure that revokes it. Keyed by the
  * context object itself (not the plugin id) so a caller can't revoke a
@@ -211,6 +197,12 @@ export function createPluginContext(
   }
 
   const logger = childLogger(`plugin:${id}`);
+
+  // Identifies THIS mount for the `ctx.kv` crash-recovery marks (begin/end/
+  // interrupted). One per `createPluginContext()` call — a fresh mount after
+  // a crash or a hot reload gets a fresh id, so `interrupted()` correctly
+  // sees whatever the PREVIOUS mount left stamped and never sees its own.
+  const kvMountId = nanoid(12);
 
   // Flipped by `revokePluginContext()` when the loader's apply() timeout
   // fires. `apply()` itself is never cancelled (see revokePluginContext's
@@ -396,6 +388,49 @@ export function createPluginContext(
     },
   };
 
+  // Not a registrar — a durable store, same as `collections`/`facts`. Writes
+  // (`set`/`del`/`begin`/`end`) are grant-checked on `kv.write`; reads
+  // (`get`/`list`/`interrupted`) are ungated, same split as
+  // `collections.put` vs `collections.query`.
+  //
+  // Deliberately NOT `assertLive`: like `facts.put`/`collections.put`, a kv
+  // write happens long after `apply()` returns — the revoke guard exists to
+  // stop a timed-out `apply()` from mutating the live REGISTRIES, and kv is
+  // a data store, not a registry.
+  //
+  // Nothing here is pushed onto the effect stack, and there is no
+  // `unregisterPluginKv` for `lifecycle.ts` to call. kv rows deliberately
+  // OUTLIVE unmount — a hot-reloaded or restarted plugin must find both its
+  // ordinary state and its in-flight checkpoints still there when `apply()`
+  // runs again.
+  const kv: PluginKv = {
+    get<T>(key: string) {
+      return kvGet(id, key) as T | undefined;
+    },
+    set(key: string, value: unknown) {
+      assertGranted(id, 'kv.write');
+      kvSet(id, key, value);
+    },
+    del(key: string) {
+      assertGranted(id, 'kv.write');
+      kvDel(id, key);
+    },
+    list(prefix?: string) {
+      return kvList(id, prefix);
+    },
+    begin(key: string, value: unknown) {
+      assertGranted(id, 'kv.write');
+      kvBegin(id, kvMountId, key, value);
+    },
+    end(key: string) {
+      assertGranted(id, 'kv.write');
+      kvEnd(id, key);
+    },
+    interrupted() {
+      return kvInterrupted(id, kvMountId);
+    },
+  };
+
   // Not a registrar, same as artifacts/agents — nobody needs a different
   // secret store, they need to read one. There is no write path here: a
   // secret is written by a human (UI/CLI/API), never by a plugin, so nothing
@@ -553,7 +588,7 @@ export function createPluginContext(
     id,
     logger,
     settings,
-    kv: createKv(id),
+    kv,
     workflows,
     integrations,
     harnesses,
