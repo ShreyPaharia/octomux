@@ -18,6 +18,7 @@ import { resetFacts } from './facts.js';
 import { subscribeServerEvents } from '../events.js';
 import { resetPluginGrants } from './grants.js';
 import { resetServices } from './services.js';
+import { createTestDb } from '../test-helpers.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -37,6 +38,10 @@ function writeModule(name: string, source: string): string {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loader-test-'));
   nodeModulesDir = path.join(tmpDir, 'node_modules');
+  // ctx.kv now reads/writes real SQLite (plugin_kv) rather than throwing a
+  // stub — give it an in-memory DB so the "hands apply() a real context"
+  // test below can exercise it without touching the real data dir.
+  createTestDb();
 });
 
 afterEach(() => {
@@ -444,14 +449,20 @@ plugins:
   it('hands apply() a real context, not a silent no-op', async () => {
     // The default makeContext must be the real createPluginContext: a stub
     // whose registrars do nothing would report this plugin as loaded while
-    // registering nothing. ctx.kv throws by design until storage lands, which
-    // is the cheapest observable proof the real context arrived.
+    // registering nothing. This row declares no grants, so ctx.kv.get()
+    // (an ungated read) works while ctx.kv.set() (gated on kv.write) throws
+    // "not granted" — the cheapest observable proof the real context, with
+    // its real grant wiring, arrived.
     const abs = writeModule(
       'ctx-plugin.mjs',
       `export function apply(ctx) {
          globalThis.__octomuxCtxProbe = {
            id: ctx.id,
-           kvThrows: (() => { try { ctx.kv.get('x'); return false; } catch { return true; } })(),
+           kvGetWorks: (() => { try { ctx.kv.get('x'); return true; } catch { return false; } })(),
+           kvSetThrowsNotGranted: (() => {
+             try { ctx.kv.set('x', 1); return false; }
+             catch (err) { return /not granted/.test(String(err)); }
+           })(),
          };
        }\n`,
     );
@@ -466,7 +477,8 @@ plugins:
     expect(report.failed).toEqual([]);
     expect((globalThis as Record<string, unknown>).__octomuxCtxProbe).toEqual({
       id: 'ctxplug',
-      kvThrows: true,
+      kvGetWorks: true,
+      kvSetThrowsNotGranted: true,
     });
     delete (globalThis as Record<string, unknown>).__octomuxCtxProbe;
   });

@@ -102,11 +102,52 @@ export interface PluginSettingsScope {
   update(patch: Record<string, unknown>): Promise<void>;
 }
 
+/**
+ * `ctx.kv` — plugin-PRIVATE durable scratch: opaque blobs keyed by a string,
+ * scoped to the plugin that wrote them. Nobody but the owning plugin can
+ * read a kv entry.
+ *
+ * NOT `ctx.collections`: a collection is schema-validated, keyed on a field
+ * the plugin nominates, and readable by any plugin (`query` takes a bare OR
+ * qualified name — reads are unscoped by design). kv has no schema, no query
+ * language beyond a key or a key prefix, and only its own plugin can ever
+ * see it.
+ *
+ * NOT `ctx.facts`: facts are an append-only log scoped to one task and die
+ * with it. kv has no task in the picture at all — it is the plugin's own
+ * durable memory, independent of any run.
+ *
+ * kv state deliberately OUTLIVES an unmount. Every registrar on `ctx` (a
+ * workflow, a route, a fact type, a UI panel) is undone when the plugin
+ * unmounts — that's the whole point of the registrar model. kv is the one
+ * exception: nothing here is deregistered on teardown, because a
+ * hot-reloaded or restarted plugin must find its checkpoints, and its
+ * ordinary state, still sitting there when `apply()` runs again. That
+ * asymmetry is deliberate, not an oversight.
+ *
+ * `begin`/`end`/`interrupted` are the crash-recovery half of this API. They
+ * share `get`/`set`'s key space (prefix your keys to avoid collisions) but
+ * stamp a mark identifying which plugin *mount* wrote them. A checkpoint
+ * left in place by a mount other than the current one is, by construction,
+ * an operation that never finished — the process crashed mid-`begin`, or a
+ * hot reload tore that mount down before it called `end`. `apply()` is the
+ * natural place to call `interrupted()` and decide what to do about it —
+ * this is the plugin-side analogue of `recoverTasks()` at host boot, and it
+ * adds no new boot pass of its own.
+ */
 export interface PluginKv {
   get<T>(key: string): T | undefined;
   set(key: string, value: unknown): void;
   del(key: string): void;
   list(prefix?: string): Array<{ key: string; value: unknown }>;
+  /** Marks an operation in flight, checkpointing whatever this plugin needs to
+   *  resume it. Same key space as `set`/`get` — prefix your keys. */
+  begin(key: string, value: unknown): void;
+  /** The operation finished. Deletes the checkpoint. */
+  end(key: string): void;
+  /** Checkpoints left behind by a previous mount — a crash, or a hot reload
+   *  that tore the plugin down mid-operation. Empty on a clean start. */
+  interrupted(): Array<{ key: string; value: unknown; startedAt: string }>;
 }
 
 // All three qualify internally. The plugin declares a LOCAL id and never sees
@@ -935,6 +976,7 @@ export type PluginCapability =
   | 'collections.define'
   | 'collections.write'
   | 'services.provide'
+  | 'kv.write'
   | 'ui.panel'
   | 'artifacts.write'
   | 'policy.intercept'
