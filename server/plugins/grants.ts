@@ -53,6 +53,7 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'ui.panel',
   'artifacts.write',
   'policy.intercept',
+  'surfaces.register',
 ];
 
 export function isPluginCapability(value: unknown): value is PluginCapability {

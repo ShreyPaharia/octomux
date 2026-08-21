@@ -1,0 +1,10 @@
+{
+  "name": "octomux-plugin-discord-surface",
+  "version": "1.0.0",
+  "description": "Reference octomux ctx.surfaces provider — renders panels as Discord-flavoured markdown and demonstrates a non-read-only surface via prompt().",
+  "type": "module",
+  "main": "index.mjs",
+  "files": [
+    "index.mjs"
+  ]
+}

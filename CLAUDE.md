@@ -286,9 +286,9 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes seven registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes eight registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
-`ctx.compute.register()` (see "Compute providers" above),
+`ctx.compute.register()` (see "Compute providers" above), `ctx.surfaces.register()` (below),
 `ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()`, `ctx.policy.intercept()` — plus
 `ctx.artifacts` (`write`/`list`), `ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings`
 (async get/update, scoped to `settings.plugins[id]`), and `ctx.kv`.
@@ -325,7 +325,7 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
   `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
   `http.route`, `facts.define`, `facts.put`, `ui.panel`, `artifacts.write`,
-  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
+  `policy.intercept`, `surfaces.register`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
   `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
@@ -343,6 +343,15 @@ no host `node_modules` tree to import a runtime value from even by accident.
   row of kind `policy` (shows in the task's Activity panel). There is deliberately no
   `task.merge` point — core never merges a PR (`server/poller/merged-pr.ts` only observes
   merges that already happened on GitHub), so there's no call site to gate.
+- **`ctx.surfaces.register()`** — a place octomux presents itself to a human, beyond the
+  four compiled in (`web`, `cli`, `slack`, `telegram`; `CORE_SURFACE_KINDS`, frozen before
+  any plugin loads, same as compute). Works only because `ctx.ui` panels are declarative
+  bindings, not components: a panel written before the surface existed still renders on it.
+  A surface declares the renderer names it draws; the host resolves `panel.as` →
+  `panel.renderer` before calling `render` — the declared renderer when supported, otherwise
+  the surface's `fallback` (default `json`). Degraded, never dropped, never blank. `prompt`
+  is optional; without it the surface is read-only and asking it throws. Requires
+  `surfaces.register`.
 - `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required.
   `octomux plugins reload <id>` is different — it goes over the API and needs a running server,
   because it re-imports and re-runs the plugin's `apply()` in the live process. A plugin that
@@ -367,6 +376,10 @@ no host `node_modules` tree to import a runtime value from even by accident.
   both worth knowing: a `ctx.http.route()` handler receives the raw request headers, including
   the remote-mode auth token of whoever called it; and `POST /api/plugins/:id/reload` re-imports
   and re-executes on-disk plugin code on request. Both sit behind `remoteAuthMiddleware`.
+  All four core surfaces (`web`, `cli`, `slack`, `telegram`) are read-only — octomux's only
+  human-question path is still the card-based approval gate (`server/orchestrator/gate.ts`),
+  DB-backed and untouched by `ctx.surfaces`. The registrar records the prompt capability so a
+  plugin surface can implement one; no core surface does.
 - Plan + status: `plans/2026-08-16-plugin-ecosystem.md` (design, "Trust model" section has the
   full threat writeup) and `plans/2026-08-16-plugin-ecosystem-tasks.md` (execution log — STEP-0
   through STEP-2 shipped on `next`; WAVE-3's integration outbound broker, WAVE-4's harness leaks,

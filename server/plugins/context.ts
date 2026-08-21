@@ -14,6 +14,7 @@ import { registerPluginWorkflow } from '../workflows/registry.js';
 import { registerProvider } from '../integrations/registry.js';
 import { registerHarness } from '../harnesses/registry.js';
 import { registerCompute } from '../compute/registry.js';
+import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
 import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
 import { registerPluginUiPanel } from './ui-registry.js';
@@ -29,6 +30,7 @@ import type {
   IntegrationRegistrar,
   HarnessRegistrar,
   ComputeRegistrar,
+  SurfaceRegistrar,
   HttpRegistrar,
   FactsRegistrar,
   ArtifactsApi,
@@ -39,6 +41,7 @@ import type {
   PluginIntegrationProvider,
   PluginHarness,
   PluginCompute,
+  SurfaceDefinition,
   Fact,
   FactQuery,
   FactTypeDefinition,
@@ -274,6 +277,27 @@ export function createPluginContext(
     },
   };
 
+  const surfaces: SurfaceRegistrar = {
+    register(s: SurfaceDefinition) {
+      assertLive('surfaces.register');
+      assertGranted(id, 'surfaces.register');
+      const payload = s as unknown as Record<string, unknown>;
+      const localKind = requireLocalId(payload, 'kind', 'surfaces.register');
+      requireArrayField(payload, 'renderers', 'surfaces.register');
+      // `render` is REQUIRED here even though `SurfaceDefinition.render` is
+      // typed optional — core's `web` omits it because the browser owns
+      // rendering and reads the binding table straight off the API, but a
+      // plugin surface has no client of ours to delegate to. A plugin
+      // surface with no `render` is a bug, not a mode, so it fails loudly
+      // here rather than silently rendering nothing forever.
+      requireFunctionField(payload, 'render', 'surfaces.register');
+      // Absent `prompt` means read-only — same convention as `compute`'s
+      // optional `resume`.
+      requireOptionalFunctionField(payload, 'prompt', 'surfaces.register');
+      registerSurface({ ...s, kind: qualify(id, localKind) });
+    },
+  };
+
   const http: HttpRegistrar = {
     route(method: HttpMethod, path: string, handler: PluginRouteHandler) {
       assertLive('http.route');
@@ -396,6 +420,7 @@ export function createPluginContext(
     integrations,
     harnesses,
     compute,
+    surfaces,
     http,
     facts,
     artifacts,
