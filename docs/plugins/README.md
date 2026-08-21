@@ -99,7 +99,7 @@ plugin "myplugin": capability "workflows.register" is not granted. Add it to the
 That message is the actual thrown error, verbatim — it already names the
 line to add.
 
-### The 15 capabilities
+### The 17 capabilities
 
 Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 `server/plugins/grants.ts`, `PluginCapability` in
@@ -123,6 +123,7 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 | `agents.run`            | `ctx.agents.run()`            |
 | `fanout.run`            | `ctx.fanout.run()`            |
 | `surfaces.register`     | `ctx.surfaces.register()`     |
+| `attention.ask`         | `ctx.attention.ask()`         |
 
 Reads and logging are ungated — no grant needed for `ctx.logger`,
 `ctx.settings`, `ctx.catalog.list()`, `ctx.facts.read()`/`ctx.facts.watch()`,
@@ -175,11 +176,11 @@ There are more than three now: `ctx.workflows`, `ctx.integrations`,
 `ctx.harnesses`, `ctx.compute`, `ctx.surfaces`, `ctx.http`, `ctx.facts`,
 `ctx.collections`, `ctx.ui`, and `ctx.policy` are **registrars** — each adds
 something to core's registries, or (only `ctx.policy`) can refuse something
-core was about to do. `ctx.artifacts`, `ctx.agents`, `ctx.fanout`, and
-`ctx.catalog` are **methods on `ctx`**, not registrars — nobody needs a
-different artifact/agent-run/fan-out implementation, they need to run one, so
-none of them has a `register()`. `ctx.effect()`, `ctx.logger`,
-`ctx.settings`, and `ctx.kv` round out the object.
+core was about to do. `ctx.artifacts`, `ctx.agents`, `ctx.attention`,
+`ctx.fanout`, and `ctx.catalog` are **methods on `ctx`**, not registrars —
+nobody needs a different artifact/agent-run/attention/fan-out implementation,
+they need to run one, so none of them has a `register()`. `ctx.effect()`,
+`ctx.logger`, `ctx.settings`, and `ctx.kv` round out the object.
 
 | `ctx` member                                       | What it's for                                           | This guide     | Deep reference                                                                     |
 | -------------------------------------------------- | ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
@@ -195,6 +196,7 @@ none of them has a `register()`. `ctx.effect()`, `ctx.logger`,
 | `ctx.policy.intercept()`                           | deny or patch a task intent at a gate point             | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
 | `ctx.artifacts` (`write`/`list`)                   | drop a file into the task's worktree                    | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
 | `ctx.agents.run()`                                 | headless, structured-output agent session               | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
+| `ctx.attention.ask()`                              | ask a human a question, fanned out across surfaces      | reference only | [api-reference.md](./api-reference.md#ctxattention)                                |
 | `ctx.fanout.run()`                                 | run a step per item, with retry and resume              | reference only | [api-reference.md](./api-reference.md#ctxfanout)                                   |
 | `ctx.catalog.list()`                               | read what's currently installed                         | §below         | [api-reference.md](./api-reference.md#ctxcatalog)                                  |
 | `ctx.settings`                                     | your plugin's own opaque config                         | §below         | [api-reference.md](./api-reference.md#ctxsettings)                                 |

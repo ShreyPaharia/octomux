@@ -58,6 +58,7 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'agents.run',
   'fanout.run',
   'surfaces.register',
+  'attention.ask',
   'secrets.read',
 ];
 

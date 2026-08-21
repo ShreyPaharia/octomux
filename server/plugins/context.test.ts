@@ -93,6 +93,20 @@ vi.mock('./fanout.js', () => ({
   }),
 }));
 
+// attention/index.ts owns the real surface fan-out (first-answer-wins,
+// timeout, abort-the-rest); its own tests cover that. This file tests only
+// context.ts's wiring around it — the grant check and the assertLive guard —
+// so it mocks the engine rather than driving a real surface prompt. Must be
+// registered before context.ts is pulled in, same reasoning as the `fs`
+// mock above.
+const attentionAsks: Array<{ ask: unknown }> = [];
+vi.mock('../attention/index.js', () => ({
+  askHumans: vi.fn(async (ask: unknown) => {
+    attentionAsks.push({ ask });
+    return { status: 'answered', answer: 'yes', surface: 'stub' };
+  }),
+}));
+
 // context.ts imports settings.js statically, which in turn reaches the real
 // fs module through the mock above — that mock must be registered before
 // context.ts is pulled in. bun's mock.module doesn't hoist, so this must be
@@ -171,6 +185,7 @@ beforeEach(() => {
   registeredPolicyHooks.length = 0;
   fanoutCalls.length = 0;
   abortedFanOutPlugins.length = 0;
+  attentionAsks.length = 0;
 });
 
 /** Every capability a gated registrar might need, for tests that aren't
@@ -802,6 +817,8 @@ describe('grant checks (SHR-259)', () => {
     ).rejects.toThrow(/not granted/);
     // SHR-272: ctx.agents.run() is gated on agents.run same as the above.
     await expect(ctx.agents.run({ input: 'x', outputSchema: {} })).rejects.toThrow(/not granted/);
+    // SHR-258: ctx.attention.ask() is gated on attention.ask same as the above.
+    await expect(ctx.attention.ask({ question: 'x' })).rejects.toThrow(/not granted/);
   });
 
   it('the ungranted error names the plugin and the missing capability', () => {
@@ -1129,5 +1146,37 @@ describe('ctx.secrets (SHR-277)', () => {
     revokePluginContext(ctx);
 
     await expect(ctx.secrets.resolve('${secret:api-key}')).rejects.toThrow(/revoked/);
+  });
+});
+
+describe('ctx.attention (SHR-258)', () => {
+  it('ask() throws without attention.ask, naming the plugin and the capability', async () => {
+    const ctx = createPluginContext('attention-nogrant');
+
+    await expect(ctx.attention.ask({ question: 'proceed?' })).rejects.toThrow(
+      /"attention-nogrant"/,
+    );
+    await expect(ctx.attention.ask({ question: 'proceed?' })).rejects.toThrow(/"attention\.ask"/);
+    expect(attentionAsks).toEqual([]);
+  });
+
+  it('ask() forwards its argument to askHumans and returns its result when granted', async () => {
+    const ctx = createPluginContext('attention-granted', ['attention.ask']);
+    const ask = { question: 'proceed?', choices: ['yes', 'no'], taskId: 'task-1' };
+
+    await expect(ctx.attention.ask(ask)).resolves.toEqual({
+      status: 'answered',
+      answer: 'yes',
+      surface: 'stub',
+    });
+    expect(attentionAsks).toEqual([{ ask }]);
+  });
+
+  it('ask() throws after the context is revoked (assertLive), even with the grant', async () => {
+    const ctx = createPluginContext('attention-revoked', ['attention.ask']);
+    await disposePluginContext(ctx);
+
+    await expect(ctx.attention.ask({ question: 'proceed?' })).rejects.toThrow(/revoked/);
+    expect(attentionAsks).toEqual([]);
   });
 });

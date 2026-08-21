@@ -27,6 +27,12 @@ export interface PluginContext {
   readonly policy: PolicyRegistrar;
   readonly surfaces: SurfaceRegistrar;
   /**
+   * `ctx.attention` — ask a human a question and await the answer. Not a
+   * registrar: nobody needs a different way to reach a human, they need to
+   * reach one. See `AttentionApi`.
+   */
+  readonly attention: AttentionApi;
+  /**
    * `ctx.fanout` — run a step per item instead of once per schedule fire.
    * See `FanOutApi`. Not a registrar: nobody needs a different fan-out
    * implementation, they need to run one.
@@ -534,6 +540,95 @@ export interface SurfacePrompt {
   question: string;
   /** Offered answers. Absent means free text. */
   choices?: string[];
+  /**
+   * Aborted when the question no longer needs an answer — another surface
+   * answered first, the ask timed out, or the asking plugin unmounted. A
+   * `prompt` that posted a message, opened a modal or started a poll should
+   * honour this and WITHDRAW it; the host ignores whatever a withdrawn
+   * prompt resolves to either way. Absent when the caller has no way to
+   * withdraw (a direct `promptOn()`).
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * `ctx.attention` — the one verb that makes a plugin STOP and ask a person.
+ *
+ * `ctx.surfaces` gave octomux a way to reach a human on more than the four
+ * places it compiles in. This is what a plugin calls to use that: one
+ * question, fanned out to EVERY registered surface that declares `prompt`,
+ * resolved by whichever human answers first.
+ *
+ * ```ts
+ * const { status, answer } = await ctx.attention.ask({
+ *   taskId,
+ *   question: 'Ship this to prod?',
+ *   choices: ['ship', 'hold'],
+ *   defaultAnswer: 'hold',
+ * });
+ * ```
+ *
+ * ## First answer wins, the rest are withdrawn
+ *
+ * The losing surfaces get their `SurfacePrompt.signal` aborted, so a Slack
+ * message can be deleted and a Discord modal closed rather than left sitting
+ * there collecting an answer nobody will read. A surface that ignores the
+ * signal is not broken — its late answer is simply discarded.
+ *
+ * ## Bounded, always
+ *
+ * `timeoutMs` (default 5 minutes — `DEFAULT_ATTENTION_TIMEOUT_MS` in
+ * `server/attention/index.ts`; this package stays types-only) bounds the
+ * wait. On timeout — and when there is no prompt-capable surface to ask at
+ * all — the call RESOLVES with `defaultAnswer`, it does not reject and it
+ * does not hang. Read `status` before you act on `answer`: `'answered'` is a
+ * human, anything else is your own default coming back to you.
+ *
+ * ## It does not survive a restart
+ *
+ * Stated plainly because the alternative is a plugin trusting it: a pending
+ * ask lives in memory only. A surface's `prompt` is a live in-process
+ * function and the `await` on the other side is a live promise — both die
+ * with the process, so there is nothing a DB row could resume. Restart the
+ * server mid-ask and the question is gone; nothing is re-asked and nothing
+ * is answered. Don't build an approval gate that must not be lost on top of
+ * it (core's `server/orchestrator/gate.ts` is the DB-backed one).
+ */
+export interface AttentionApi {
+  /** Requires the `attention.ask` capability grant. Never rejects on a
+   *  timeout or an unreachable human — see `AttentionAnswer.status`. */
+  ask(ask: AttentionAsk): Promise<AttentionAnswer>;
+}
+
+export interface AttentionAsk {
+  /** Present when the question is about a specific task. Passed through to
+   *  every surface as `SurfacePrompt.taskId`. */
+  taskId?: string;
+  question: string;
+  /** Offered answers. Absent means free text. */
+  choices?: string[];
+  /** How long to wait before giving up and returning `defaultAnswer`.
+   *  Default 5 minutes. */
+  timeoutMs?: number;
+  /** What `answer` holds when no human answers — on timeout, when every
+   *  surface declines, and when no registered surface can prompt at all.
+   *  Undefined by default, which is a perfectly good "no decision". */
+  defaultAnswer?: string;
+}
+
+export interface AttentionAnswer {
+  /**
+   * - `answered`     — a human answered on `surface`.
+   * - `timeout`      — nobody answered within `timeoutMs`.
+   * - `unanswerable` — nobody could be asked: no registered surface declares
+   *                    `prompt`, or every one of them declined or threw.
+   */
+  status: 'answered' | 'timeout' | 'unanswerable';
+  /** The human's answer when `status === 'answered'`, otherwise
+   *  `AttentionAsk.defaultAnswer` (so `undefined` unless you set one). */
+  answer?: string;
+  /** Qualified kind of the surface that answered. Only set for `'answered'`. */
+  surface?: string;
 }
 
 export interface SurfaceDefinition {
@@ -796,6 +891,7 @@ export type PluginCapability =
   | 'agents.run'
   | 'fanout.run'
   | 'surfaces.register'
+  | 'attention.ask'
   | 'secrets.read';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
