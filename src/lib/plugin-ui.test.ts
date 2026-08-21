@@ -13,8 +13,13 @@ vi.mock('./event-source', () => ({
 }));
 
 const { renderHook, waitFor, act } = await import('@testing-library/react');
-const { usePluginUiContributions, usePluginFacts, usePluginCollection } =
-  await import('./plugin-ui');
+const {
+  usePluginUiContributions,
+  usePluginFacts,
+  usePluginCollection,
+  usePluginUiActions,
+  invokePluginAction,
+} = await import('./plugin-ui');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -195,5 +200,62 @@ describe('usePluginCollection', () => {
 
     await new Promise((r) => setTimeout(r, 50));
     expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('usePluginUiActions', () => {
+  const actions = [
+    { pluginId: 'a', actionId: 'a:restart', id: 'restart', label: 'Restart', slot: 'task.panel' },
+    { pluginId: 'b', actionId: 'b:sweep', id: 'sweep', label: 'Sweep', slot: 'board.card' },
+    { pluginId: 'c', actionId: 'c:report', id: 'report', label: 'Report', command: true },
+  ];
+
+  it('fetches actions and filters by slot when given one', async () => {
+    requestMock.mockResolvedValue({ actions });
+
+    const { result } = renderHook(() => usePluginUiActions('task.panel'));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(requestMock).toHaveBeenCalledWith('/plugin-ui/actions');
+    expect(result.current.actions).toHaveLength(1);
+    expect(result.current.actions[0].actionId).toBe('a:restart');
+  });
+
+  it('returns every action when called with no slot', async () => {
+    requestMock.mockResolvedValue({ actions });
+
+    const { result } = renderHook(() => usePluginUiActions());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.actions).toHaveLength(3);
+  });
+
+  it('refetches when a plugin:ui-updated event arrives', async () => {
+    requestMock.mockResolvedValue({ actions: [] });
+    renderHook(() => usePluginUiActions());
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      eventCallback?.({ type: 'plugin:ui-updated', payload: {} });
+    });
+
+    await waitFor(() => expect(requestMock.mock.calls.length).toBeGreaterThan(1));
+  });
+});
+
+describe('invokePluginAction', () => {
+  it('POSTs to the qualified action endpoint with the body, URL-encoding the ":"', async () => {
+    requestMock.mockResolvedValue({ ok: true, message: 'done' });
+
+    const result = await invokePluginAction('a:restart', {
+      taskId: 't1',
+      input: { force: true },
+    });
+
+    expect(requestMock).toHaveBeenCalledWith('/plugin-ui/actions/a%3Arestart', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: 't1', input: { force: true } }),
+    });
+    expect(result).toEqual({ ok: true, message: 'done' });
   });
 });

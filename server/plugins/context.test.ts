@@ -791,6 +791,10 @@ describe('grant checks (SHR-259)', () => {
     expect(() => ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' })).toThrow(
       /not granted/,
     );
+    // SHR-257: ctx.ui.action() is gated on ui.action, separately from ui.panel.
+    expect(() => ctx.ui.action({ id: 'x', label: 'X', run: async () => {} })).toThrow(
+      /not granted/,
+    );
     expect(() => ctx.policy.intercept('task.launch', () => undefined)).toThrow(/not granted/);
     // SHR-273: compute + artifacts landed after the capability list was
     // written and were ungated for a while. Pin them so that cannot recur.
@@ -873,6 +877,11 @@ describe('grant checks (SHR-259)', () => {
       'ui.panel',
       (ctx: ReturnType<typeof createPluginContext>) =>
         ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' }),
+    ],
+    [
+      'ui.action',
+      (ctx: ReturnType<typeof createPluginContext>) =>
+        ctx.ui.action({ id: 'x', label: 'X', run: async () => {} }),
     ],
     [
       // SHR-272: ctx.agents.run() is async and, with no real harness/substrate

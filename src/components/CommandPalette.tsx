@@ -4,6 +4,9 @@ import { useTasksContext } from '@/lib/tasks-context';
 import { repoName } from '@/lib/utils';
 import { StatusGlyph } from '@/components/ui/status-glyph';
 import { taskApi } from '@/lib/api/taskApi';
+import { usePluginUiActions, invokePluginAction, type UiAction } from '@/lib/plugin-ui';
+import { PluginActionDialog } from '@/components/PluginActions';
+import { showToast } from '@/components/CustomToast';
 import type { Task } from '@octomux/types';
 import type { WorkflowStatus } from '@octomux/types';
 
@@ -68,6 +71,10 @@ export function CommandPalette() {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // No slot filter — the palette is command-only, not tied to a rendering
+  // slot; `command: true` on the action (not `slot`) is what admits it here.
+  const { actions: pluginActions } = usePluginUiActions();
+  const [dialogAction, setDialogAction] = useState<UiAction | null>(null);
 
   const selectTask = (task: Task) => {
     setQuery('');
@@ -122,6 +129,22 @@ export function CommandPalette() {
     return scored.slice(0, 50).map(({ task }) => ({ kind: 'session' as const, task }));
   }, [tasks, query]);
 
+  // Palette invocations are task-free (no `taskId` — matches `ctx.ui.action()`
+  // semantics: an action doesn't require a task). A schema/confirm action
+  // opens the same `PluginActionDialog` `PluginActions` uses rather than
+  // duplicating the form-submit flow here.
+  const runPluginAction = useCallback((action: UiAction) => {
+    setQuery('');
+    setActive(0);
+    if (action.schema || action.confirm) {
+      setDialogAction(action);
+      return;
+    }
+    invokePluginAction(action.actionId, {})
+      .then((result) => showToast('success', action.label, result.message ?? 'Done'))
+      .catch((err) => showToast('error', action.label, (err as Error).message));
+  }, []);
+
   const actionRows = useMemo<ActionRow[]>(() => {
     const base: ActionRow[] = [
       { kind: 'action', id: 'new-task', label: 'New task', run: actionNewTask },
@@ -141,6 +164,18 @@ export function CommandPalette() {
       }
     }
 
+    // Plugin-declared actions with `command: true` — no `slot` filter, that's
+    // what `usePluginUiActions()` (no argument) is for.
+    for (const action of pluginActions) {
+      if (!action.command) continue;
+      base.push({
+        kind: 'action',
+        id: `plugin-action-${action.actionId}`,
+        label: action.label,
+        run: () => runPluginAction(action),
+      });
+    }
+
     if (!query) return [];
     const scored: { row: ActionRow; score: number }[] = [];
     for (const row of base) {
@@ -150,7 +185,7 @@ export function CommandPalette() {
     scored.sort((a, b) => b.score - a.score);
     return scored.map((s) => s.row);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, tasks, moveTask]);
+  }, [query, tasks, moveTask, pluginActions, runPluginAction]);
 
   const rows = useMemo<Row[]>(() => {
     if (!query.trim()) return [];
@@ -265,6 +300,9 @@ export function CommandPalette() {
             </li>
           )}
         </ul>
+      )}
+      {dialogAction && (
+        <PluginActionDialog action={dialogAction} open onClose={() => setDialogAction(null)} />
       )}
     </div>
   );

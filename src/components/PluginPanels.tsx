@@ -14,6 +14,10 @@
  * A plugin contributes a binding, never a component (packages/plugin-api's
  * `UiRegistrar` doc) — this is the ONLY place plugin-declared UI reaches the
  * DOM, always through a renderer from `src/workflows/renderers`.
+ *
+ * Also renders `PluginActions` (SHR-257) above the panels for the same slot —
+ * an action is a write-capable sibling of these read-only panels, and a slot
+ * with actions but no panels still needs to render, see `PluginPanels` below.
  */
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import {
@@ -26,6 +30,7 @@ import {
   type UiSlot,
 } from '@/lib/plugin-ui';
 import { getRenderer } from '@/workflows/renderers';
+import { PluginActions } from '@/components/PluginActions';
 
 interface PluginPanelProps {
   /** Absent in task-free mode (e.g. mounted at `settings.card`) — only
@@ -116,20 +121,24 @@ export function PluginPanels({ slot, taskId, className }: PluginPanelsProps) {
     taskId === undefined
       ? allContributions.filter((c) => c.collectionName !== undefined)
       : allContributions;
-  if (contributions.length === 0) return null;
   return (
-    <div className={className ?? 'flex flex-col gap-3 px-4 py-2'} data-testid="plugin-panels">
-      {contributions.map((contribution, i) => (
-        <PluginPanel
-          // factType/collectionName are mutually exclusive and either can be
-          // absent (a panel with neither binding must still render, not
-          // crash) — fall back through both, then the index, so the key is
-          // always defined and stable per contribution.
-          key={`${contribution.pluginId}:${contribution.factType ?? contribution.collectionName ?? i}`}
-          taskId={taskId}
-          contribution={contribution}
-        />
-      ))}
-    </div>
+    <>
+      <PluginActions slot={slot} taskId={taskId} />
+      {contributions.length > 0 && (
+        <div className={className ?? 'flex flex-col gap-3 px-4 py-2'} data-testid="plugin-panels">
+          {contributions.map((contribution, i) => (
+            <PluginPanel
+              // factType/collectionName are mutually exclusive and either can be
+              // absent (a panel with neither binding must still render, not
+              // crash) — fall back through both, then the index, so the key is
+              // always defined and stable per contribution.
+              key={`${contribution.pluginId}:${contribution.factType ?? contribution.collectionName ?? i}`}
+              taskId={taskId}
+              contribution={contribution}
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }

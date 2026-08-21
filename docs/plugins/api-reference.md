@@ -74,7 +74,7 @@ member:
 | [`ctx.collections`](#ctxcollections)                               | durable, keyed, schema-validated records                           |
 | [`ctx.artifacts`](#ctxartifacts)                                   | files written into a task's worktree                               |
 | [`ctx.agents`](#ctxagents)                                         | runs a headless, structured-output agent session                   |
-| [`ctx.ui`](#ctxui)                                                 | declarative panel bindings, never components                       |
+| [`ctx.ui`](#ctxui)                                                 | declarative panel bindings and action declarations, never code     |
 | [`ctx.policy`](#ctxpolicy)                                         | the one member that can deny a core action                         |
 | [`ctx.surfaces`](#ctxsurfaces)                                     | registers a place octomux presents itself to a human               |
 | [`ctx.fanout`](#ctxfanout)                                         | runs a step per item, with retries and a host-enforced cap         |
@@ -855,6 +855,7 @@ functions core calls and bypassing its own hook entirely.
 ```ts
 interface UiRegistrar {
   panel(binding: UiPanelBinding): void;
+  action(def: UiActionDefinition): void;
 }
 type UiSlot =
   | 'task.panel'
@@ -884,14 +885,51 @@ interface UiCollectionPanelBinding {
   fact?: never;
 }
 type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
+
+interface UiActionDefinition {
+  id: string; // BARE local id — qualified to `<pluginId>:<id>`
+  label: string; // button / command-entry text
+  slot?: UiSlot; // omit for a command-palette-only action
+  schema?: Record<string, unknown>; // JSON Schema — present means the client renders a form
+  command?: boolean; // surface this action in whatever command palette the surface has
+  confirm?: string; // confirmation string shown before running; absent runs immediately
+  run(invocation: UiActionInvocation): Promise<UiActionResult | void> | UiActionResult | void;
+}
+interface UiActionInvocation {
+  taskId?: string; // present when invoked from a task-scoped slot
+  input: Record<string, unknown>; // schema-validated when `schema` was declared; `{}` otherwise
+}
+interface UiActionResult {
+  message?: string; // shown to the human who triggered the action
+}
+/** What a client actually receives from `GET /api/plugin-ui/actions` — `run`
+ *  stripped, `id` qualified. */
+interface UiActionContribution {
+  pluginId: string;
+  actionId: string; // qualified — `<pluginId>:<id>` — the address `POST .../:actionId` takes
+  id: string; // bare, as the plugin declared it
+  label: string;
+  slot?: UiSlot;
+  schema?: Record<string, unknown>;
+  command?: boolean;
+  confirm?: string;
+}
 ```
 
-Declarative BINDINGS, never components. A plugin ships zero browser
-JavaScript and needs no build step — a binding names a slot, a renderer, and
-a fact type or collection; the client owns every renderer and looks it up by
-name. There is deliberately no `ctx.ui.component()` and no custom sidebar:
-that ceiling is what keeps a panel written today renderable on a surface
-that doesn't exist yet — see `ctx.surfaces` below.
+Declarative BINDINGS and DECLARATIONS, never components. `panel` is the read
+half: a binding names a slot, a renderer, and a fact type or collection; the
+client owns every renderer and looks it up by name. `action` (SHR-257) is
+the write half: a plugin names a handler and the HOST holds it — `def.run`
+is a real function value that never crosses to a client. What a client gets
+back (`UiActionContribution`) is the declaration minus `run`: a label, an
+optional slot, an optional JSON Schema, an optional confirm string. That's
+enough to draw a button or a command-palette entry and build a form from,
+and it's the whole reason `action` doesn't take the obvious shape of "hand
+the client a callback" — a plugin ships zero browser JavaScript either way,
+and needs no build step. There is deliberately no `ctx.ui.component()` and
+no custom sidebar: that ceiling is what keeps a panel or an action written
+today renderable on a surface that doesn't exist yet — see `ctx.surfaces`
+below.
 
 `UiPanelBinding` is a union: exactly one of `fact` (bare local fact type) or
 `collection` (bare local collection name). `registerPluginUiPanel`
@@ -908,6 +946,73 @@ ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
 Gate: `ui.panel`. Unmount: every contribution this plugin registered is
 removed (`unregisterPluginUi`) — the panel vanishes with no restart.
 Bindings are served to the client at `GET /api/plugin-ui/contributions`.
+
+**`ctx.ui.action(def)`** — a named handler the host invokes on request.
+`def.id` is a bare local id, qualified the same way as everything else
+(`<pluginId>:<id>`); `registerPluginUiAction` rejects a missing `id`,
+`label`, or `run`, and an unrecognized `slot`, at registration time — a bad
+action declaration is a load-time failure, not a silently-broken button.
+
+```js
+ctx.ui.action({
+  id: 'retry',
+  label: 'Retry failed check',
+  slot: 'task.panel',
+  command: true,
+  confirm: 'Re-run the coverage check for this task?',
+  schema: {
+    type: 'object',
+    properties: { reason: { type: 'string' } },
+  },
+  async run({ taskId, input }) {
+    await rerunCoverageCheck(taskId, input.reason);
+    return { message: 'Coverage check re-queued.' };
+  },
+});
+```
+
+`def.schema`, when present, is a JSON Schema: the client renders a form from
+it — the same schema-driven form the schedules UI already builds from a
+workflow's `config` schema — and the host validates the submitted `input`
+against that schema before `run` ever sees it (`invokeUiAction`,
+`server/plugins/ui-registry.ts`, via the same `validateAgainstSchema` call
+`ctx.facts.put` uses). Omit `schema` and the action takes no input; the host
+still requires `input` to be a plain object (or absent) and rejects anything
+else. `def.command: true` surfaces the action in whatever command palette
+the surface offers — independent of `slot`, so an action can be
+palette-only, slot-only, or both. `def.confirm` is a string the client shows
+before invoking; omit it and the action runs on request with no
+confirmation step.
+
+REST (`server/routes/plugin-ui.ts`):
+
+- `GET /api/plugin-ui/actions[?slot=<slot>]` — lists `UiActionContribution`s,
+  optionally filtered to one slot. Ungated, like listing panels — reading
+  what's contributed isn't the thing capability grants exist to flag.
+- `POST /api/plugin-ui/actions/:actionId` with `{ taskId?, input? }` —
+  invokes one action. 404 for an unrecognized qualified id, 400 if `input`
+  fails the action's schema (or isn't a plain object when there's no
+  schema), otherwise runs `def.run` and returns its `UiActionResult` (or
+  `{}` if it returned nothing).
+
+Gate: `ui.action` on `ctx.ui.action()` — declaring an action is the gated
+act; invoking one already declared is not separately gated, and neither is
+listing them, matching `ui.panel`'s read side and `facts.read`/
+`catalog.list`. Unmount: every action this plugin registered is removed
+alongside its panels (`unregisterPluginUi`) — same map, same call, one line
+of teardown for both halves of `ctx.ui`.
+
+**The ceiling is unchanged, and that's the point.** A plugin contributes a
+binding or a declaration, never code — that's what keeps the security model
+intact (there is no CSP anywhere in octomux, and `server/remote-auth.ts`
+returns `allow` unconditionally in local mode, so serving third-party
+JavaScript to a browser was never on the table) and it's what keeps a
+contribution portable onto a surface that didn't exist when it was written.
+
+**Known gap:** all four core surfaces (`web`, `cli`, `slack`, `telegram`) are
+still read-only for prompting; an action is invoked over REST by whatever
+client draws its trigger, and today only the web client draws one. Don't
+describe a CLI or Slack action button as working — nothing renders one yet.
 
 ## `ctx.surfaces`
 
@@ -1130,7 +1235,7 @@ decision.
 
 ### Every capability
 
-All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
+All 17 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 `PluginCapability` in `@octomux/plugin-api`):
 
 | Capability              | Gates                         | Undone on unmount?                                      |
@@ -1145,8 +1250,10 @@ All 15 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 | `collections.define`    | `ctx.collections.define()`    | yes — the definition; records survive                   |
 | `collections.write`     | `ctx.collections.put()`       | n/a — a write, not a registration                       |
 | `ui.panel`              | `ctx.ui.panel()`              | yes                                                     |
+| `ui.action`             | `ctx.ui.action()`             | yes                                                     |
 | `artifacts.write`       | `ctx.artifacts.write()`       | n/a — files land in the worktree and outlive the plugin |
 | `policy.intercept`      | `ctx.policy.intercept()`      | yes                                                     |
+| `secrets.read`          | `ctx.secrets.resolve()`       | n/a — a read, not a registration                        |
 | `agents.run`            | `ctx.agents.run()`            | n/a — an in-flight run settles on its own               |
 | `fanout.run`            | `ctx.fanout.run()`            | n/a — an in-flight run is aborted, not "undone"         |
 | `surfaces.register`     | `ctx.surfaces.register()`     | yes                                                     |

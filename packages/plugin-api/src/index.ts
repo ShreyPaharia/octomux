@@ -384,6 +384,82 @@ export interface AgentRunner {
  */
 export interface UiRegistrar {
   panel(binding: UiPanelBinding): void;
+  /**
+   * Declares an ACTION — a named handler the HOST invokes (SHR-257).
+   *
+   * The read half of `ctx.ui` draws data; this is the write half. It changes
+   * nothing about the ceiling: `def.run` stays in the host process and is
+   * addressed over REST by its qualified id. What reaches the browser is the
+   * declaration MINUS the handler — a label, a slot, an optional JSON Schema.
+   * Still zero plugin JavaScript in the client, still portable onto a surface
+   * that did not exist when the action was written.
+   *
+   * Requires the `ui.action` capability grant.
+   */
+  action(def: UiActionDefinition): void;
+}
+
+/**
+ * One `ctx.ui.action()` declaration.
+ *
+ * `run` is the ONLY function here and it never leaves the host. Everything
+ * else is data the client can render on its own: a label to put on a button,
+ * a slot to put the button in, a JSON Schema to build a form from, a confirm
+ * string to gate it behind.
+ */
+export interface UiActionDefinition {
+  /** BARE local id — the host qualifies it to `<pluginId>:<id>`. */
+  id: string;
+  /** Button / command-entry text. */
+  label: string;
+  /** Where the trigger renders. Omit for a command-palette-only action. */
+  slot?: UiSlot;
+  /**
+   * JSON Schema for the action's input. Present → the client renders a form
+   * from it (the same schema-driven form the schedules UI uses) and the host
+   * validates the submitted values against it before `run` sees them. Absent
+   * → the action takes no input and `invocation.input` is `{}`.
+   */
+  schema?: Record<string, unknown>;
+  /** Surfaces this action in whatever command palette the surface has. */
+  command?: boolean;
+  /** Shown as a confirmation before running. Absent → runs immediately. */
+  confirm?: string;
+  /**
+   * Runs IN THE HOST when the action is invoked. Throwing surfaces the message
+   * to the caller; there is no timeout, the transport bounds the wait.
+   */
+  run(invocation: UiActionInvocation): Promise<UiActionResult | void> | UiActionResult | void;
+}
+
+export interface UiActionInvocation {
+  /** Present when invoked from a task-scoped slot. */
+  taskId?: string;
+  /** Schema-validated when the action declared a `schema`; `{}` otherwise. */
+  input: Record<string, unknown>;
+}
+
+/** What `run` may hand back to the caller. `void` is fine — most actions just do
+ *  the thing. */
+export interface UiActionResult {
+  /** Shown to the human who triggered the action. */
+  message?: string;
+}
+
+/** An action as served to a client: the declaration with its handler stripped
+ *  and its id qualified. What `GET /api/plugin-ui/actions` returns. */
+export interface UiActionContribution {
+  /** Manifest row id of the contributing plugin. */
+  pluginId: string;
+  /** Qualified — `<pluginId>:<id>`. The address `POST /api/plugin-ui/actions/:id` takes. */
+  actionId: string;
+  /** Bare local id as the plugin declared it. */
+  id: string;
+  label: string;
+  slot?: UiSlot;
+  schema?: Record<string, unknown>;
+  command?: boolean;
+  confirm?: string;
 }
 export type UiSlot =
   | 'task.panel'
@@ -791,6 +867,7 @@ export type PluginCapability =
   | 'collections.define'
   | 'collections.write'
   | 'ui.panel'
+  | 'ui.action'
   | 'artifacts.write'
   | 'policy.intercept'
   | 'agents.run'

@@ -99,7 +99,7 @@ plugin "myplugin": capability "workflows.register" is not granted. Add it to the
 That message is the actual thrown error, verbatim — it already names the
 line to add.
 
-### The 15 capabilities
+### The 17 capabilities
 
 Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 `server/plugins/grants.ts`, `PluginCapability` in
@@ -117,6 +117,7 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 | `collections.define`    | `ctx.collections.define()`    |
 | `collections.write`     | `ctx.collections.put()`       |
 | `ui.panel`              | `ctx.ui.panel()`              |
+| `ui.action`             | `ctx.ui.action()`             |
 | `artifacts.write`       | `ctx.artifacts.write()`       |
 | `policy.intercept`      | `ctx.policy.intercept()`      |
 | `secrets.read`          | `ctx.secrets.resolve()`       |
@@ -191,7 +192,7 @@ none of them has a `register()`. `ctx.effect()`, `ctx.logger`,
 | `ctx.http.route()`                                 | add an HTTP route                                       | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
 | `ctx.facts` (`define`/`put`/`read`/`watch`)        | task-scoped notes, deleted with the task                | reference only | [api-reference.md](./api-reference.md#ctxfacts)                                    |
 | `ctx.collections` (`define`/`put`/`query`/`watch`) | durable, schema'd records that outlive a task           | reference only | [api-reference.md](./api-reference.md#ctxcollections)                              |
-| `ctx.ui.panel()`                                   | bind a declarative panel to a fact or collection        | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
+| `ctx.ui.panel()` / `ctx.ui.action()`               | bind a declarative panel, or declare a host-run action  | §below         | [api-reference.md](./api-reference.md#ctxui)                                       |
 | `ctx.policy.intercept()`                           | deny or patch a task intent at a gate point             | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
 | `ctx.artifacts` (`write`/`list`)                   | drop a file into the task's worktree                    | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
 | `ctx.agents.run()`                                 | headless, structured-output agent session               | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
@@ -204,9 +205,9 @@ none of them has a `register()`. `ctx.effect()`, `ctx.logger`,
 
 "Reference only" rows aren't walked through step by step in this guide — the
 full shape lives in `api-reference.md`. This file stays a guide: it covers
-`workflows`/`integrations`/`harnesses`/`compute`/`surfaces` (the registrars
-that need the most explaining), plus `catalog`/`settings`/`kv`, in depth
-below.
+`workflows`/`integrations`/`harnesses`/`compute`/`surfaces`/`ui.action` (the
+registrars that need the most explaining), plus `catalog`/`settings`/`kv`, in
+depth below.
 
 Every registrar payload is typed as `Record<string, unknown>` at the type
 level (the plan keeps `@octomux/plugin-api` free of a dependency on the
@@ -389,6 +390,55 @@ See [`examples/discord-surface`](./examples/discord-surface) for a complete
 surface — renders panels to Discord markdown and implements `prompt`, with
 its README stating plainly what would need a real Discord token/webhook to
 actually post.
+
+### `ctx.ui.action(def)`
+
+`ctx.ui.panel()` shows something; `ctx.ui.action()` does something. It's the
+write half of `ctx.ui`: you declare a named handler, the host holds it, and
+the client only ever sees the declaration minus the handler — a label, an
+optional slot, an optional JSON Schema, an optional confirm string. Your
+`run` function never leaves the process it was registered in.
+
+```yaml
+plugins:
+  - id: coverage-bot
+    name: '@acme/octomux-coverage-bot'
+    grants: [facts.define, facts.put, ui.panel, ui.action]
+```
+
+```js
+ctx.ui.action({
+  id: 'retry',
+  label: 'Retry failed check',
+  slot: 'task.panel', // omit for a command-palette-only action
+  command: true, // also surface it in the command palette
+  confirm: 'Re-run the coverage check for this task?',
+  schema: { type: 'object', properties: { reason: { type: 'string' } } },
+  async run({ taskId, input }) {
+    await rerunCoverageCheck(taskId, input.reason);
+    return { message: 'Coverage check re-queued.' };
+  },
+});
+```
+
+A `schema`, if you give it one, is what makes this more than a bare button:
+the client renders a form from it — the same schema-driven form the
+schedules UI builds from a workflow's `config` schema — and the host
+validates the submission against it before `run` ever sees `input`. Skip
+`schema` and the action takes no input at all.
+
+Invocation is over REST, not a direct call from the client into your code:
+`GET /api/plugin-ui/actions[?slot=]` lists what's contributed (ungated, like
+listing panels), and `POST /api/plugin-ui/actions/:actionId` with
+`{ taskId?, input? }` runs it (404 unknown id, 400 bad input). Requires the
+`ui.action` grant — see [§Capability grants](#capability-grants). Unmount
+removes an action the same way it removes a panel: gone with no restart.
+
+**Stated plainly:** all four core surfaces (`web`, `cli`, `slack`,
+`telegram`) are still read-only for prompting, and today only the web client
+actually draws an action trigger. A CLI or Slack action button is not a
+thing yet — don't build a plugin assuming one exists. Full shape:
+[`api-reference.md` §`ctx.ui`](./api-reference.md#ctxui).
 
 ## Kind presets (`kinds/*.json`)
 

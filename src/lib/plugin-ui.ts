@@ -14,6 +14,11 @@
  * the binding at all) — never both. Both pairs are optional on the wire type
  * for that reason; callers branch on which pair is present.
  *
+ * Extended for SHR-257 (`ctx.ui.action()`): `GET /api/plugin-ui/actions` and
+ * `POST /api/plugin-ui/actions/:actionId` are read-only/write-only mirrors of
+ * the same idea — a plugin declares an action, the host runs the handler,
+ * only data (never plugin code) reaches this module.
+ *
  * Follows the same `useResource` shape as everything else in
  * `src/lib/hooks.ts` — no hand-rolled fetch/state pattern. `request` is
  * imported straight from `./api/client` rather than adding a new namespace to
@@ -78,10 +83,32 @@ export interface CollectionRecord {
   updatedAt: string;
 }
 
+/**
+ * An action as served to the client — the declaration with its handler
+ * stripped and its id qualified (`@octomux/plugin-api`'s
+ * `UiActionContribution`, mirrored by value for the same reason `UiSlot` is
+ * above). `actionId` is the address `POST /api/plugin-ui/actions/:actionId`
+ * takes; `slot` absent means command-palette only (no button anywhere else).
+ */
+export interface UiAction {
+  pluginId: string;
+  actionId: string;
+  id: string;
+  label: string;
+  slot?: UiSlot;
+  schema?: Record<string, unknown>;
+  command?: boolean;
+  confirm?: string;
+}
+
 function listContributions(): Promise<UiContribution[]> {
   return request<{ contributions: UiContribution[] }>('/plugin-ui/contributions').then(
     (r) => r.contributions,
   );
+}
+
+function listActions(): Promise<UiAction[]> {
+  return request<{ actions: UiAction[] }>('/plugin-ui/actions').then((r) => r.actions);
 }
 
 function readTaskFacts(taskId: string, type: string): Promise<PluginFact[]> {
@@ -165,4 +192,42 @@ export function usePluginCollection(contribution: UiContribution) {
     readCollection(collectionName as string),
   );
   return { records: data ?? [], loading, error };
+}
+
+/**
+ * Every `ctx.ui.action()` contribution, optionally filtered to one slot.
+ * Called with no `slot` (the command palette's case) returns every action —
+ * a palette entry isn't tied to a rendering slot.
+ *
+ * Refetches on the same `plugin:ui-updated` event `usePluginUiContributions`
+ * does, for the same reason: an action is part of a plugin's mount/unmount
+ * lifecycle (`server/plugins/lifecycle.ts` / `loader.ts` broadcast that event
+ * for both panels and actions), so a plugin that unmounts must make its
+ * buttons and palette rows disappear with no page reload, not just its panels.
+ */
+export function usePluginUiActions(slot?: UiSlot) {
+  const { data, loading, error } = useResource<UiAction[]>('plugin-ui-actions', listActions, {
+    events: (e) => (e.type as string) === 'plugin:ui-updated',
+  });
+  const actions = useMemo(
+    () => (data ?? []).filter((a) => (slot === undefined ? true : a.slot === slot)),
+    [data, slot],
+  );
+  return { actions, loading, error };
+}
+
+/**
+ * Invokes a plugin action by its qualified id. The handler runs entirely in
+ * the host (`server/plugins/ui-actions.ts` or wherever the server half
+ * lands) — this is a bare POST, never plugin code reaching the browser.
+ * `taskId` is omitted for task-free invocations (e.g. the command palette).
+ */
+export function invokePluginAction(
+  actionId: string,
+  body: { taskId?: string; input?: Record<string, unknown> },
+): Promise<{ ok: boolean; message?: string }> {
+  return request<{ ok: boolean; message?: string }>(
+    `/plugin-ui/actions/${encodeURIComponent(actionId)}`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
 }

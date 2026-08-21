@@ -230,6 +230,7 @@ describe('unmountPlugin', () => {
     expect(report.released).toEqual({
       routes: 0,
       uiContributions: 0,
+      uiActions: 0,
       policyHooks: 0,
       workflowKinds: [],
       harnessIds: [],
