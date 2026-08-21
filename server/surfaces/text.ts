@@ -56,14 +56,23 @@ function renderJson(panel: SurfacePanel): string {
   return '```json\n' + JSON.stringify(latestPayload(panel.facts), null, 2) + '\n```';
 }
 
-function tableRows(payload: unknown): Array<Record<string, unknown>> {
+function tableRows(facts: Fact[]): Array<Record<string, unknown>> {
+  const payload = latestPayload(facts);
   if (Array.isArray(payload)) return payload as Array<Record<string, unknown>>;
   const rows = payloadField(payload, 'rows');
-  return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+  if (Array.isArray(rows)) return rows as Array<Record<string, unknown>>;
+  // Neither shape matched, so fall back to one row PER entry. This is what a
+  // collection-bound panel wants (SHR-279): its records arrive here as facts,
+  // one record each, and reading only the last one would show a 2,000-record
+  // board as a single row. For a fact-bound panel this only fires where the
+  // old code rendered nothing at all, so it never changes an existing table.
+  return facts.every((f) => typeof f.payload === 'object' && f.payload !== null)
+    ? facts.map((f) => f.payload as Record<string, unknown>)
+    : [];
 }
 
 function renderTable(panel: SurfacePanel): string {
-  const rows = tableRows(latestPayload(panel.facts));
+  const rows = tableRows(panel.facts);
   if (rows.length === 0) return formatScalar(undefined);
   const columns = Object.keys(rows[0]);
   const lines = [columns.join(' | '), columns.map(() => '---').join(' | ')];

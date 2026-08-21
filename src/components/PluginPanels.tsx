@@ -4,8 +4,12 @@
  * Renders every `ctx.ui` contribution for one slot (SHR-256, extended for
  * collection bindings in SHR-275). Wired into the task detail page
  * (`src/pages/TaskDetail.tsx`), which mounts
- * `<PluginPanels slot="task.panel" taskId={task.id} />`. See the module doc
- * on `src/lib/plugin-ui.ts` for the data layer.
+ * `<PluginPanels slot="task.panel" taskId={task.id} />`. Also mounted
+ * task-free at `src/pages/SettingsPage.tsx` as
+ * `<PluginPanels slot="settings.card" />` (SHR-279) — a collection is
+ * task-independent, so that's its only home; see the `taskId`-optional
+ * handling below. See the module doc on `src/lib/plugin-ui.ts` for the data
+ * layer.
  *
  * A plugin contributes a binding, never a component (packages/plugin-api's
  * `UiRegistrar` doc) — this is the ONLY place plugin-declared UI reaches the
@@ -24,7 +28,10 @@ import {
 import { getRenderer } from '@/workflows/renderers';
 
 interface PluginPanelProps {
-  taskId: string;
+  /** Absent in task-free mode (e.g. mounted at `settings.card`) — only
+   *  collection-bound contributions reach this component in that mode, see
+   *  `PluginPanels` below. */
+  taskId?: string;
   contribution: UiContribution;
 }
 
@@ -56,7 +63,10 @@ function recordsAsFacts(records: CollectionRecord[]): PluginFact[] {
  *  bound its way (see the guards in `src/lib/plugin-ui.ts`), so only the one
  *  matching the binding actually does work. */
 function PluginPanel({ taskId, contribution }: PluginPanelProps) {
-  const factsResult = usePluginFacts(taskId, contribution);
+  // taskId is only absent for fact-bound contributions filtered out by the
+  // parent before this ever mounts (task-free mode) — '' keeps the hook call
+  // unconditional (rules of hooks) without ever actually fetching.
+  const factsResult = usePluginFacts(taskId ?? '', contribution);
   const collectionResult = usePluginCollection(contribution);
   const isCollectionBound = contribution.collectionName !== undefined;
   const { facts, loading, error } = isCollectionBound
@@ -89,14 +99,23 @@ function PluginPanel({ taskId, contribution }: PluginPanelProps) {
 
 export interface PluginPanelsProps {
   slot: UiSlot;
-  taskId: string;
+  /** Omit for a task-free mount (e.g. `slot="settings.card"`). Without a
+   *  task, fact-bound contributions have nothing to read — they're dropped
+   *  rather than rendered as a permanently empty card. Only collection-bound
+   *  contributions render. Mirrors the server: its task walk skips
+   *  collection-bound bindings, its collection path skips fact-bound ones. */
+  taskId?: string;
   className?: string;
 }
 
 /** All contributions for `slot`, each in its own panel. Renders nothing when
  *  there are none — a task with no plugins installed shows no empty shell. */
 export function PluginPanels({ slot, taskId, className }: PluginPanelsProps) {
-  const { contributions } = usePluginUiContributions(slot);
+  const { contributions: allContributions } = usePluginUiContributions(slot);
+  const contributions =
+    taskId === undefined
+      ? allContributions.filter((c) => c.collectionName !== undefined)
+      : allContributions;
   if (contributions.length === 0) return null;
   return (
     <div className={className ?? 'flex flex-col gap-3 px-4 py-2'} data-testid="plugin-panels">
