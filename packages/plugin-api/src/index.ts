@@ -19,6 +19,7 @@ export interface PluginContext {
   readonly compute: ComputeRegistrar;
   readonly http: HttpRegistrar;
   readonly facts: FactsRegistrar;
+  readonly collections: CollectionsRegistrar;
   readonly artifacts: ArtifactsApi;
   readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
@@ -50,7 +51,8 @@ export interface CatalogEntry {
   kind: 'plugin' | 'core';
   /** Everything this unit contributes, as `<registry>:<qualified id>` strings —
    *  `workflow:demo:changelog`, `harness:demo:foo`, `integration:jira`,
-   *  `route:GET /coverage/:task`, `ui:task.panel`, `fact:demo:coverage`. */
+   *  `route:GET /coverage/:task`, `ui:task.panel`, `fact:demo:coverage`,
+   *  `collection:demo:baselines`. */
   provides: string[];
   /** `name@version` for a plugin (resolved path when a local-path row has no
    *  version), `'built-in'` for core. */
@@ -186,6 +188,85 @@ export interface Fact {
 }
 
 /**
+ * `ctx.collections` — durable, keyed records that OUTLIVE a task (SHR-275).
+ *
+ * `ctx.facts` is an append-only log scoped to one task; when the task is
+ * deleted its facts go with it. That makes it the wrong home for anything a
+ * plugin wants to keep — a per-repo score, a rolling index, a registry of
+ * things it has seen. A collection is the other half: a small set of records
+ * keyed by a field the plugin nominates, upserted on write, with no task in
+ * the picture at all.
+ *
+ * It is deliberately NOT `plugin_facts` with a nullable `task_id`. Same
+ * reasoning as ruling R1 in `plans/2026-08-20-plugin-runtime-p0.md`: two
+ * concerns with different lifetimes (one dies with a task, one does not) do
+ * not share one table, one AUTOINCREMENT sequence, and one drain.
+ *
+ * Names are namespaced under the manifest row id exactly like fact types, so
+ * a plugin can add `coverage-bot:baselines` and can never overwrite a
+ * `core:` name.
+ *
+ * NOT `ctx.kv` (SHR-263). kv is opaque per-plugin blobs keyed by a string;
+ * this is schema-validated, queryable records. They may end up sharing a
+ * storage layer; they are not the same API.
+ */
+export interface CollectionsRegistrar {
+  /** Declares a collection, its record schema, and which record field is the
+   *  upsert key. `def.name` is BARE — the host qualifies it. */
+  define(def: CollectionDefinition): void;
+  /** Upserts one record on its `key` field. `collection` is the plugin's own
+   *  BARE local name — a plugin writes only its own collections, so a
+   *  qualified name here is an error, not a cross-plugin write. */
+  put(collection: string, record: unknown): Promise<void>;
+  /** Reads records. `collection` may be BARE (this plugin's own) or QUALIFIED
+   *  (`other-plugin:baselines`) — reads are unscoped, same as `facts.read`. */
+  query(collection: string, q?: QuerySpec): Promise<unknown[]>;
+  /** Subscribes to a QUALIFIED name. In-process, fired on write. Returns an
+   *  unsubscribe; also auto-disposed on unmount. */
+  watch(qualifiedName: string, cb: (record: unknown) => void): () => void;
+}
+
+export interface CollectionDefinition {
+  /** BARE local name. The host qualifies it to `<pluginId>:<name>`. */
+  name: string;
+  /** JSON Schema every record is validated against on write. */
+  schema: Record<string, unknown>;
+  /** Top-level record property holding the record's identity. Writes upsert
+   *  on it, so `put` twice with the same key value replaces, never appends. */
+  key: string;
+}
+
+/**
+ * Deliberately small. Exact-match filters, an order and a window — enough for
+ * a panel binding and a plugin's own bookkeeping. There is no operator
+ * language, no join, and no aggregate: a plugin that needs those has outgrown
+ * this API rather than found a gap in it.
+ */
+export interface QuerySpec {
+  /** Exact-match on top-level record fields, AND-ed together. */
+  where?: Record<string, unknown>;
+  /** Top-level record field to sort by. Default: `updatedAt`. */
+  orderBy?: string;
+  /** Default `asc`. */
+  order?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
+/** One stored record, as the REST surface and the repository return it. The
+ *  registrar's `query()` hands back the bare `record` values instead. */
+export interface CollectionRecord {
+  /** Qualified — `coverage-bot:baselines`. */
+  collection: string;
+  /** The stringified value of the record's `key` field. */
+  key: string;
+  record: unknown;
+  /** `YYYY-MM-DD HH:MM:SS` UTC — sqlite `datetime('now')` shape. */
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * `ctx.artifacts` — files a run produced: a review report, a coverage summary,
  * a generated diagram. Written into the task's worktree under
  * `.octomux/artifacts/<pluginId>/<name>`, alongside the narrative
@@ -293,10 +374,8 @@ export type UiRenderer =
   | 'json'
   | 'diff'
   | 'log';
-export interface UiPanelBinding {
+interface UiPanelBindingBase {
   slot: UiSlot;
-  /** BARE local fact type — the host qualifies it, same as `facts.define`. */
-  fact: string;
   /** Renderer name. An UNKNOWN renderer degrades to `json`, never a blank. */
   as: UiRenderer | string;
   /** Payload key holding the primary value (renderer-specific). */
@@ -305,6 +384,27 @@ export interface UiPanelBinding {
   delta?: string;
   title?: string;
 }
+
+/** A panel bound to a task-scoped fact type. The original shape — every
+ *  binding written before SHR-275 is one of these, unchanged. */
+export interface UiFactPanelBinding extends UiPanelBindingBase {
+  /** BARE local fact type — the host qualifies it, same as `facts.define`. */
+  fact: string;
+  collection?: never;
+}
+
+/** A panel bound to a durable collection (SHR-275). Task-independent: it
+ *  renders the collection's records wherever the slot puts it. */
+export interface UiCollectionPanelBinding extends UiPanelBindingBase {
+  /** BARE local collection name — the host qualifies it, same as
+   *  `collections.define`. */
+  collection: string;
+  fact?: never;
+}
+
+/** Exactly one of `fact` / `collection`. The union is what keeps every
+ *  already-shipped fact-bound binding valid with no edit. */
+export type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
 
 /**
  * `ctx.policy` — the one verb in the plugin API that can say **no**.
@@ -389,6 +489,10 @@ export type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<Poli
  * Again: this governs what a plugin can do *through `ctx`*. It is a statement
  * of intent that core can enforce at its own seams and show to a human — not
  * a privilege boundary around the plugin's code.
+ *
+ * `collections.query` / `collections.watch` are ungated for the same reason
+ * `facts.read` / `artifacts.list` are: reading what is installed or recorded
+ * is not the thing worth a second look.
  */
 export type PluginCapability =
   | 'workflows.register'
@@ -398,6 +502,8 @@ export type PluginCapability =
   | 'http.route'
   | 'facts.define'
   | 'facts.put'
+  | 'collections.define'
+  | 'collections.write'
   | 'ui.panel'
   | 'artifacts.write'
   | 'policy.intercept'

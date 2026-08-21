@@ -1,3 +1,8 @@
+# SHR-275 — `ctx.collections`
+
+Commit `16b7846`. `bun run typecheck` / `format:check` / `lint` clean; full
+suite green (3663 + 1301 + 223, 0 fail).
+
 ## What shipped
 
 `ctx.agents.run({ input, outputSchema, model?, timeoutMs?, workspaceDir? })` → `Promise<T>`,

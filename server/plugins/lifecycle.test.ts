@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach } from '../bun-test.js';
+import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
 import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
 import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetPluginUi, listUiContributions } from './ui-registry.js';
 import { resetFacts } from './facts.js';
+import { resetCollections, listPluginCollections, isCollectionDefined } from './collections.js';
+import * as collectionsModule from './collections.js';
+import { getRecord } from '../repositories/plugin-collections.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
 import { resetCompute, getCompute, CORE_COMPUTE_KINDS } from '../compute/registry.js';
@@ -11,6 +14,7 @@ import { resetProviders, getProvider, CORE_PROVIDER_KINDS } from '../integration
 import { subscribeServerEvents } from '../events.js';
 import { evaluatePolicy, resetPolicy } from './policy.js';
 import { resetPluginGrants } from './grants.js';
+import { createTestDb } from '../test-helpers.js';
 import type { PluginContext } from '@octomux/plugin-api';
 
 // `workflows/registry.ts` has no resetWorkflows() (deliberate — presets.ts
@@ -58,9 +62,11 @@ function fakeCompute(kind: string): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  createTestDb();
   resetPluginRoutes();
   resetPluginUi();
   resetFacts();
+  resetCollections();
   resetHarnesses();
   resetCompute();
   resetProviders();
@@ -100,6 +106,8 @@ describe('unmountPlugin', () => {
       'compute.register',
       'artifacts.write',
       'facts.define',
+      'collections.define',
+      'collections.write',
       'ui.panel',
       'policy.intercept',
     ]);
@@ -110,6 +118,7 @@ describe('unmountPlugin', () => {
     ctx.compute.register(fakeCompute('fake'));
     ctx.integrations.register(fakeProvider('fake'));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+    ctx.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
     ctx.policy.intercept('task.launch', () => ({ deny: 'no' }));
 
@@ -128,6 +137,7 @@ describe('unmountPlugin', () => {
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(false);
+    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(true);
 
     const report = await unmountPlugin(pluginId, ctx);
 
@@ -141,6 +151,7 @@ describe('unmountPlugin', () => {
     expect(report.released.computeKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
+    expect(report.released.collectionNames).toEqual([`${pluginId}:baselines`]);
     expect(report.released.effects).toBe(0);
 
     // Actually released, not just reported.
@@ -150,6 +161,10 @@ describe('unmountPlugin', () => {
     expect(() => getCompute(`${pluginId}:fake`)).toThrow();
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(false);
+    // Definitions gone (SHR-275) — but see the dedicated durability test
+    // below for the record itself surviving unmount.
+    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(false);
+    expect(listPluginCollections(pluginId)).toEqual([]);
     // The policy hook stopped firing — the point falls back to the fast
     // "no hooks registered" path and allows through.
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(true);
@@ -196,6 +211,7 @@ describe('unmountPlugin', () => {
       computeKinds: [],
       providerKinds: [],
       factTypes: [],
+      collectionNames: [],
       effects: 0,
     });
   });
@@ -247,5 +263,45 @@ describe('unmountPlugin', () => {
     // Nothing else in the sequence was stranded — routes/ui/etc. still ran and
     // reported normally, exactly as the module's own doc comment promises.
     expect(report.released.routes).toBe(0);
+  });
+
+  it('a record written before unmount is still readable after unmount — collections are durable, only definitions drop', async () => {
+    const pluginId = 'lc-durable';
+    const ctx = createPluginContext(pluginId, ['collections.define', 'collections.write']);
+    ctx.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
+    await ctx.collections.put('baselines', { branch: 'main', pct: 87 });
+
+    await unmountPlugin(pluginId, ctx);
+
+    // The definition is gone...
+    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(false);
+    // ...but the stored record survives, read straight from the repository —
+    // this is the durability guarantee `ctx.collections` exists to provide,
+    // and a hot reload (SHR-254) depends on it still being there.
+    expect(getRecord(`${pluginId}:baselines`, 'main')?.record).toEqual({
+      branch: 'main',
+      pct: 87,
+    });
+  });
+
+  it('a failing unregisterPluginCollections does not strand the later steps', async () => {
+    const pluginId = 'lc-collections-fail';
+    const ctx = createPluginContext(pluginId, ['harnesses.register']);
+    ctx.harnesses.register(fakeHarness('fake'));
+
+    const spy = vi
+      .spyOn(collectionsModule, 'unregisterPluginCollections')
+      .mockImplementation(() => {
+        throw new Error('collections boom');
+      });
+    try {
+      const report = await unmountPlugin(pluginId, ctx);
+
+      expect(report.failures).toContainEqual({ step: 'collections', error: 'collections boom' });
+      // The later steps (harnesses, etc.) still ran despite the failure above.
+      expect(() => getHarness(`${pluginId}:fake`)).toThrow();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

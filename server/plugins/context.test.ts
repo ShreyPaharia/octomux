@@ -69,7 +69,8 @@ vi.mock('./policy.js', () => ({
 // fs module through the mock above — that mock must be registered before
 // context.ts is pulled in. bun's mock.module doesn't hoist, so this must be
 // a dynamic import, not a static one at the top of the file.
-const { createPluginContext, revokePluginContext } = await import('./context.js');
+const { createPluginContext, revokePluginContext, disposePluginContext } =
+  await import('./context.js');
 const { qualify } = await import('./qualify.js');
 const { getLogger, setLogger } = await import('../logger.js');
 const { default: pino } = await import('pino');
@@ -83,6 +84,8 @@ const { writeTaskArtifact: mockWriteTaskArtifact, listTaskArtifacts: mockListTas
 const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreCompute } =
   await import('../compute/registry.js');
 const { resetPluginGrants } = await import('./grants.js');
+const { resetCollections } = await import('./collections.js');
+const { createTestDb } = await import('../test-helpers.js');
 
 /** Pipe pino output into an in-memory buffer of parsed JSON lines. */
 function captureLogs() {
@@ -119,6 +122,8 @@ beforeEach(() => {
   vi.mocked(mockListTaskArtifacts).mockReset();
   resetCompute();
   resetPluginGrants();
+  resetCollections();
+  createTestDb();
   registeredPolicyHooks.length = 0;
 });
 
@@ -131,6 +136,8 @@ const ALL_CAPS = [
   'http.route',
   'facts.define',
   'facts.put',
+  'collections.define',
+  'collections.write',
   'ui.panel',
   'policy.intercept',
 ] as const;
@@ -656,6 +663,10 @@ describe('grant checks (SHR-259)', () => {
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/not granted/);
     expect(() => ctx.facts.define({ type: 'x', schema: {} })).toThrow(/not granted/);
     expect(() => ctx.facts.put('task-1', 'x', {})).toThrow(/not granted/);
+    expect(() => ctx.collections.define({ name: 'x', key: 'id', schema: {} })).toThrow(
+      /not granted/,
+    );
+    expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
     expect(() => ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' })).toThrow(
       /not granted/,
     );
@@ -686,10 +697,12 @@ describe('grant checks (SHR-259)', () => {
     await expect(ctx.artifacts.list('task-1')).rejects.not.toThrow(/not granted/);
   });
 
-  it('reads (facts.read, facts.watch) and self-owned members (settings, kv, logger, effect) stay ungated', () => {
+  it('reads (facts.read, facts.watch, collections.query, collections.watch) and self-owned members (settings, kv, logger, effect) stay ungated', () => {
     const ctx = createPluginContext('nogrants3');
     expect(() => ctx.facts.read('task-1')).not.toThrow();
     expect(() => ctx.facts.watch('other:type', () => {})).not.toThrow();
+    expect(() => ctx.collections.query('other:things')).not.toThrow();
+    expect(() => ctx.collections.watch('other:things', () => {})).not.toThrow();
     expect(() => ctx.effect(() => {})).not.toThrow();
     expect(typeof ctx.settings.get).toBe('function');
     expect(typeof ctx.kv.get).toBe('function'); // throws for its own "not available" reason, not a grant
@@ -752,6 +765,22 @@ describe('grant checks (SHR-259)', () => {
         result.catch(() => {});
       },
     ],
+    [
+      'collections.define',
+      (ctx: ReturnType<typeof createPluginContext>) =>
+        ctx.collections.define({ name: 'x', key: 'id', schema: {} }),
+    ],
+    [
+      'collections.write',
+      // Same reasoning as facts.put above: the collection was never defined
+      // for this plugin id, so the returned promise rejects downstream in
+      // collections.ts — irrelevant here, this only pins the grant check
+      // itself not throwing synchronously. Silence the rejection.
+      (ctx: ReturnType<typeof createPluginContext>) => {
+        const result = ctx.collections.put('x', { id: '1' });
+        result.catch(() => {});
+      },
+    ],
   ])('a call granted only "%s" is allowed through, everything else stays denied', (cap, call) => {
     const ctx = createPluginContext('onegrant', [cap as (typeof ALL_CAPS)[number]]);
     expect(() => call(ctx)).not.toThrow();
@@ -795,6 +824,70 @@ describe('ctx.policy', () => {
     const ctx = createPluginContext('policy-plugin-5', ['policy.intercept']);
     revokePluginContext(ctx);
     expect(() => ctx.policy.intercept('task.launch', () => undefined)).toThrow(/revoked/);
+  });
+});
+
+describe('ctx.collections (SHR-275)', () => {
+  it('define throws without collections.define, succeeds with it', () => {
+    const ctx = createPluginContext('coll-define');
+    expect(() => ctx.collections.define({ name: 'x', key: 'id', schema: {} })).toThrow(
+      /not granted/,
+    );
+
+    const granted = createPluginContext('coll-define-2', ['collections.define']);
+    expect(() =>
+      granted.collections.define({ name: 'x', key: 'id', schema: { type: 'object' } }),
+    ).not.toThrow();
+  });
+
+  it('put throws without collections.write, succeeds (and actually stores) with it', async () => {
+    const ctx = createPluginContext('coll-write');
+    expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
+
+    const granted = createPluginContext('coll-write-2', [
+      'collections.define',
+      'collections.write',
+    ]);
+    granted.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
+    await expect(
+      granted.collections.put('baselines', { id: '1', ok: true }),
+    ).resolves.toBeUndefined();
+    expect(await granted.collections.query('baselines')).toEqual([{ id: '1', ok: true }]);
+  });
+
+  it('query and watch work without any grant — reads are ungated, like facts.read', async () => {
+    const owner = createPluginContext('coll-owner-read', [
+      'collections.define',
+      'collections.write',
+    ]);
+    owner.collections.define({ name: 'things', key: 'id', schema: { type: 'object' } });
+    await owner.collections.put('things', { id: '1' });
+
+    const reader = createPluginContext('coll-reader-noGrant');
+    await expect(reader.collections.query('coll-owner-read:things')).resolves.toEqual([
+      { id: '1' },
+    ]);
+    expect(() => reader.collections.watch('coll-owner-read:things', () => {})).not.toThrow();
+  });
+
+  it("watch's unsubscribe is auto-disposed by disposePluginContext — a watcher on a sibling's collection stops firing once the watching plugin is disposed", async () => {
+    const owner = createPluginContext('coll-owner-3', ['collections.define', 'collections.write']);
+    owner.collections.define({ name: 'events', key: 'id', schema: { type: 'object' } });
+
+    const watcherCtx = createPluginContext('coll-watcher-3');
+    const seen: unknown[] = [];
+    watcherCtx.collections.watch('coll-owner-3:events', (record) => seen.push(record));
+
+    await owner.collections.put('events', { id: '1' });
+    expect(seen).toEqual([{ id: '1' }]);
+
+    await disposePluginContext(watcherCtx);
+
+    await owner.collections.put('events', { id: '2' });
+    // The watcher's own plugin was disposed, so its subscription is gone —
+    // even though `owner` (which defines and owns the collection) was never
+    // touched.
+    expect(seen).toEqual([{ id: '1' }]);
   });
 });
 

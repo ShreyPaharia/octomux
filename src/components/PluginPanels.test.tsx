@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from '../bun-test.js';
 import { render, screen } from '@testing-library/react';
 
-const contributionsFixture = [
+const factContributionFixture = [
   {
     pluginId: 'coverage-bot',
     slot: 'task.panel' as const,
@@ -13,15 +13,41 @@ const contributionsFixture = [
   },
 ];
 
+const collectionContributionFixture = [
+  {
+    pluginId: 'coverage-bot',
+    slot: 'task.panel' as const,
+    collection: 'baselines',
+    collectionName: 'coverage-bot:baselines',
+    as: 'stat',
+    title: 'Baselines',
+    value: 'pct',
+  },
+];
+
+const neitherBoundContributionFixture = [
+  {
+    pluginId: 'coverage-bot',
+    slot: 'task.panel' as const,
+    as: 'stat',
+    title: 'Nothing',
+  },
+];
+
 const usePluginUiContributionsMock = vi.fn();
 const usePluginFactsMock = vi.fn();
+const usePluginCollectionMock = vi.fn();
 
 vi.mock('@/lib/plugin-ui', () => ({
   usePluginUiContributions: usePluginUiContributionsMock,
   usePluginFacts: usePluginFactsMock,
+  usePluginCollection: usePluginCollectionMock,
 }));
 
 const { PluginPanels } = await import('./PluginPanels');
+
+const EMPTY_FACTS = { facts: [], loading: false, error: null };
+const EMPTY_RECORDS = { records: [], loading: false, error: null };
 
 describe('PluginPanels', () => {
   it('renders nothing when there are no contributions for the slot', () => {
@@ -30,15 +56,16 @@ describe('PluginPanels', () => {
       loading: false,
       error: null,
     });
-    usePluginFactsMock.mockReturnValue({ facts: [], loading: false, error: null });
+    usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+    usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
 
     const { container } = render(<PluginPanels slot="task.panel" taskId="t1" />);
     expect(container.querySelector('[data-testid="plugin-panels"]')).toBeNull();
   });
 
-  it('renders a panel per contribution, with title and rendered value', () => {
+  it('renders a fact-bound panel per contribution, with title and rendered value', () => {
     usePluginUiContributionsMock.mockReturnValue({
-      contributions: contributionsFixture,
+      contributions: factContributionFixture,
       loading: false,
       error: null,
     });
@@ -55,19 +82,75 @@ describe('PluginPanels', () => {
       loading: false,
       error: null,
     });
+    usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
 
     render(<PluginPanels slot="task.panel" taskId="t1" />);
     expect(screen.getByText('Coverage')).toBeTruthy();
     expect(screen.getByText('91')).toBeTruthy();
+    // Fact-bound: the collection hook's data must never reach the renderer.
+    expect(usePluginCollectionMock).toHaveBeenCalled();
+  });
+
+  it('renders a collection-bound panel through the named renderer', () => {
+    usePluginUiContributionsMock.mockReturnValue({
+      contributions: collectionContributionFixture,
+      loading: false,
+      error: null,
+    });
+    usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+    usePluginCollectionMock.mockReturnValue({
+      records: [
+        {
+          collection: 'coverage-bot:baselines',
+          key: 'main',
+          record: { pct: 77 },
+          createdAt: 'c',
+          updatedAt: 'u',
+        },
+      ],
+      loading: false,
+      error: null,
+    });
+
+    render(<PluginPanels slot="task.panel" taskId="t1" />);
+    expect(screen.getByText('Baselines')).toBeTruthy();
+    expect(screen.getByText('77')).toBeTruthy();
+  });
+
+  it('does not crash when a contribution has neither a fact nor a collection binding', () => {
+    usePluginUiContributionsMock.mockReturnValue({
+      contributions: neitherBoundContributionFixture,
+      loading: false,
+      error: null,
+    });
+    usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+    usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
+
+    render(<PluginPanels slot="task.panel" taskId="t1" />);
+    expect(screen.getByText('Nothing')).toBeTruthy();
   });
 
   it('shows an error instead of the renderer when the facts fetch fails', () => {
     usePluginUiContributionsMock.mockReturnValue({
-      contributions: contributionsFixture,
+      contributions: factContributionFixture,
       loading: false,
       error: null,
     });
     usePluginFactsMock.mockReturnValue({ facts: [], loading: false, error: 'boom' });
+    usePluginCollectionMock.mockReturnValue(EMPTY_RECORDS);
+
+    render(<PluginPanels slot="task.panel" taskId="t1" />);
+    expect(screen.getByText('boom')).toBeTruthy();
+  });
+
+  it('shows an error instead of the renderer when the collection fetch fails', () => {
+    usePluginUiContributionsMock.mockReturnValue({
+      contributions: collectionContributionFixture,
+      loading: false,
+      error: null,
+    });
+    usePluginFactsMock.mockReturnValue(EMPTY_FACTS);
+    usePluginCollectionMock.mockReturnValue({ records: [], loading: false, error: 'boom' });
 
     render(<PluginPanels slot="task.panel" taskId="t1" />);
     expect(screen.getByText('boom')).toBeTruthy();

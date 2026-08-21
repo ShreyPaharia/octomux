@@ -26,6 +26,7 @@ import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { router as pluginUiRouter } from './routes/plugin-ui.js';
 import { router as pluginFactsRouter } from './routes/plugin-facts.js';
+import { router as pluginCollectionsRouter } from './routes/plugin-collections.js';
 import { router as taskArtifactsRouter } from './routes/task-artifacts.js';
 import { router as pluginsRouter } from './routes/plugins.js';
 import { listWorkflows } from './workflows/registry.js';
@@ -56,6 +57,7 @@ export function setupRoutes(app: Express): void {
   app.use('/api/p', createPluginParentRouter());
   app.use(pluginUiRouter);
   app.use(pluginFactsRouter);
+  app.use(pluginCollectionsRouter);
   app.use(taskArtifactsRouter);
   app.use(pluginsRouter);
 

@@ -19,6 +19,7 @@ import { listCompute } from '../compute/registry.js';
 import { listPluginRoutes, RESERVED_ROUTE_PLUGIN_IDS } from './http-registry.js';
 import { listUiContributions } from './ui-registry.js';
 import { listPluginFactTypes, CORE_FACT_TYPES } from './facts.js';
+import { listPluginCollections } from './collections.js';
 import type { CatalogEntry, LoadReport } from '@octomux/plugin-api';
 
 // getMountedPlugin/listMountedPluginIds come from loader.js, which itself
@@ -42,6 +43,8 @@ export interface PluginRegistrations {
   routes: string[];
   uiSlots: string[];
   factTypes: string[];
+  /** `ctx.collections.define()` names owned by this plugin (SHR-275). */
+  collectionNames: string[];
 }
 
 function belongsTo(pluginId: string, id: string): boolean {
@@ -71,11 +74,12 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
       .filter((c) => c.pluginId === pluginId)
       .map((c) => c.slot),
     factTypes: listPluginFactTypes(pluginId),
+    collectionNames: listPluginCollections(pluginId),
   };
 }
 
 /** Flattened `provides[]` form of `pluginRegistrations()`. Order: workflows,
- *  harnesses, integrations, routes, ui, facts. */
+ *  harnesses, integrations, routes, ui, facts, collections. */
 function provides(reg: PluginRegistrations): string[] {
   return [
     ...reg.workflowKinds.map((k) => `workflow:${k}`),
@@ -84,6 +88,7 @@ function provides(reg: PluginRegistrations): string[] {
     ...reg.routes.map((r) => `route:${r}`),
     ...reg.uiSlots.map((s) => `ui:${s}`),
     ...reg.factTypes.map((f) => `fact:${f}`),
+    ...reg.collectionNames.map((c) => `collection:${c}`),
   ];
 }
 
@@ -116,6 +121,9 @@ function coreRegistrations(): PluginRegistrations {
     // contributions today, so this is always empty, not filtered.
     uiSlots: [],
     factTypes: [...CORE_FACT_TYPES],
+    // Core never calls ctx.collections.define() — nothing in server/ defines
+    // a collection today, so this is always empty, not filtered.
+    collectionNames: [],
   };
 }
 
