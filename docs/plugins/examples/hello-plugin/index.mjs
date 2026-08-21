@@ -39,5 +39,9 @@ export async function apply(ctx) {
     },
   });
 
+  // Read-only — shows this plugin isn't the only thing octomux loaded.
+  // ctx.catalog.list() has no write path; see docs/plugins/api-reference.md#ctxcatalog.
+  ctx.logger.info({ installed: ctx.catalog.list().map((e) => e.id) }, 'catalog');
+
   ctx.logger.info({ pluginId: ctx.id }, 'octomux-plugin-hello: apply() done');
 }

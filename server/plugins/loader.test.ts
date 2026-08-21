@@ -13,7 +13,7 @@ import {
 import { manifestPath as defaultManifestPath } from './paths.js';
 import { listHarnesses, resetHarnesses, getHarness } from '../harnesses/registry.js';
 import { getWorkflow } from '../workflows/registry.js';
-import { resetPluginRoutes, pluginRouteCounts } from './http-registry.js';
+import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetFacts } from './facts.js';
 import { subscribeServerEvents } from '../events.js';
 
@@ -784,7 +784,7 @@ plugins:
     expect(report.failed[0]).toMatchObject({ id: 'partialfail', phase: 'apply' });
     // Nothing survives the failed apply() — the route it registered before
     // throwing is already gone, and the plugin was never added to `mounted`.
-    expect(pluginRouteCounts()['partialfail']).toBeUndefined();
+    expect(listPluginRoutes('partialfail')).toEqual([]);
     expect(getMountedPlugin('partialfail')).toBeUndefined();
 
     // Fix the source (no throw) and reload — must succeed, not error with
@@ -806,7 +806,7 @@ plugins:
     });
 
     expect(result.ok).toBe(true);
-    expect(pluginRouteCounts()['partialfail']).toBe(1);
+    expect(listPluginRoutes('partialfail')).toEqual(['GET /thing']);
   });
 
   it('broadcasts plugin:ui-updated on a successful mount', async () => {

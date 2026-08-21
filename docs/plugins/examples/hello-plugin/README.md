@@ -85,3 +85,13 @@ the plugin has loaded.
 This is separate from `ctx.settings` (general plugin config, stored under
 `settings.plugins.hello`, reached via `PATCH /api/settings` — see
 `docs/plugins/README.md` §Settings). This example doesn't use `ctx.settings`.
+
+## What the catalog log line shows
+
+`apply()` also logs `ctx.catalog.list().map((e) => e.id)` — with just this
+plugin installed that's `["core"]`, not `["hello", "core"]`: the loader only
+marks a plugin mounted (what `ctx.catalog` reads) AFTER its `apply()`
+returns, so a plugin never sees itself in the catalog from inside its own
+`apply()`, only siblings that mounted earlier plus core. It does see itself
+from a route handler or anything else that runs after `apply()` finishes.
+See `docs/plugins/README.md` §Reading what is installed.

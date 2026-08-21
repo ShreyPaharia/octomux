@@ -106,6 +106,15 @@ export async function readFacts(taskId: string, opts?: FactQuery): Promise<Fact[
   return readFactsForTask(taskId, opts);
 }
 
+/** Qualified fact types a plugin defined. For `ctx.catalog` / unmount accounting. */
+export function listPluginFactTypes(pluginId: string): string[] {
+  const result: string[] = [];
+  for (const [qualified, def] of definitions) {
+    if (def.pluginId === pluginId) result.push(qualified);
+  }
+  return result;
+}
+
 /** Whether a QUALIFIED fact type has a live `define()` registration. Used by
  *  `ui-registry.ts` to warn on a `ctx.ui.panel({ fact })` typo — a binding
  *  whose fact type nothing ever defined renders a permanently empty panel

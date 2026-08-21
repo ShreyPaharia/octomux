@@ -80,9 +80,7 @@ describe('octomux doctor', () => {
     expect(output).toContain('apply');
   });
 
-  it('prints the route count per plugin when the report carries one', async () => {
-    // Cast: `routeCounts` lands on LoadReport via a sibling change not yet
-    // merged — see the type note in doctor.ts.
+  it('prints a provides summary for a plugin with routes and a workflow', async () => {
     writeReport({
       loaded: [
         {
@@ -92,10 +90,15 @@ describe('octomux doctor', () => {
           resolvedPath: '/x',
           order: 0,
           applyMs: 1.1,
+          provides: [
+            'route:GET /coverage/:task',
+            'route:POST /coverage/:task',
+            'workflow:coverage-bot:changelog',
+          ],
         },
         {
-          id: 'no-routes',
-          name: 'no-routes-plugin',
+          id: 'no-provides',
+          name: 'no-provides-plugin',
           version: '1.0.0',
           resolvedPath: '/y',
           order: 1,
@@ -105,8 +108,7 @@ describe('octomux doctor', () => {
       failed: [],
       manifestPath: '/fake/octomux.yml',
       safeMode: false,
-      routeCounts: { 'coverage-bot': 3 },
-    } as LoadReport);
+    });
 
     vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
 
@@ -115,9 +117,10 @@ describe('octomux doctor', () => {
 
     const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(output).toContain('coverage-bot (coverage-bot-plugin@1.0.0)');
-    expect(output).toContain('3 routes');
-    // A plugin with no entry in routeCounts gets no route-count suffix at all.
-    expect(output).toContain('no-routes (no-routes-plugin@1.0.0) — 0.5ms\n');
+    expect(output).toContain('1 workflow, 2 routes');
+    // An older persisted report with no `provides` at all gets no summary
+    // suffix — must not read as "0 of everything".
+    expect(output).toContain('no-provides (no-provides-plugin@1.0.0) — 0.5ms\n');
   });
 
   it('reports JSON mode with the raw persisted report', async () => {
@@ -137,8 +140,6 @@ describe('octomux doctor', () => {
   });
 
   it('leads with the manifest error instead of a clean bill of health', async () => {
-    // Cast: `manifestError`/`loadedAt` land on LoadReport via a sibling
-    // change not yet merged — see the type note in doctor.ts.
     writeReport({
       loaded: [],
       failed: [],
@@ -146,7 +147,7 @@ describe('octomux doctor', () => {
       safeMode: false,
       manifestError: 'invalid plugin manifest: YAML anchors/aliases are not allowed',
       loadedAt: '2026-08-17T00:00:00.000Z',
-    } as LoadReport);
+    });
 
     vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
 

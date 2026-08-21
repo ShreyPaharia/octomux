@@ -41,8 +41,16 @@ export interface PluginContext {
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly http: HttpRegistrar;
+  readonly facts: FactsRegistrar;
+  readonly ui: UiRegistrar;
+  readonly catalog: CatalogReader;
+  effect(dispose: () => void | Promise<void>): void;
 }
 ```
+
+`http`, `facts`, `ui`, and `effect` aren't documented here yet — that's other
+tickets' debt. `catalog` is below.
 
 One context is built per manifest row (`createPluginContext(row.id)` in
 `context.ts`) and handed only to that row's `apply()`/`reconcile()`.
@@ -192,6 +200,38 @@ The eight bold-"yes" functions are exactly `HARNESS_REQUIRED_FN_FIELDS` in
 hot path (task launch, hook install/uninstall, settings validate/merge, flag
 resolution).
 
+### `ctx.catalog`
+
+```ts
+interface CatalogEntry {
+  id: string; // bare plugin id, or 'core'
+  kind: 'plugin' | 'core';
+  provides: string[]; // 'workflow:demo:changelog' | 'harness:demo:foo' | …
+  source: string; // 'pkg@1.2.3' | '/abs/local/path' | 'built-in'
+}
+interface CatalogReader {
+  list(): CatalogEntry[];
+}
+```
+
+```js
+const installed = ctx.catalog.list();
+ctx.logger.info({ installed: installed.map((e) => e.id) }, 'who else is here');
+```
+
+Read-only — `ctx.catalog` has exactly one method, `list()`. There is no write
+path and no override path: reading what is installed is a query, not an
+implementation choice, so this is not a fourth registrar and it never will
+grow a `register()`. See [`#not-seams`](#not-seams).
+
+Ordering caveat: the loader (`server/plugins/loader.ts`) only marks a row
+mounted — what `ctx.catalog` iterates — AFTER its `apply()` returns
+successfully. Called from inside your own `apply()`, `ctx.catalog.list()`
+never includes yourself, even in a single-plugin manifest; it includes
+siblings that finished mounting earlier (manifest order) and always includes
+`core`. Call it later — a route handler, a `run`, anything that executes
+after `apply()` finishes — to see yourself.
+
 ## Manifest (`octomux.yml`)
 
 ```ts
@@ -239,6 +279,7 @@ interface LoadedPlugin {
   order: number;
   applyMs: number;
   reconcileMs?: number; // reconcileMs: reserved, never set today
+  provides?: string[]; // same '<registry>:<qualified id>' strings as CatalogEntry.provides
 }
 interface LoadReport {
   loaded: LoadedPlugin[];
@@ -253,10 +294,18 @@ interface LoadReport {
 }
 ```
 
-Persisted to `~/.octomux/plugin-load-report.json` after every boot
-(`server/index.ts`), read by `octomux doctor` — see README §Failure modes for
-what each `phase` means and when a row lands in `failed` vs. is silently
-skipped (`disabled: true` rows are skipped, not failed).
+There is no `routeCounts` field — `provides` (SHR-268) supersedes it: a route
+is just one more `route:METHOD /path` entry alongside a plugin's workflows,
+harnesses, integrations, UI slots, and fact types, instead of its own
+one-off counter.
+
+`provides` is filled in at boot (`server/index.ts`, from the same
+`pluginProvides()` that backs `ctx.catalog.list()`) and persisted with the
+rest of the report to `~/.octomux/plugin-load-report.json`. `octomux doctor`
+reads it back through `buildCatalog()` (`server/plugins/catalog.ts`) — see
+README §Failure modes for what each `phase` means and when a row lands in
+`failed` vs. is silently skipped (`disabled: true` rows are skipped, not
+failed).
 
 ## Namespacing (`qualify()`, `server/plugins/qualify.ts`)
 
@@ -275,3 +324,13 @@ qualify('demo', 'changelog') === 'demo:changelog';
   calling `qualify()` yourself.
 - You never see the qualified form. `ctx.id` is always your row's bare id;
   what you pass to a registrar is always your bare local `kind`/`id`.
+
+## Not seams
+
+Reading what is installed is a query, not an implementation choice — it
+never picks a behavior, so it doesn't get a registrar. `ctx.catalog` is the
+worked example: it's a plain read-only method on `ctx`, not
+`ctx.catalog.register()`, and there's no override path either. The same
+reasoning applies to anything else added later that is purely a read over
+state core already owns — it belongs on `ctx` directly, not behind a new
+registrar.

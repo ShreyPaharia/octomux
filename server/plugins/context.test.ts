@@ -339,6 +339,27 @@ describe('workflow + provider payload shape guards (F2)', () => {
   });
 });
 
+describe('ctx.catalog', () => {
+  it('list() returns entries, and still works after revokePluginContext (it is a read, not a registration)', () => {
+    // `createPluginContext` here never goes through the loader's mount flow
+    // (`loader.test.ts` / `catalog.test.ts` cover a real mounted-plugin
+    // entry), so this context's own plugin id won't appear in the catalog —
+    // only the always-present `core` entry is guaranteed. What this test
+    // pins is that `list()` is a plain read: it returns data both before and
+    // after the context is revoked, unlike every other registrar.
+    const ctx = createPluginContext('catalog-demo');
+
+    const before = ctx.catalog.list();
+    expect(Array.isArray(before)).toBe(true);
+    expect(before.some((e) => e.id === 'core' && e.kind === 'core')).toBe(true);
+
+    revokePluginContext(ctx);
+
+    const after = ctx.catalog.list();
+    expect(after.some((e) => e.id === 'core' && e.kind === 'core')).toBe(true);
+  });
+});
+
 describe('revokePluginContext (F3)', () => {
   const harness = () => ({ id: 'late', displayName: 'Late', ...stubHarnessFns });
 

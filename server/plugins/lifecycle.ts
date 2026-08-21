@@ -12,13 +12,14 @@
 import { childLogger } from '../logger.js';
 import { broadcast } from '../events.js';
 import { disposePluginContext } from './context.js';
-import { unregisterPluginRoutes, pluginRouteCounts } from './http-registry.js';
+import { unregisterPluginRoutes } from './http-registry.js';
 import { unregisterPluginFacts } from './facts.js';
-import { unregisterPluginUi, listUiContributions } from './ui-registry.js';
+import { unregisterPluginUi } from './ui-registry.js';
 import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
-import { listHarnesses, unregisterHarness } from '../harnesses/registry.js';
-import { listProviders, unregisterProvider } from '../integrations/registry.js';
+import { unregisterHarness } from '../harnesses/registry.js';
+import { unregisterProvider } from '../integrations/registry.js';
+import { pluginRegistrations } from './catalog.js';
 import type { PluginContext } from '@octomux/plugin-api';
 
 const logger = childLogger('plugins/lifecycle');
@@ -34,6 +35,7 @@ export interface UnmountReleased {
   workflowKinds: string[];
   harnessIds: string[];
   providerKinds: string[];
+  factTypes: string[];
   /** `ctx.effect()` callbacks that ran (successfully or not). */
   effects: number;
 }
@@ -61,6 +63,11 @@ export interface PluginUnloadability {
  * a signal from `server/plugins/context.ts` — that file is pinned/DO NOT
  * EDIT for this task, and every workflow a plugin owns is already qualified
  * `<pluginId>:<kind>`, so a prefix scan is sufficient with no new plumbing.
+ *
+ * Does NOT go through `pluginRegistrations()` (`catalog.ts`) even though
+ * that now covers the equivalent workflow-kind scan: this needs the
+ * workflow OBJECT to read `wf.apiRouter` off it, and the catalog only ever
+ * hands back kind strings.
  */
 export function getPluginUnloadability(pluginId: string): PluginUnloadability {
   const prefix = `${pluginId}:`;
@@ -114,33 +121,26 @@ async function step<T>(
 export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promise<UnmountReport> {
   const failures: UnmountFailure[] = [];
 
-  // Snapshot counts BEFORE each unregister call — the registries only expose
-  // "what's there now", not "what did I just remove".
-  const routeCount = pluginRouteCounts()[pluginId] ?? 0;
+  // Snapshot BEFORE any unregister call runs — the registries (via
+  // `pluginRegistrations()`) only expose "what's there now", not "what did I
+  // just remove". One catalog read replaces the four hand-rolled prefix
+  // scans this used to do separately.
+  const registered = pluginRegistrations(pluginId);
+
   await step(pluginId, failures, 'routes', () => unregisterPluginRoutes(pluginId));
 
   await step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
-  // No public count for fact-type definitions — `facts.ts` is DO NOT EDIT for
-  // this task and exposes no getter beyond `unregisterPluginFacts` itself.
 
-  const uiCount = listUiContributions().filter((c) => c.pluginId === pluginId).length;
   await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
 
   const workflowKinds =
     (await step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId))) ?? [];
 
-  const prefix = `${pluginId}:`;
-  const harnessIds = listHarnesses()
-    .map((h) => h.id)
-    .filter((id) => id.startsWith(prefix));
-  for (const id of harnessIds) {
+  for (const id of registered.harnessIds) {
     await step(pluginId, failures, `harness:${id}`, () => unregisterHarness(id));
   }
 
-  const providerKinds = listProviders()
-    .map((p) => p.kind)
-    .filter((kind) => kind.startsWith(prefix));
-  for (const kind of providerKinds) {
+  for (const kind of registered.providerKinds) {
     await step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
   }
 
@@ -151,11 +151,12 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   }
 
   const released: UnmountReleased = {
-    routes: routeCount,
-    uiContributions: uiCount,
+    routes: registered.routes.length,
+    uiContributions: registered.uiSlots.length,
     workflowKinds,
-    harnessIds,
-    providerKinds,
+    harnessIds: registered.harnessIds,
+    providerKinds: registered.providerKinds,
+    factTypes: registered.factTypes,
     effects: effectFailures.length,
   };
 

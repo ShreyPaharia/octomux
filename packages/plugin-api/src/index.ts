@@ -20,12 +20,41 @@ export interface PluginContext {
   readonly facts: FactsRegistrar;
   readonly ui: UiRegistrar;
   /**
+   * `ctx.catalog` — a READ over what is currently installed (SHR-268): this
+   * plugin's own registrations plus every sibling's and core's, as one flat
+   * list. There is deliberately no write path and no override path here —
+   * reading what is installed is a query, not an implementation choice, so
+   * this is NOT a registrar and has no `register()`. Backed by the same live
+   * registries every other `ctx.*` surface writes into.
+   */
+  readonly catalog: CatalogReader;
+  /**
    * Registers a teardown callback run when this plugin unmounts, in reverse
    * registration order. Everything registered *through* `ctx` is tracked
    * automatically; `effect` covers what the plugin owns itself — timers,
    * watchers, sockets. Anything not routed through `ctx` cannot be tracked.
    */
   effect(dispose: () => void | Promise<void>): void;
+}
+
+/**
+ * One installed unit — a plugin or core itself — as `ctx.catalog` reports it.
+ */
+export interface CatalogEntry {
+  /** Bare plugin id, or the literal `'core'`. */
+  id: string;
+  kind: 'plugin' | 'core';
+  /** Everything this unit contributes, as `<registry>:<qualified id>` strings —
+   *  `workflow:demo:changelog`, `harness:demo:foo`, `integration:jira`,
+   *  `route:GET /coverage/:task`, `ui:task.panel`, `fact:demo:coverage`. */
+  provides: string[];
+  /** `name@version` for a plugin (resolved path when a local-path row has no
+   *  version), `'built-in'` for core. */
+  source: string;
+}
+
+export interface CatalogReader {
+  list(): CatalogEntry[];
 }
 
 // Structural minimum the host satisfies. NOT pino's Logger — a types-only package
@@ -215,6 +244,11 @@ export interface LoadedPlugin {
   order: number;
   applyMs: number;
   reconcileMs?: number;
+  /** Everything this plugin contributed, `<registry>:<qualified id>` form —
+   *  same shape as `CatalogEntry.provides`, for `octomux doctor`'s no-server
+   *  `buildCatalog()` (SHR-268). Optional for the same reason as `loadedAt`:
+   *  an older persisted report won't have it. */
+  provides?: string[];
 }
 export interface LoadReport {
   loaded: LoadedPlugin[];
@@ -234,12 +268,6 @@ export interface LoadReport {
    *  `LoadReport` literals (older persisted reports, fixtures) stay valid —
    *  `loadPlugins()` itself always sets it. */
   loadedAt?: string;
-  /** Route count per plugin id, for `octomux doctor` (SHR-253). Written by
-   *  `server/index.ts` after the loader runs, from `pluginRouteCounts()`.
-   *  Optional for the same reason as `loadedAt`: a report persisted by an
-   *  older build won't have it, and doctor omits the count rather than
-   *  reporting zero. */
-  routeCounts?: Record<string, number>;
 }
 
 export const PLUGIN_API_VERSION = 0;
