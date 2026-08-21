@@ -69,7 +69,11 @@ styles) verified against the real loader.
 For a bigger, non-toy example — a real compute provider that runs a task's
 git worktree and processes on another machine over SSH — see
 [`examples/ssh-compute`](./examples/ssh-compute), covered in
-[§`ctx.compute.register(p)`](#ctxcomputeregisterp) below.
+[§`ctx.compute.register(p)`](#ctxcomputeregisterp) below. For a surface
+plugin — a `discord` surface that renders panels to Discord markdown and
+answers prompts — see [`examples/discord-surface`](./examples/discord-surface),
+covered in [§`ctx.surfaces.register(surface)`](#ctxsurfacesregistersurface)
+below.
 
 ## The three registrars
 
@@ -206,6 +210,49 @@ See [`examples/ssh-compute`](./examples/ssh-compute) for a complete provider
 built on exactly this — it runs a task over SSH, with a README covering
 config/secrets, remote-box prerequisites, the trust model, and precisely
 what its test suite verifies versus what still needs a real remote host.
+
+### `ctx.surfaces.register(surface)`
+
+A fifth registrar: it adds a place octomux presents itself to a human. Core
+already speaks four — `web`, `cli`, `slack`, `telegram` — all frozen before
+any plugin loads, same as `ctx.compute`'s `local`. This works only because
+`ctx.ui` panels are declarative bindings, not components: a panel written
+before your surface existed still renders on it, unchanged.
+
+```js
+ctx.surfaces.register({
+  kind: 'discord', // local id — becomes "<row-id>:discord"
+  renderers: ['markdown', 'json'],
+  render(panel) {
+    /* ... turn one resolved panel into Discord-flavoured markdown */
+  },
+  async prompt(ask) {
+    /* optional — ask a human a question on this surface; omit it and the
+       surface is read-only */
+  },
+});
+```
+
+The host resolves `panel.as` → `panel.renderer` against your `renderers`
+list **before** calling `render` — a surface that declares
+`['markdown']` only ever gets called with `renderer: 'markdown'`, never with
+a renderer name it didn't declare. Unsupported degrades to your `fallback`
+(default `'json'`), never drops the panel.
+
+`prompt` is optional; without it the surface is read-only, and asking it
+throws. **All four core surfaces are read-only today** — octomux's only
+human-question path is the DB-backed approval gate
+(`server/orchestrator/gate.ts`), untouched by this registrar — so a plugin
+surface implementing `prompt` is doing something no core surface does yet.
+
+Requires the `surfaces.register` grant. Full field-by-field reference,
+including the renderer-resolution table and the qualification/freeze rule:
+[`api-reference.md` §`ctx.surfaces`](./api-reference.md#ctxsurfaces).
+
+See [`examples/discord-surface`](./examples/discord-surface) for a complete
+surface — renders panels to Discord markdown and implements `prompt`, with
+its README stating plainly what would need a real Discord token/webhook to
+actually post.
 
 ## Kind presets (`kinds/*.json`)
 

@@ -16,6 +16,7 @@ import { listWorkflows } from '../workflows/registry.js';
 import { listHarnesses } from '../harnesses/registry.js';
 import { listProviders } from '../integrations/registry.js';
 import { listCompute } from '../compute/registry.js';
+import { listSurfaces } from '../surfaces/index.js';
 import { listPluginRoutes, RESERVED_ROUTE_PLUGIN_IDS } from './http-registry.js';
 import { listUiContributions } from './ui-registry.js';
 import { listPluginFactTypes, CORE_FACT_TYPES } from './facts.js';
@@ -39,6 +40,8 @@ export interface PluginRegistrations {
   providerKinds: string[];
   /** `ctx.compute.register()` kinds owned by this plugin (SHR-261). */
   computeKinds: string[];
+  /** `ctx.surfaces.register()` kinds owned by this plugin (SHR-267). */
+  surfaceKinds: string[];
   /** `"METHOD /path"` entries, from `listPluginRoutes()`. */
   routes: string[];
   uiSlots: string[];
@@ -69,6 +72,9 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
     computeKinds: listCompute()
       .map((c) => c.kind)
       .filter((kind) => belongsTo(pluginId, kind)),
+    surfaceKinds: listSurfaces()
+      .map((s) => s.kind)
+      .filter((kind) => belongsTo(pluginId, kind)),
     routes: listPluginRoutes(pluginId),
     uiSlots: listUiContributions()
       .filter((c) => c.pluginId === pluginId)
@@ -79,12 +85,13 @@ export function pluginRegistrations(pluginId: string): PluginRegistrations {
 }
 
 /** Flattened `provides[]` form of `pluginRegistrations()`. Order: workflows,
- *  harnesses, integrations, routes, ui, facts, collections. */
+ *  harnesses, integrations, surfaces, routes, ui, facts, collections. */
 function provides(reg: PluginRegistrations): string[] {
   return [
     ...reg.workflowKinds.map((k) => `workflow:${k}`),
     ...reg.harnessIds.map((h) => `harness:${h}`),
     ...reg.providerKinds.map((p) => `integration:${p}`),
+    ...reg.surfaceKinds.map((s) => `surface:${s}`),
     ...reg.routes.map((r) => `route:${r}`),
     ...reg.uiSlots.map((s) => `ui:${s}`),
     ...reg.factTypes.map((f) => `fact:${f}`),
@@ -112,6 +119,9 @@ function coreRegistrations(): PluginRegistrations {
       .filter(isCore),
     computeKinds: listCompute()
       .map((c) => c.kind)
+      .filter(isCore),
+    surfaceKinds: listSurfaces()
+      .map((s) => s.kind)
       .filter(isCore),
     providerKinds: listProviders()
       .map((p) => p.kind)

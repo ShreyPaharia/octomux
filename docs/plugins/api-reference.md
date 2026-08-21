@@ -50,6 +50,7 @@ export interface PluginContext {
   effect(dispose: () => void | Promise<void>): void;
   readonly compute: ComputeRegistrar;
   readonly agents: AgentRunner;
+  readonly surfaces: SurfaceRegistrar;
 }
 ```
 
@@ -562,6 +563,123 @@ Expose one yourself with `ctx.http.route` if you want a button.
 
 Until `ctx.collections` lands, a `{ collection }` source throws with a message
 saying so — pass `{ items }` in the meantime.
+
+## `ctx.surfaces`
+
+```ts
+interface SurfaceRegistrar {
+  register(surface: SurfaceDefinition): void; // requires the `surfaces.register` grant
+}
+```
+
+Registers a **surface** — a place octomux presents itself to a human. Core
+already speaks four: `web`, `cli`, `slack`, `telegram`. All four are frozen
+before any plugin loads, same as `local` under `ctx.compute` — a plugin can
+never redefine one. `ctx.surfaces.register` is the seam that adds a fifth
+without editing core, and it works only because `ctx.ui` panels are
+declarative **bindings**, not components (see `UiRegistrar` above): a
+binding names a fact type and a renderer, never a DOM node, a Block Kit
+block, or an ANSI escape, so a panel written before your surface existed
+renders on it unchanged. See
+[`examples/discord-surface`](./examples/discord-surface) for a complete
+worked example.
+
+```ts
+interface SurfaceDefinition {
+  kind: string; // local id — becomes "<row-id>:<kind>"
+  renderers: Array<UiRenderer | string>; // renderer names this surface draws natively
+  fallback?: string; // renderer for anything else it can't draw; default 'json'
+  render?(panel: SurfacePanel): string | undefined; // REQUIRED for a plugin surface
+  prompt?(ask: SurfacePrompt): Promise<string | undefined>; // absent → read-only
+}
+```
+
+| Field       | Type                                                   | Required by `ctx.surfaces.register`?                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`      | `string`                                               | **yes** — non-empty, becomes the local half of `<row-id>:<kind>`                                                                                                                                                          |
+| `renderers` | `Array<UiRenderer \| string>`                          | **yes**, must be an array                                                                                                                                                                                                 |
+| `fallback`  | `string`                                               | no — defaults to `'json'`                                                                                                                                                                                                 |
+| `render`    | `(panel: SurfacePanel) => string \| undefined`         | **yes for a plugin surface** — the registrar rejects one that omits it. Core's `web` is the one exception: the browser owns every renderer and reads the binding table over REST, so it registers with no `render` at all |
+| `prompt`    | `(ask: SurfacePrompt) => Promise<string \| undefined>` | no — absent means the surface is **read-only**                                                                                                                                                                            |
+
+### The renderer contract
+
+A surface declares the renderer names it draws (`renderers`). The host
+resolves every panel against that list **before** calling `render` — your
+`render` implementation never sees a renderer name outside what it declared:
+
+| Field            | Meaning                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `panel.as`       | what the `ctx.ui` binding asked for                                                                                             |
+| `panel.renderer` | what this surface actually draws — `panel.as` if `renderers` includes it, otherwise the surface's `fallback` (default `'json'`) |
+
+Degraded, never dropped, never blank — the same rule the web client has
+always applied to an unknown renderer name. A surface that declares
+`renderers: ['markdown']` gets `renderer: 'markdown'` for a `stat` panel it
+never asked to draw as markdown; it does not get skipped and `render` is not
+called with `'stat'`.
+
+### Read-only surfaces
+
+`prompt` is optional. A surface without one is **read-only**: it draws
+panels and cannot ask a question. Calling `promptOn()` against a read-only
+surface **throws**, naming the surface — a question nobody can answer is a
+wedged run, not something to swallow silently.
+
+**All four core surfaces are read-only today.** octomux's only
+human-question path is the card-based approval gate
+(`server/orchestrator/gate.ts`), which is DB-backed and predates this
+registrar — nothing rewired it onto `ctx.surfaces`. The registrar exists so a
+_plugin_ surface can implement `prompt`; no core surface does yet. See
+[`examples/discord-surface`](./examples/discord-surface) for a surface that
+does implement it.
+
+### Qualification and freezing
+
+Same rule as every other registrar: you declare `kind: 'discord'`, the kind
+the rest of octomux sees is `<row-id>:discord` — `qualify()`,
+`server/plugins/qualify.ts`. `CORE_SURFACE_KINDS = ['web', 'cli', 'slack',
+'telegram']` is frozen before any plugin loads, the same pattern
+`freezeCoreHarnesses()`/`CORE_COMPUTE_KINDS` use — a plugin can declare
+`kind: 'slack'` but it registers as `<row-id>:slack`, never collides with
+core's bare `slack`.
+
+### Capability grant and unmount
+
+`register()` requires the `surfaces.register` grant in the manifest row's
+`grants:` list — omitted, and the registrar throws at registration and the
+row lands in the load report as an `apply`-phase failure naming the plugin
+and the capability, same as every other gated registrar
+(`server/plugins/context.ts`, `server/plugins/grants.ts`). A surface is
+deregistered when its plugin unmounts, same as a workflow, a harness, or a
+compute provider — nothing keeps serving a dead plugin's panels.
+
+### `SurfacePanel` and `SurfacePrompt`
+
+```ts
+interface SurfacePanel {
+  pluginId: string; // manifest row id of the plugin that declared the binding
+  slot: UiSlot;
+  factType: string; // qualified — "<pluginId>:<fact>"
+  as: string; // renderer the binding asked for
+  renderer: string; // renderer this surface actually draws — `as`, or the fallback
+  value?: string;
+  delta?: string;
+  title?: string;
+  facts: Fact[]; // this binding's facts on the task being rendered, oldest first
+}
+
+interface SurfacePrompt {
+  taskId?: string; // present when the question is about a specific task
+  question: string;
+  choices?: string[]; // offered answers; absent means free text
+}
+```
+
+`render(panel)` returns the text this surface's transport takes — mrkdwn for
+Slack, plain text for CLI/Telegram, Discord-flavoured markdown for a Discord
+surface. Returning `undefined` means "nothing to show for this panel" and it
+is omitted, not rendered as an empty block.
 
 ## Manifest (`octomux.yml`)
 

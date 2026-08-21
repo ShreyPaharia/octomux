@@ -57,6 +57,7 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'policy.intercept',
   'agents.run',
   'fanout.run',
+  'surfaces.register',
 ];
 
 export function isPluginCapability(value: unknown): value is PluginCapability {

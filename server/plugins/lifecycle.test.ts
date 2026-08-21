@@ -10,6 +10,12 @@ import { getRecord } from '../repositories/plugin-collections.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
 import { resetCompute, getCompute, CORE_COMPUTE_KINDS } from '../compute/registry.js';
+import {
+  resetSurfaces,
+  registerCoreSurfaces,
+  listSurfaces,
+  CORE_SURFACE_KINDS,
+} from '../surfaces/index.js';
 import { resetProviders, getProvider, CORE_PROVIDER_KINDS } from '../integrations/registry.js';
 import { subscribeServerEvents } from '../events.js';
 import { evaluatePolicy, resetPolicy } from './policy.js';
@@ -61,6 +67,14 @@ function fakeCompute(kind: string): Record<string, unknown> {
   };
 }
 
+function fakeSurface(kind: string): Record<string, unknown> {
+  return {
+    kind,
+    renderers: [],
+    render: () => undefined,
+  };
+}
+
 beforeEach(() => {
   createTestDb();
   resetPluginRoutes();
@@ -69,6 +83,12 @@ beforeEach(() => {
   resetCollections();
   resetHarnesses();
   resetCompute();
+  // context.ts imports `../surfaces/index.js`, whose module scope registers
+  // + freezes the four core surfaces as a side effect the first time
+  // anything in this process imports it — reset then re-register so each
+  // test starts from that same clean, core-only state.
+  resetSurfaces();
+  registerCoreSurfaces();
   resetProviders();
   resetPolicy();
   resetPluginGrants();
@@ -96,7 +116,7 @@ describe('getPluginUnloadability', () => {
 });
 
 describe('unmountPlugin', () => {
-  it('releases routes, ui, policy hooks, workflow kinds, harnesses, compute providers, and providers, and runs ctx.effect() in reverse', async () => {
+  it('releases routes, ui, policy hooks, workflow kinds, harnesses, compute providers, surfaces, and providers, and runs ctx.effect() in reverse', async () => {
     const pluginId = 'lc-full';
     const ctx = createPluginContext(pluginId, [
       'http.route',
@@ -104,6 +124,7 @@ describe('unmountPlugin', () => {
       'harnesses.register',
       'integrations.register',
       'compute.register',
+      'surfaces.register',
       'artifacts.write',
       'facts.define',
       'collections.define',
@@ -116,6 +137,7 @@ describe('unmountPlugin', () => {
     ctx.workflows.register({ kind: 'mine', displayName: 'Mine', surfaces: ['feed'] });
     ctx.harnesses.register(fakeHarness('fake'));
     ctx.compute.register(fakeCompute('fake'));
+    ctx.surfaces.register(fakeSurface('fake') as never);
     ctx.integrations.register(fakeProvider('fake'));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
@@ -134,6 +156,7 @@ describe('unmountPlugin', () => {
     expect(getWorkflow(`${pluginId}:mine`)).toBeDefined();
     expect(getHarness(`${pluginId}:fake`).id).toBe(`${pluginId}:fake`);
     expect(getCompute(`${pluginId}:fake`).kind).toBe(`${pluginId}:fake`);
+    expect(listSurfaces().map((s) => s.kind)).toContain(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(false);
@@ -149,6 +172,7 @@ describe('unmountPlugin', () => {
     expect(report.released.workflowKinds).toEqual([`${pluginId}:mine`]);
     expect(report.released.harnessIds).toEqual([`${pluginId}:fake`]);
     expect(report.released.computeKinds).toEqual([`${pluginId}:fake`]);
+    expect(report.released.surfaceKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
     expect(report.released.collectionNames).toEqual([`${pluginId}:baselines`]);
@@ -159,6 +183,7 @@ describe('unmountPlugin', () => {
     expect(getWorkflow(`${pluginId}:mine`)).toBeUndefined();
     expect(() => getHarness(`${pluginId}:fake`)).toThrow();
     expect(() => getCompute(`${pluginId}:fake`)).toThrow();
+    expect(listSurfaces().map((s) => s.kind)).not.toContain(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(false);
     // Definitions gone (SHR-275) — but see the dedicated durability test
@@ -209,6 +234,7 @@ describe('unmountPlugin', () => {
       workflowKinds: [],
       harnessIds: [],
       computeKinds: [],
+      surfaceKinds: [],
       providerKinds: [],
       factTypes: [],
       collectionNames: [],
@@ -216,12 +242,13 @@ describe('unmountPlugin', () => {
     });
   });
 
-  it('core harness/compute/provider ids are never touched, even if somehow prefixed the same as a plugin', () => {
+  it('core harness/compute/surface/provider ids are never touched, even if somehow prefixed the same as a plugin', () => {
     // Guard lives in the registries themselves (unregisterHarness/unregisterCompute/
-    // unregisterProvider) — this just pins that unmountPlugin's sweeps only ever
-    // target `<pluginId>:` prefixed ids, which core ids never are.
+    // unregisterSurface/unregisterProvider) — this just pins that unmountPlugin's
+    // sweeps only ever target `<pluginId>:` prefixed ids, which core ids never are.
     expect(CORE_HARNESS_IDS.some((id) => id.includes(':'))).toBe(false);
     expect(CORE_COMPUTE_KINDS.some((k) => k.includes(':'))).toBe(false);
+    expect(CORE_SURFACE_KINDS.some((k) => k.includes(':'))).toBe(false);
     expect(CORE_PROVIDER_KINDS.some((k) => k.includes(':'))).toBe(false);
   });
 

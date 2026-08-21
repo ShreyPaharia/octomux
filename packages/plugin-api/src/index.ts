@@ -24,6 +24,7 @@ export interface PluginContext {
   readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
   readonly policy: PolicyRegistrar;
+  readonly surfaces: SurfaceRegistrar;
   /**
    * `ctx.fanout` — run a step per item instead of once per schedule fire.
    * See `FanOutApi`. Not a registrar: nobody needs a different fan-out
@@ -413,6 +414,107 @@ export interface UiCollectionPanelBinding extends UiPanelBindingBase {
 export type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
 
 /**
+ * `ctx.surfaces` — where octomux presents itself to a human.
+ *
+ * octomux already speaks web (and the macOS/phone shells around it), CLI,
+ * Slack and Telegram. Every one of those was compiled in: adding a fifth meant
+ * editing core. This registrar is the seam that ends that — a plugin adds a
+ * surface and every `ctx.ui` panel that already exists appears on it.
+ *
+ * That works only because `ctx.ui` panels are declarative BINDINGS, not
+ * components (see `UiRegistrar`). A binding names a fact type and a renderer;
+ * it never names a DOM, a Block Kit block or an ANSI escape. So a panel
+ * written a year before Discord existed as a surface still renders on Discord,
+ * with no change to the plugin that wrote it. This is the entire reason the
+ * binding model was chosen, and there is a test that holds it to it.
+ *
+ * ## The renderer contract
+ *
+ * A surface declares the renderer names it can draw (`renderers`). The host
+ * resolves every panel against that list BEFORE calling `render`:
+ *
+ * - `panel.as`       — what the binding asked for.
+ * - `panel.renderer` — what this surface will actually draw. Equal to
+ *                      `panel.as` when the surface supports it, otherwise the
+ *                      surface's `fallback` (default `'json'`).
+ *
+ * `panel.renderer` is GUARANTEED to be in `renderers` (or the fallback), so a
+ * `render` implementation only ever handles the list it declared. A surface
+ * that declares `['markdown']` receives `renderer: 'markdown'` for a `stat`
+ * panel — degraded, never dropped, never blank. Same rule the web client has
+ * always applied to an unknown renderer name.
+ *
+ * ## Read-only surfaces
+ *
+ * `prompt` is optional. A surface without one is **read-only**: it draws
+ * panels and cannot ask a question. Asking a read-only surface throws with a
+ * message naming the surface — it is not silently swallowed, because a
+ * question nobody can answer is a wedged run, not a degraded one.
+ *
+ * ## Rendering in-process vs. delegating to a client
+ *
+ * `render` returns the text this surface's transport takes (mrkdwn for Slack,
+ * plain text for CLI/Telegram, whatever a plugin surface wants). Core's `web`
+ * surface is the one exception and omits `render` entirely: the browser owns
+ * every renderer and reads the binding table over REST. A PLUGIN surface must
+ * provide `render` — the registrar rejects one that doesn't, since there is no
+ * client of yours for core to delegate to.
+ *
+ * Surface kinds are qualified like every other registrar: a plugin declares
+ * `discord` and the host serves it as `<pluginId>:discord`. Core's four
+ * (`web`, `cli`, `slack`, `telegram`) are frozen before any plugin loads and
+ * cannot be redefined.
+ */
+export interface SurfaceRegistrar {
+  /** Requires the `surfaces.register` capability grant in the manifest row. */
+  register(surface: SurfaceDefinition): void;
+}
+
+/** One `ctx.ui` panel binding, resolved for one surface and loaded with the
+ *  facts it renders. What `SurfaceDefinition.render` receives. */
+export interface SurfacePanel {
+  /** Manifest row id of the plugin that declared the binding. */
+  pluginId: string;
+  slot: UiSlot;
+  /** Qualified fact type — `<pluginId>:<fact>`. */
+  factType: string;
+  /** Renderer the binding asked for. */
+  as: string;
+  /** Renderer this surface will draw — `as`, or the surface's fallback. */
+  renderer: string;
+  value?: string;
+  delta?: string;
+  title?: string;
+  /** Facts for this binding on the task being rendered, oldest first. */
+  facts: Fact[];
+}
+
+/** A question put to a human on a surface. */
+export interface SurfacePrompt {
+  /** Present when the question is about a specific task. */
+  taskId?: string;
+  question: string;
+  /** Offered answers. Absent means free text. */
+  choices?: string[];
+}
+
+export interface SurfaceDefinition {
+  /** BARE local kind — the host qualifies it to `<pluginId>:<kind>`. */
+  kind: string;
+  /** Renderer names this surface draws natively. Anything else falls back. */
+  renderers: Array<UiRenderer | string>;
+  /** Renderer used for a panel this surface can't draw. Defaults to `'json'`.
+   *  Must itself be something `render` handles. */
+  fallback?: string;
+  /** Renders one panel into this surface's transport. `undefined` means
+   *  "nothing to show" and the panel is omitted, not rendered blank.
+   *  REQUIRED for plugin surfaces; omitted only by core's `web`. */
+  render?(panel: SurfacePanel): string | undefined;
+  /** Absent → the surface is read-only. */
+  prompt?(ask: SurfacePrompt): Promise<string | undefined>;
+}
+
+/**
  * `ctx.policy` — the one verb in the plugin API that can say **no**.
  *
  * Every other registrar is additive: a plugin contributes a workflow, a route,
@@ -650,7 +752,8 @@ export type PluginCapability =
   | 'artifacts.write'
   | 'policy.intercept'
   | 'agents.run'
-  | 'fanout.run';
+  | 'fanout.run'
+  | 'surfaces.register';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the
 // concrete `WorkflowType` / `IntegrationProvider` / `Harness` bindings to the

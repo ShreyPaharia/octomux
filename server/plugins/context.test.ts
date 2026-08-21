@@ -111,6 +111,7 @@ const { writeTaskArtifact: mockWriteTaskArtifact, listTaskArtifacts: mockListTas
   await import('../artifact-task.js');
 const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreCompute } =
   await import('../compute/registry.js');
+const { listSurfaces, resetSurfaces, registerCoreSurfaces } = await import('../surfaces/index.js');
 const { resetPluginGrants } = await import('./grants.js');
 const { resetCollections } = await import('./collections.js');
 const { createTestDb } = await import('../test-helpers.js');
@@ -149,6 +150,13 @@ beforeEach(() => {
   vi.mocked(mockWriteTaskArtifact).mockReset();
   vi.mocked(mockListTaskArtifacts).mockReset();
   resetCompute();
+  // context.ts imports `../surfaces/index.js`, whose module scope registers
+  // + freezes the four core surfaces as a side effect the first time
+  // anything in this process imports it — reset then re-register so each
+  // test starts from that same clean, core-only state instead of
+  // accumulating plugin surfaces test-to-test.
+  resetSurfaces();
+  registerCoreSurfaces();
   resetPluginGrants();
   resetCollections();
   createTestDb();
@@ -435,6 +443,77 @@ describe('ctx.compute', () => {
   });
 });
 
+describe('ctx.surfaces', () => {
+  it('qualifies a local surface kind', () => {
+    const ctx = createPluginContext('demo-surface', ['surfaces.register']);
+    ctx.surfaces.register({ kind: 'discord', renderers: ['stat'], render: () => undefined });
+
+    expect(listSurfaces().map((s) => s.kind)).toContain(qualify('demo-surface', 'discord'));
+  });
+
+  it('throws without the surfaces.register grant, naming the plugin and the capability', () => {
+    const ctx = createPluginContext('demo-surface-nogrant');
+    expect(() =>
+      ctx.surfaces.register({ kind: 'discord', renderers: [], render: () => undefined }),
+    ).toThrow(/"demo-surface-nogrant"/);
+    expect(() =>
+      ctx.surfaces.register({ kind: 'discord', renderers: [], render: () => undefined }),
+    ).toThrow(/"surfaces\.register"/);
+    expect(listSurfaces().map((s) => s.kind)).not.toContain(
+      qualify('demo-surface-nogrant', 'discord'),
+    );
+  });
+
+  it('throws when the payload is missing a local "kind"', () => {
+    const ctx = createPluginContext('demo-surface-2', ['surfaces.register']);
+    expect(() =>
+      ctx.surfaces.register({ renderers: [], render: () => undefined } as never),
+    ).toThrow(/kind/);
+  });
+
+  it('throws when "renderers" is missing or not an array', () => {
+    const ctx = createPluginContext('shape-surface', ['surfaces.register']);
+    expect(() => ctx.surfaces.register({ kind: 'x', render: () => undefined } as never)).toThrow(
+      /renderers/,
+    );
+    expect(() =>
+      ctx.surfaces.register({ kind: 'x', renderers: 'nope', render: () => undefined } as never),
+    ).toThrow(/renderers/);
+    expect(listSurfaces().map((s) => s.kind)).not.toContain(qualify('shape-surface', 'x'));
+  });
+
+  it('throws when "render" is missing — required for a plugin surface, unlike core web', () => {
+    const ctx = createPluginContext('shape-surface-2', ['surfaces.register']);
+    expect(() => ctx.surfaces.register({ kind: 'x', renderers: [] } as never)).toThrow(/render/);
+    expect(listSurfaces().map((s) => s.kind)).not.toContain(qualify('shape-surface-2', 'x'));
+  });
+
+  it('throws when "render" is present but not a function', () => {
+    const ctx = createPluginContext('shape-surface-3', ['surfaces.register']);
+    expect(() =>
+      ctx.surfaces.register({ kind: 'x', renderers: [], render: 'nope' } as never),
+    ).toThrow(/render/);
+  });
+
+  it('accepts a surface with no "prompt" — absent means read-only', () => {
+    const ctx = createPluginContext('shape-surface-4', ['surfaces.register']);
+    ctx.surfaces.register({ kind: 'x', renderers: [], render: () => undefined });
+    expect(listSurfaces().map((s) => s.kind)).toContain(qualify('shape-surface-4', 'x'));
+  });
+
+  it('throws when "prompt" is present but not a function', () => {
+    const ctx = createPluginContext('shape-surface-5', ['surfaces.register']);
+    expect(() =>
+      ctx.surfaces.register({
+        kind: 'x',
+        renderers: [],
+        render: () => undefined,
+        prompt: 'nope',
+      } as never),
+    ).toThrow(/prompt/);
+  });
+});
+
 describe('workflow + provider payload shape guards (F2)', () => {
   const provider = () => ({
     kind: 'thing',
@@ -511,6 +590,9 @@ describe('revokePluginContext (F3)', () => {
     expect(() => ctx.compute.register({ kind: 'k', create: async () => ({}) as unknown })).toThrow(
       /revoked/,
     );
+    expect(() =>
+      ctx.surfaces.register({ kind: 'k', renderers: [], render: () => undefined }),
+    ).toThrow(/revoked/);
     expect(() => ctx.workflows.register({ kind: 'k' })).toThrow(/revoked/);
     expect(() =>
       ctx.integrations.register({
@@ -523,6 +605,7 @@ describe('revokePluginContext (F3)', () => {
 
     expect(listHarnesses().map((h) => h.id)).not.toContain('slowplug:late');
     expect(listCompute().map((p) => p.kind)).not.toContain('slowplug:k');
+    expect(listSurfaces().map((s) => s.kind)).not.toContain('slowplug:k');
     expect(getWorkflow(qualify('slowplug', 'k'))).toBeUndefined();
     expect(getProvider(qualify('slowplug', 'k'))).toBeUndefined();
   });

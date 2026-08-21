@@ -12,6 +12,7 @@ import {
 } from './catalog.js';
 import { resetPluginRoutes } from './http-registry.js';
 import { resetPluginUi } from './ui-registry.js';
+import { resetSurfaces, registerCoreSurfaces } from '../surfaces/index.js';
 // SHR-259: every gated registrar denies a plugin with no recorded grants.
 // These tests exercise the catalog, not the grant model, so grant everything.
 import { setPluginGrants, PLUGIN_CAPABILITIES } from './grants.js';
@@ -37,6 +38,12 @@ beforeEach(() => {
   resetHarnesses();
   resetProviders();
   resetMountedPlugins();
+  // context.ts imports `../surfaces/index.js`, whose module scope registers
+  // + freezes the four core surfaces as a side effect the first time
+  // anything in this process imports it — reset then re-register so each
+  // test starts from that same clean, core-only state.
+  resetSurfaces();
+  registerCoreSurfaces();
 });
 
 describe('pluginRegistrations', () => {
@@ -68,6 +75,7 @@ describe('pluginRegistrations', () => {
     mine.facts.define({ type: 'observed', schema: { type: 'object' } });
     mine.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
     mine.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+    mine.surfaces.register({ kind: 's', renderers: [], render: () => undefined });
 
     const sibling =
       (setPluginGrants('cat-sibling', PLUGIN_CAPABILITIES), createPluginContext('cat-sibling'));
@@ -93,12 +101,13 @@ describe('pluginRegistrations', () => {
     expect(reg.routes).toEqual(['GET /thing']);
     expect(reg.uiSlots).toEqual(['task.panel']);
     expect(reg.factTypes).toEqual(['cat-mine:observed']);
+    expect(reg.surfaceKinds).toEqual(['cat-mine:s']);
     expect(reg.collectionNames).toEqual(['cat-mine:baselines']);
   });
 });
 
 describe('pluginProvides', () => {
-  it('flattens in order: workflows, harnesses, integrations, routes, ui, facts, collections', () => {
+  it('flattens in order: workflows, harnesses, integrations, surfaces, routes, ui, facts, collections', () => {
     const ctx =
       (setPluginGrants('cat-order', PLUGIN_CAPABILITIES), createPluginContext('cat-order'));
     ctx.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
@@ -120,6 +129,7 @@ describe('pluginProvides', () => {
       validate: () => ({ ok: true }),
       handler: async () => {},
     });
+    ctx.surfaces.register({ kind: 's', renderers: [], render: () => undefined });
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
     ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
     ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
@@ -129,6 +139,7 @@ describe('pluginProvides', () => {
       'workflow:cat-order:k',
       'harness:cat-order:h',
       'integration:cat-order:i',
+      'surface:cat-order:s',
       'route:GET /thing',
       'ui:task.panel',
       'fact:cat-order:observed',
@@ -162,6 +173,10 @@ describe('coreCatalogEntry', () => {
     expect(entry.provides).toContain('harness:claude-code');
     expect(entry.provides).not.toContain('harness:cat-attacker:foo');
     expect(entry.provides.some((p) => p.startsWith('harness:cat-attacker'))).toBe(false);
+    expect(entry.provides).toContain('surface:web');
+    expect(entry.provides).toContain('surface:cli');
+    expect(entry.provides).toContain('surface:slack');
+    expect(entry.provides).toContain('surface:telegram');
   });
 });
 

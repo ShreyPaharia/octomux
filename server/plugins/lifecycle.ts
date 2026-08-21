@@ -3,9 +3,9 @@
  * Reverses, in reverse registration order, everything a plugin's `apply()`
  * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> collections -> ui -> policy -> the four registries
- * (workflow kinds, harnesses, compute providers, providers) -> ctx.effect()
- * disposers per-plugin isolation policy).
+ * Order: routes -> facts -> collections -> ui -> policy -> the five registries
+ * (workflow kinds, harnesses, compute providers, surfaces, providers) ->
+ * ctx.effect() disposers
  *
  * Capability grants are NOT released as an explicit step here — that already
  * happens inside `disposePluginContext()` (`server/plugins/context.ts`,
@@ -29,6 +29,7 @@ import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
 import { unregisterHarness } from '../harnesses/registry.js';
 import { unregisterCompute } from '../compute/registry.js';
+import { unregisterSurface } from '../surfaces/index.js';
 import { unregisterProvider } from '../integrations/registry.js';
 import { pluginRegistrations } from './catalog.js';
 import type { PluginContext } from '@octomux/plugin-api';
@@ -48,6 +49,7 @@ export interface UnmountReleased {
   workflowKinds: string[];
   harnessIds: string[];
   computeKinds: string[];
+  surfaceKinds: string[];
   providerKinds: string[];
   factTypes: string[];
   /** `ctx.collections.define()` names dropped (SHR-275). Records survive —
@@ -171,6 +173,10 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     await step(pluginId, failures, `compute:${kind}`, () => unregisterCompute(kind));
   }
 
+  for (const kind of registered.surfaceKinds) {
+    await step(pluginId, failures, `surface:${kind}`, () => unregisterSurface(kind));
+  }
+
   for (const kind of registered.providerKinds) {
     await step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
   }
@@ -188,6 +194,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     workflowKinds,
     harnessIds: registered.harnessIds,
     computeKinds: registered.computeKinds,
+    surfaceKinds: registered.surfaceKinds,
     providerKinds: registered.providerKinds,
     factTypes: registered.factTypes,
     collectionNames: registered.collectionNames,
