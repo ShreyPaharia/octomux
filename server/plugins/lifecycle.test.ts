@@ -97,6 +97,8 @@ describe('unmountPlugin', () => {
       'workflows.register',
       'harnesses.register',
       'integrations.register',
+      'compute.register',
+      'artifacts.write',
       'facts.define',
       'ui.panel',
       'policy.intercept',

@@ -461,7 +461,7 @@ describe('plugin runtime integration: ctx.artifacts (SHR-269)', () => {
 plugins:
   - id: reporter
     name: ${fixturePath}
-    grants: [http.route]
+    grants: [http.route, artifacts.write]
 `);
     const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
     expect(report.failed).toEqual([]);
@@ -525,7 +525,7 @@ plugins:
 plugins:
   - id: reporter
     name: ${writeModule('fixture-reporter.mjs', fixtureReporterSource(noWorktree.id))}
-    grants: [http.route]
+    grants: [http.route, artifacts.write]
 `);
     expect((await loadPlugins({ manifestPath, resolveFrom: tmpDir })).failed).toEqual([]);
     const app = createApp();

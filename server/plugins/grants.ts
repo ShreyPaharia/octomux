@@ -46,10 +46,12 @@ export const PLUGIN_CAPABILITIES: readonly PluginCapability[] = [
   'workflows.register',
   'integrations.register',
   'harnesses.register',
+  'compute.register',
   'http.route',
   'facts.define',
   'facts.put',
   'ui.panel',
+  'artifacts.write',
   'policy.intercept',
 ];
 

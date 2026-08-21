@@ -107,7 +107,7 @@ describe('a plugin-registered compute provider drives a task', () => {
     rec = recordingProvider();
     // Register the way a third-party plugin does — never touching the
     // registry directly, and never choosing its own qualified id.
-    createPluginContext(PLUGIN_ID).compute.register(rec.provider);
+    createPluginContext(PLUGIN_ID, ['compute.register']).compute.register(rec.provider);
     freezeCoreCompute();
   });
 

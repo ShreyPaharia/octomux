@@ -259,6 +259,7 @@ export function createPluginContext(
   const compute: ComputeRegistrar = {
     register(p: PluginCompute) {
       assertLive('compute.register');
+      assertGranted(id, 'compute.register');
       const localKind = requireLocalId(p, 'kind', 'compute.register');
       // `create` is guarded because `sessionFor()` dereferences it
       // unconditionally on every task launch — same reasoning as the harness
@@ -338,6 +339,10 @@ export function createPluginContext(
     // worktree that outlives the plugin, so nothing here pushes onto
     // `effects`.
     async write(taskId, input) {
+      // Granted, but deliberately NOT `assertLive` — see the block comment
+      // above. Different questions: a revoked context may still flush output
+      // it already earned; an ungranted plugin should never have been writing.
+      assertGranted(id, 'artifacts.write');
       return toArtifactEntry(taskId, writeTaskArtifact(taskId, id, input));
     },
     // Unscoped, like facts.read: every plugin's artifacts on the task, not

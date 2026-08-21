@@ -323,9 +323,10 @@ no host `node_modules` tree to import a runtime value from even by accident.
   plugin row; core harnesses/integrations still register.
 - **Capability grants.** A manifest row declares the `ctx` surface its plugin uses:
   `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
-  `workflows.register`, `integrations.register`, `harnesses.register`, `http.route`,
-  `facts.define`, `facts.put`, `ui.panel`, `policy.intercept`. Reads (`facts.read`,
-  `facts.watch`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are ungated. A row with no
+  `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
+  `http.route`, `facts.define`, `facts.put`, `ui.panel`, `artifacts.write`,
+  `policy.intercept`. Reads (`facts.read`, `facts.watch`, `artifacts.list`, `ctx.settings`,
+  `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
   row's grants is withheld until acknowledged: the granted set is tracked per row in

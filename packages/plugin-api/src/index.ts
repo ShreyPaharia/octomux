@@ -355,10 +355,12 @@ export type PluginCapability =
   | 'workflows.register'
   | 'integrations.register'
   | 'harnesses.register'
+  | 'compute.register'
   | 'http.route'
   | 'facts.define'
   | 'facts.put'
   | 'ui.panel'
+  | 'artifacts.write'
   | 'policy.intercept';
 
 // Registrar payload shapes are intentionally loose here — the plan leaves the

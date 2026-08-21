@@ -347,7 +347,7 @@ describe('ctx.harnesses', () => {
 
 describe('ctx.compute', () => {
   it('qualifies a local compute kind', () => {
-    const ctx = createPluginContext('demo-compute');
+    const ctx = createPluginContext('demo-compute', ['compute.register']);
     ctx.compute.register({ kind: 'foo', create: async () => ({}) as unknown });
 
     expect(listCompute().map((p) => p.kind)).toContain(qualify('demo-compute', 'foo'));
@@ -355,7 +355,7 @@ describe('ctx.compute', () => {
   });
 
   it('throws when the payload is missing a local "kind"', () => {
-    const ctx = createPluginContext('demo-compute-2');
+    const ctx = createPluginContext('demo-compute-2', ['compute.register']);
     expect(() => ctx.compute.register({ create: async () => ({}) as unknown })).toThrow(/kind/);
   });
 
@@ -365,7 +365,7 @@ describe('ctx.compute', () => {
       create: async () => ({}) as unknown,
     } as never);
     freezeCoreCompute();
-    const ctx = createPluginContext('attacker');
+    const ctx = createPluginContext('attacker', ['compute.register']);
 
     ctx.compute.register({ kind: 'local', create: async () => ({}) as unknown });
 
@@ -374,24 +374,24 @@ describe('ctx.compute', () => {
   });
 
   it('throws when required function field "create" is missing', () => {
-    const ctx = createPluginContext('shape-compute');
+    const ctx = createPluginContext('shape-compute', ['compute.register']);
     expect(() => ctx.compute.register({ kind: 'x' })).toThrow(/create/);
     expect(() => getCompute(qualify('shape-compute', 'x'))).toThrow(/unknown compute/i);
   });
 
   it('throws when "create" is present but not a function', () => {
-    const ctx = createPluginContext('shape-compute-2');
+    const ctx = createPluginContext('shape-compute-2', ['compute.register']);
     expect(() => ctx.compute.register({ kind: 'x', create: 'nope' })).toThrow(/create/);
   });
 
   it('allows omitting the optional "resume" field', () => {
-    const ctx = createPluginContext('shape-compute-3');
+    const ctx = createPluginContext('shape-compute-3', ['compute.register']);
     ctx.compute.register({ kind: 'x', create: async () => ({}) as unknown });
     expect(getCompute(qualify('shape-compute-3', 'x'))).toBeDefined();
   });
 
   it('throws when "resume" is present but not a function', () => {
-    const ctx = createPluginContext('shape-compute-4');
+    const ctx = createPluginContext('shape-compute-4', ['compute.register']);
     expect(() =>
       ctx.compute.register({ kind: 'x', create: async () => ({}) as unknown, resume: 'nope' }),
     ).toThrow(/resume/);
@@ -515,7 +515,7 @@ describe('ctx.artifacts', () => {
       size: 5,
       updatedAt: '2026-08-21 00:00:00',
     });
-    const ctx = createPluginContext('artifact-plugin');
+    const ctx = createPluginContext('artifact-plugin', ['artifacts.write']);
 
     const entry = await ctx.artifacts.write('task-1', {
       // Nothing on ArtifactInput lets a caller name a plugin id, but even a
@@ -549,7 +549,7 @@ describe('ctx.artifacts', () => {
       size: 5,
       updatedAt: '2026-08-21 00:00:00',
     });
-    const ctx = createPluginContext('artifact-plugin');
+    const ctx = createPluginContext('artifact-plugin', ['artifacts.write']);
 
     const entry = await ctx.artifacts.write('task/1', {
       name: 'my report.md',
@@ -577,7 +577,7 @@ describe('ctx.artifacts', () => {
         updatedAt: '2026-08-21 00:01:00',
       },
     ]);
-    const ctx = createPluginContext('reader-plugin');
+    const ctx = createPluginContext('reader-plugin', ['artifacts.write']);
 
     const entries = await ctx.artifacts.list('task-2');
 
@@ -612,7 +612,7 @@ describe('ctx.artifacts', () => {
       size: 5,
       updatedAt: '2026-08-21 00:00:00',
     });
-    const ctx = createPluginContext('revoked-plugin');
+    const ctx = createPluginContext('revoked-plugin', ['artifacts.write']);
     revokePluginContext(ctx);
 
     const entry = await ctx.artifacts.write('task-3', {
@@ -629,7 +629,7 @@ describe('ctx.artifacts', () => {
     vi.mocked(mockWriteTaskArtifact).mockImplementation(() => {
       throw new Error('task "task-4" has no worktree — cannot write artifact');
     });
-    const ctx = createPluginContext('artifact-plugin-2');
+    const ctx = createPluginContext('artifact-plugin-2', ['artifacts.write']);
 
     await expect(
       ctx.artifacts.write('task-4', { name: 'report.md', mime: 'text/markdown', body: 'hello' }),
@@ -638,7 +638,7 @@ describe('ctx.artifacts', () => {
 });
 
 describe('grant checks (SHR-259)', () => {
-  it('a plugin with no recorded grants is denied every gated registrar', () => {
+  it('a plugin with no recorded grants is denied every gated registrar', async () => {
     const ctx = createPluginContext('nogrants');
 
     expect(() => ctx.workflows.register({ kind: 'k' })).toThrow(/not granted/);
@@ -660,12 +660,28 @@ describe('grant checks (SHR-259)', () => {
       /not granted/,
     );
     expect(() => ctx.policy.intercept('task.launch', () => undefined)).toThrow(/not granted/);
+    // SHR-273: compute + artifacts landed after the capability list was
+    // written and were ungated for a while. Pin them so that cannot recur.
+    expect(() => ctx.compute.register({ kind: 'c', create: async () => ({}) } as never)).toThrow(
+      /not granted/,
+    );
+    await expect(
+      ctx.artifacts.write('task-1', { name: 'r.md', mime: 'text/markdown', body: 'x' }),
+    ).rejects.toThrow(/not granted/);
   });
 
   it('the ungranted error names the plugin and the missing capability', () => {
     const ctx = createPluginContext('nogrants2');
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/"nogrants2"/);
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/"http\.route"/);
+  });
+
+  it('artifacts.list stays ungated — reads are ungated by design, same as facts.read (SHR-273)', async () => {
+    const ctx = createPluginContext('nogrants3');
+    // Asserts the grant check specifically, not success: the mocked
+    // listTaskArtifacts returns undefined here, so this call rejects either
+    // way. What must never happen is rejecting for lack of a grant.
+    await expect(ctx.artifacts.list('task-1')).rejects.not.toThrow(/not granted/);
   });
 
   it('reads (facts.read, facts.watch) and self-owned members (settings, kv, logger, effect) stay ungated', () => {
