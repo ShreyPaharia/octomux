@@ -22,7 +22,8 @@ const { default: request } = await import('supertest');
 const { loadPlugins, unloadPlugin, reloadPlugin, resetMountedPlugins } =
   await import('./loader.js');
 const { resetPluginRoutes } = await import('./http-registry.js');
-const { resetFacts, putFact, readFacts } = await import('./facts.js');
+const { resetFacts, putFact } = await import('./facts.js');
+const { readRecordsForTask } = await import('../repositories/plugin-records.js');
 const { evaluatePolicy, resetPolicy } = await import('./policy.js');
 const { acknowledgeGrants, resetPluginGrants } = await import('./grants.js');
 const { listTaskUpdates } = await import('../repositories/tasks.js');
@@ -618,10 +619,10 @@ plugins:
       pluginId: 'spendcap',
     });
 
-    // Recorded as a fact — machine-readable audit.
-    const facts = await readFacts(task.id, { type: 'core:policy.decision' });
-    expect(facts).toHaveLength(1);
-    expect(facts[0].payload).toMatchObject({
+    // Recorded as a plugin_records row (SHR-282) — machine-readable audit.
+    const records = readRecordsForTask(task.id, 'core:policy.decision');
+    expect(records).toHaveLength(1);
+    expect(records[0].payload).toMatchObject({
       point: 'task.launch',
       pluginId: 'spendcap',
       decision: 'deny',
@@ -673,12 +674,12 @@ plugins:
 plugins:
   - id: widen
     name: ${fixturePath}
-    grants: [facts.put]
+    grants: [records.write]
 `;
     // First boot acknowledges whatever the row declares — the user added it.
     const manifestPath = writeManifest(narrow);
     const first = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
-    // `facts.put` alone is not enough for this fixture's apply(), so it fails —
+    // `records.write` alone is not enough for this fixture's apply(), so it fails —
     // what matters here is the ledger it left behind.
     expect(first.failed[0]?.error).toContain('policy.intercept');
 
@@ -689,14 +690,14 @@ plugins:
 plugins:
   - id: widen
     name: ${fixturePath}
-    grants: [facts.put, policy.intercept]
+    grants: [records.write, policy.intercept]
 `);
     const second = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
     expect(second.pendingGrants?.widen).toEqual(['policy.intercept']);
     expect(second.failed[0]?.error).toContain('policy.intercept');
 
     // Acknowledge it the way `octomux plugins approve` does, and it takes effect.
-    acknowledgeGrants(manifestPath, 'widen', ['facts.put', 'policy.intercept']);
+    acknowledgeGrants(manifestPath, 'widen', ['records.write', 'policy.intercept']);
     resetMountedPlugins();
     const third = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
     expect(third.failed).toEqual([]);

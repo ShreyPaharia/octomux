@@ -4,14 +4,14 @@ import type { PolicyIntent } from '@octomux/plugin-api';
 // Mock factories must be synchronous (they are here) and registered BEFORE the
 // module under test is imported — `vi.mock()` maps to bun's `mock.module()`,
 // which does not hoist, unlike vitest's.
-vi.mock('./facts.js', () => ({
-  putCoreFact: vi.fn(async () => undefined),
+vi.mock('./records.js', () => ({
+  publishCoreRecord: vi.fn(() => undefined),
 }));
 vi.mock('../repositories/tasks.js', () => ({
   addTaskUpdate: vi.fn(() => 'update-id'),
 }));
 
-const { putCoreFact } = await import('./facts.js');
+const { publishCoreRecord } = await import('./records.js');
 const { addTaskUpdate } = await import('../repositories/tasks.js');
 const {
   registerPolicyHook,
@@ -23,13 +23,13 @@ const {
   POLICY_HOOK_TIMEOUT_MS,
 } = await import('./policy.js');
 
-const mockedPutCoreFact = vi.mocked(putCoreFact);
+const mockedPublishCoreRecord = vi.mocked(publishCoreRecord);
 const mockedAddTaskUpdate = vi.mocked(addTaskUpdate);
 
 describe('plugins/policy', () => {
   beforeEach(() => {
     resetPolicy();
-    mockedPutCoreFact.mockClear();
+    mockedPublishCoreRecord.mockClear();
     mockedAddTaskUpdate.mockClear();
   });
 
@@ -38,7 +38,7 @@ describe('plugins/policy', () => {
     const outcome = await evaluatePolicy('task.launch', { taskId: 'task-1', data });
 
     expect(outcome).toEqual({ allowed: true, data });
-    expect(mockedPutCoreFact).not.toHaveBeenCalled();
+    expect(mockedPublishCoreRecord).not.toHaveBeenCalled();
     expect(mockedAddTaskUpdate).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,7 @@ describe('plugins/policy', () => {
     });
 
     expect(outcome).toEqual({ allowed: true, data: { model: 'sonnet' } });
-    expect(mockedPutCoreFact).not.toHaveBeenCalled();
+    expect(mockedPublishCoreRecord).not.toHaveBeenCalled();
     expect(mockedAddTaskUpdate).not.toHaveBeenCalled();
   });
 
@@ -63,9 +63,9 @@ describe('plugins/policy', () => {
 
     expect(outcome).toEqual({ allowed: false, reason: 'over budget', pluginId: 'spend-cap' });
     expect(secondHook).not.toHaveBeenCalled();
-    expect(mockedPutCoreFact).toHaveBeenCalledWith(
-      'task-1',
+    expect(mockedPublishCoreRecord).toHaveBeenCalledWith(
       'core:policy.decision',
+      'task-1',
       expect.objectContaining({ point: 'task.launch', pluginId: 'spend-cap', decision: 'deny' }),
     );
     expect(mockedAddTaskUpdate).toHaveBeenCalledWith(
@@ -104,9 +104,9 @@ describe('plugins/policy', () => {
 
     expect(outcome).toEqual({ allowed: true, data: { model: 'haiku' } });
     expect(seenModel).toBe('haiku');
-    expect(mockedPutCoreFact).toHaveBeenCalledWith(
-      'task-1',
+    expect(mockedPublishCoreRecord).toHaveBeenCalledWith(
       'core:policy.decision',
+      'task-1',
       expect.objectContaining({ point: 'task.launch', pluginId: 'rewriter', decision: 'patch' }),
     );
     expect(mockedAddTaskUpdate).toHaveBeenCalledWith(
@@ -120,7 +120,7 @@ describe('plugins/policy', () => {
     const outcome = await evaluatePolicy('task.launch', { data: {} });
 
     expect(outcome).toEqual({ allowed: false, reason: 'nope', pluginId: 'spend-cap' });
-    expect(mockedPutCoreFact).not.toHaveBeenCalled();
+    expect(mockedPublishCoreRecord).not.toHaveBeenCalled();
     expect(mockedAddTaskUpdate).not.toHaveBeenCalled();
   });
 
@@ -135,7 +135,7 @@ describe('plugins/policy', () => {
 
     expect(outcome).toEqual({ allowed: true, data: {} });
     expect(secondHook).toHaveBeenCalled();
-    expect(mockedPutCoreFact).not.toHaveBeenCalled();
+    expect(mockedPublishCoreRecord).not.toHaveBeenCalled();
   });
 
   it(
