@@ -128,14 +128,14 @@ describe('artifact Summary section', () => {
     fs.mkdirSync(path.join(tmpDir, '.octomux'), { recursive: true });
     fs.writeFileSync(
       path.join(tmpDir, '.octomux', 'artifact.md'),
-      '# SHR-275 — `ctx.collections`\n\nSome lede paragraph about the shipped work.\n\n' +
+      '# SHR-275 — `ctx.example`\n\nSome lede paragraph about the shipped work.\n\n' +
         '## What shipped\n\nDetails here.\n',
     );
 
     setArtifactSummary(tmpDir, 'in progress');
 
     const raw = fs.readFileSync(path.join(tmpDir, '.octomux', 'artifact.md'), 'utf8');
-    expect(raw).toContain('# SHR-275 — `ctx.collections`');
+    expect(raw).toContain('# SHR-275 — `ctx.example`');
     expect(raw).toContain('Some lede paragraph about the shipped work.');
     expect(raw).toContain('## What shipped');
     expect(raw).toContain('Details here.');

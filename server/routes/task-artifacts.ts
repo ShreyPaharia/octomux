@@ -1,8 +1,8 @@
 /**
  * Serves task-scoped `ctx.artifacts` files to the SPA (and anything else
  * that wants a plugin-written artifact over HTTP). Sibling of
- * `server/routes/plugin-facts.ts` — same shape, same task-scoped/unscoped-
- * across-plugins read model as `ctx.facts`, but for files instead of typed
+ * `server/routes/plugin-records.ts` — same shape, same task-scoped/unscoped-
+ * across-plugins read model as `ctx.records`, but for files instead of typed
  * payloads. See `server/artifact-files.ts` for the on-disk format and
  * `server/artifact-task.ts` for the taskId-resolving wrapper this route calls.
  */

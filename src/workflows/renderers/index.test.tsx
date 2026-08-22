@@ -1,26 +1,28 @@
 import { describe, it, expect } from '../../bun-test.js';
 import { render, screen } from '@testing-library/react';
 import { getRenderer } from './index';
-import type { UiContribution, PluginFact } from '@/lib/plugin-ui';
+import type { RecordEnvelope, UiContribution } from '@/lib/plugin-ui';
 
 function makeContribution(overrides: Partial<UiContribution> = {}): UiContribution {
   return {
     pluginId: 'coverage-bot',
     slot: 'task.panel',
-    fact: 'coverage',
-    factType: 'coverage-bot:coverage',
+    record: 'coverage',
+    recordStore: 'coverage-bot:coverage',
     as: 'stat',
     ...overrides,
   };
 }
 
-function makeFact(overrides: Partial<PluginFact> = {}): PluginFact {
+function makeRecord(overrides: Partial<RecordEnvelope> = {}): RecordEnvelope {
   return {
     seq: 1,
+    store: 'coverage-bot:coverage',
     taskId: 'task-1',
-    type: 'coverage-bot:coverage',
+    key: null,
     payload: { value: 87 },
     createdAt: '2026-08-20T00:00:00.000Z',
+    updatedAt: '2026-08-20T00:00:00.000Z',
     ...overrides,
   };
 }
@@ -33,7 +35,9 @@ describe('workflows/renderers', () => {
     (name) => {
       const Renderer = getRenderer(name);
       const contribution = makeContribution({ as: name });
-      const { container } = render(<Renderer contribution={contribution} facts={[makeFact()]} />);
+      const { container } = render(
+        <Renderer contribution={contribution} records={[makeRecord()]} />,
+      );
       expect(container.textContent).not.toBe('');
     },
   );
@@ -41,7 +45,9 @@ describe('workflows/renderers', () => {
   it('degrades an unknown renderer name to json, never a blank panel', () => {
     const Renderer = getRenderer('some-future-renderer');
     const contribution = makeContribution({ as: 'some-future-renderer' });
-    render(<Renderer contribution={contribution} facts={[makeFact({ payload: { pct: 42 } })]} />);
+    render(
+      <Renderer contribution={contribution} records={[makeRecord({ payload: { pct: 42 } })]} />,
+    );
     // json renderer pretty-prints the payload — the value must be visible.
     expect(screen.getByText(/"pct": 42/)).toBeTruthy();
   });
@@ -50,11 +56,11 @@ describe('workflows/renderers', () => {
     expect(getRenderer('json')).toBe(getRenderer('totally-unknown'));
   });
 
-  it('every renderer shows an empty state instead of blank with no facts', () => {
+  it('every renderer shows an empty state instead of blank with no records', () => {
     for (const name of RENDERER_NAMES) {
       const Renderer = getRenderer(name);
       const { container, unmount } = render(
-        <Renderer contribution={makeContribution({ as: name })} facts={[]} />,
+        <Renderer contribution={makeContribution({ as: name })} records={[]} />,
       );
       expect(container.textContent).not.toBe('');
       unmount();
@@ -67,7 +73,7 @@ describe('workflows/renderers', () => {
     render(
       <Renderer
         contribution={contribution}
-        facts={[makeFact({ payload: { pct: 91, change: '+4' } })]}
+        records={[makeRecord({ payload: { pct: 91, change: '+4' } })]}
       />,
     );
     expect(screen.getByText('91')).toBeTruthy();
@@ -79,8 +85,8 @@ describe('workflows/renderers', () => {
     render(
       <Renderer
         contribution={makeContribution({ as: 'table' })}
-        facts={[
-          makeFact({
+        records={[
+          makeRecord({
             payload: [
               { file: 'a.ts', pct: 90 },
               { file: 'b.ts', pct: 80 },
@@ -98,7 +104,7 @@ describe('workflows/renderers', () => {
     render(
       <Renderer
         contribution={makeContribution({ as: 'badge' })}
-        facts={[makeFact({ payload: { value: 'green' } })]}
+        records={[makeRecord({ payload: { value: 'green' } })]}
       />,
     );
     expect(screen.getByText('green')).toBeTruthy();

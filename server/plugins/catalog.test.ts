@@ -16,8 +16,7 @@ import { resetSurfaces, registerCoreSurfaces } from '../surfaces/index.js';
 // SHR-259: every gated registrar denies a plugin with no recorded grants.
 // These tests exercise the catalog, not the grant model, so grant everything.
 import { setPluginGrants, PLUGIN_CAPABILITIES } from './grants.js';
-import { resetFacts } from './facts.js';
-import { resetCollections } from './collections.js';
+import { resetRecords } from './records.js';
 import { resetServices } from './services.js';
 import { resetHarnesses, registerHarness } from '../harnesses/registry.js';
 import { resetProviders } from '../integrations/registry.js';
@@ -34,8 +33,7 @@ import type { LoadReport } from '@octomux/plugin-api';
 beforeEach(() => {
   resetPluginRoutes();
   resetPluginUi();
-  resetFacts();
-  resetCollections();
+  resetRecords();
   resetServices();
   resetHarnesses();
   resetProviders();
@@ -74,9 +72,9 @@ describe('pluginRegistrations', () => {
       validate: () => ({ ok: true }),
       handler: async () => {},
     });
-    mine.facts.define({ type: 'observed', schema: { type: 'object' } });
-    mine.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
-    mine.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+    mine.records.define({ name: 'observed', scope: 'task', mode: 'append' });
+    mine.records.define({ name: 'baselines', scope: 'durable', mode: 'upsert', key: 'branch' });
+    mine.ui.panel({ slot: 'task.panel', record: 'observed', as: 'json' });
     mine.surfaces.register({ kind: 's', renderers: [], render: () => undefined });
     mine.services.provide('chat.send', () => {});
     mine.services.provide('ticket.create', () => {});
@@ -104,9 +102,8 @@ describe('pluginRegistrations', () => {
     expect(reg.providerKinds).toEqual(['cat-mine:i']);
     expect(reg.routes).toEqual(['GET /thing']);
     expect(reg.uiSlots).toEqual(['task.panel']);
-    expect(reg.factTypes).toEqual(['cat-mine:observed']);
     expect(reg.surfaceKinds).toEqual(['cat-mine:s']);
-    expect(reg.collectionNames).toEqual(['cat-mine:baselines']);
+    expect(reg.recordStores).toEqual(['cat-mine:observed', 'cat-mine:baselines']);
     // Unqualified, unlike every field above — a service name is a shared
     // contract, not something a plugin id prefixes (see services.ts).
     expect(reg.serviceNames).toEqual(['chat.send', 'ticket.create']);
@@ -114,7 +111,7 @@ describe('pluginRegistrations', () => {
 });
 
 describe('pluginProvides', () => {
-  it('flattens in order: workflows, harnesses, integrations, surfaces, routes, ui, facts, collections, services', () => {
+  it('flattens in order: workflows, harnesses, integrations, surfaces, routes, ui, records, services', () => {
     const ctx =
       (setPluginGrants('cat-order', PLUGIN_CAPABILITIES), createPluginContext('cat-order'));
     ctx.workflows.register({ kind: 'k', displayName: 'K', surfaces: ['feed'] });
@@ -138,9 +135,9 @@ describe('pluginProvides', () => {
     });
     ctx.surfaces.register({ kind: 's', renderers: [], render: () => undefined });
     ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-    ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
-    ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
-    ctx.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
+    ctx.records.define({ name: 'observed', scope: 'task', mode: 'append' });
+    ctx.ui.panel({ slot: 'task.panel', record: 'observed', as: 'json' });
+    ctx.records.define({ name: 'baselines', scope: 'durable', mode: 'upsert', key: 'branch' });
     ctx.services.provide('chat.send', () => {});
 
     expect(pluginProvides('cat-order')).toEqual([
@@ -150,8 +147,8 @@ describe('pluginProvides', () => {
       'surface:cat-order:s',
       'route:GET /thing',
       'ui:task.panel',
-      'fact:cat-order:observed',
-      'collection:cat-order:baselines',
+      'record:cat-order:observed',
+      'record:cat-order:baselines',
       'service:chat.send',
     ]);
   });

@@ -136,10 +136,10 @@ it's what `requireDiscordConfig()` checks for, not a wired secrets path.
 **Verified** — the self-check at the bottom of `index.mjs`
 (`bun docs/plugins/examples/discord-surface/index.mjs`):
 
-- `render()` returns `undefined` for a panel with no facts.
+- `render()` returns `undefined` for a panel with no records.
 - `render()` with `renderer: 'markdown'` reads the declared `value` key and
   prefixes a `title` as a bold heading.
-- `render()` with `renderer: 'json'` pretty-prints the latest fact's payload
+- `render()` with `renderer: 'json'` pretty-prints the latest record's payload
   in a fenced code block.
 - `formatQuestion()` numbers `choices` and prefixes `[task <id>]`.
 - `postAndAwaitReply()` throws — it is a stub, not silently a no-op.

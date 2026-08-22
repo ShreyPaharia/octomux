@@ -3,14 +3,13 @@ import { createTestDb, insertTask } from '../test-helpers.js';
 import {
   resolveRenderer,
   contributionsForSurface,
-  panelsForSurface,
-  renderCollectionPanels,
+  panelsForTask,
+  panelsForStore,
   promptOn,
 } from './render.js';
 import { registerSurface, resetSurfaces, freezeCoreSurfaces } from './registry.js';
 import { registerCoreSurfaces } from './core.js';
-import { defineFactType, putFact, resetFacts } from '../plugins/facts.js';
-import { defineCollection, putRecord, resetCollections } from '../plugins/collections.js';
+import { defineStore, putRecord, resetRecords } from '../plugins/records.js';
 import { registerPluginUiPanel, resetPluginUi } from '../plugins/ui-registry.js';
 import type { SurfaceDefinition, SurfacePanel } from '@octomux/plugin-api';
 
@@ -18,8 +17,7 @@ describe('surfaces/render', () => {
   beforeEach(() => {
     const db = createTestDb();
     insertTask(db, { id: 'task-1' });
-    resetFacts();
-    resetCollections();
+    resetRecords();
     resetPluginUi();
     resetSurfaces();
     registerCoreSurfaces();
@@ -53,41 +51,41 @@ describe('surfaces/render', () => {
     });
   });
 
-  describe('contributionsForSurface / panelsForSurface', () => {
+  describe('contributionsForSurface / panelsForTask', () => {
     it('throws on an unknown surface kind', () => {
       expect(() => contributionsForSurface('nope')).toThrow(/unknown surface "nope"/);
-      expect(panelsForSurface('nope', 'task-1')).rejects.toThrow(/unknown surface "nope"/);
+      expect(panelsForTask('nope', 'task-1')).rejects.toThrow(/unknown surface "nope"/);
     });
 
-    it('panelsForSurface on web throws — the client renders it, not the host', async () => {
+    it('panelsForTask on web throws — the client renders it, not the host', async () => {
       registerPluginUiPanel('coverage-bot', {
         slot: 'task.panel',
-        fact: 'coverage',
+        record: 'coverage',
         as: 'stat',
         value: 'pct',
       });
-      await expect(panelsForSurface('web', 'task-1')).rejects.toThrow(
+      await expect(panelsForTask('web', 'task-1')).rejects.toThrow(
         /surface "web" has no render — the client renders it/,
       );
     });
 
     it('a throwing render skips only that panel, leaving siblings intact', async () => {
-      defineFactType('coverage-bot', { type: 'coverage', schema: { type: 'object' } });
-      defineFactType('status-bot', { type: 'status', schema: { type: 'object' } });
+      defineStore('coverage-bot', { name: 'coverage', scope: 'task', mode: 'append' });
+      defineStore('status-bot', { name: 'status', scope: 'task', mode: 'append' });
       registerPluginUiPanel('coverage-bot', {
         slot: 'task.panel',
-        fact: 'coverage',
+        record: 'coverage',
         as: 'stat',
         value: 'pct',
       });
       registerPluginUiPanel('status-bot', {
         slot: 'task.badge',
-        fact: 'status',
+        record: 'status',
         as: 'badge',
         value: 'value',
       });
-      await putFact('coverage-bot', 'task-1', 'coverage', { pct: 87 });
-      await putFact('status-bot', 'task-1', 'status', { value: 'green' });
+      await putRecord('coverage-bot', 'coverage', { pct: 87 }, 'task-1');
+      await putRecord('status-bot', 'status', { value: 'green' }, 'task-1');
 
       registerSurface({
         kind: 'demo:flaky',
@@ -98,148 +96,139 @@ describe('surfaces/render', () => {
         },
       });
 
-      const panels = await panelsForSurface('demo:flaky', 'task-1');
+      const panels = await panelsForTask('demo:flaky', 'task-1');
       expect(panels).toHaveLength(1);
       expect(panels[0].pluginId).toBe('status-bot');
     });
 
     it('drops a panel whose render returns undefined', async () => {
-      defineFactType('coverage-bot', { type: 'coverage', schema: { type: 'object' } });
-      registerPluginUiPanel('coverage-bot', {
-        slot: 'task.panel',
-        fact: 'coverage',
-        as: 'stat',
-      });
-      // No fact written — cli's renderPanelText returns undefined for empty facts.
-      const panels = await panelsForSurface('cli', 'task-1');
+      defineStore('coverage-bot', { name: 'coverage', scope: 'task', mode: 'append' });
+      registerPluginUiPanel('coverage-bot', { slot: 'task.panel', record: 'coverage', as: 'stat' });
+      // No record written — cli's renderPanelText returns undefined for empty records.
+      const panels = await panelsForTask('cli', 'task-1');
       expect(panels).toHaveLength(0);
     });
 
-    it('skips a collection-bound contribution rather than rendering it empty or crashing', async () => {
-      defineCollection('coverage-bot', {
-        name: 'baselines',
-        schema: { type: 'object' },
-        key: 'branch',
-      });
-      registerPluginUiPanel('coverage-bot', {
+    it('a durable store binding renders nothing through the task walk — no row carries this taskId', async () => {
+      defineStore('pipeline-bot', { name: 'leads', scope: 'durable', mode: 'upsert', key: 'id' });
+      registerPluginUiPanel('pipeline-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'leads',
         as: 'table',
       });
-      await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 87 });
+      await putRecord('pipeline-bot', 'leads', { id: 'd-1', stage: 'won' });
 
-      const panels = await panelsForSurface('cli', 'task-1');
+      const panels = await panelsForTask('cli', 'task-1');
       expect(panels).toHaveLength(0);
     });
   });
 
-  describe('renderCollectionPanels', () => {
+  describe('panelsForStore', () => {
     it('throws on an unknown surface kind', async () => {
-      await expect(renderCollectionPanels('nope', 'coverage-bot:baselines')).rejects.toThrow(
+      await expect(panelsForStore('nope', 'coverage-bot:baselines')).rejects.toThrow(
         /unknown surface "nope"/,
       );
     });
 
     it('throws on web — the client renders it, not the host', async () => {
-      defineCollection('coverage-bot', {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'table',
       });
-      await expect(renderCollectionPanels('web', 'coverage-bot:baselines')).rejects.toThrow(
+      await expect(panelsForStore('web', 'coverage-bot:baselines')).rejects.toThrow(
         /surface "web" has no render — the client renders it/,
       );
     });
 
-    it('renders a collection-bound panel on cli with real record data', async () => {
-      defineCollection('coverage-bot', {
+    it('renders a store-bound panel on cli with real record data', async () => {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'stat',
         value: 'pct',
       });
       await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
 
-      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      const panels = await panelsForStore('cli', 'coverage-bot:baselines');
       expect(panels).toHaveLength(1);
       expect(panels[0].pluginId).toBe('coverage-bot');
       expect(panels[0].text).toContain('91');
     });
 
-    it('ignores fact-bound contributions and contributions bound to a different collection', async () => {
-      defineFactType('status-bot', { type: 'status', schema: { type: 'object' } });
-      defineCollection('coverage-bot', {
+    it('ignores contributions bound to a different store', async () => {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
-      defineCollection('coverage-bot', {
-        name: 'other',
-        schema: { type: 'object' },
-        key: 'id',
-      });
-      registerPluginUiPanel('status-bot', { slot: 'task.badge', fact: 'status', as: 'badge' });
+      defineStore('coverage-bot', { name: 'other', scope: 'durable', mode: 'upsert', key: 'id' });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'other',
+        record: 'other',
         as: 'table',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'stat',
         value: 'pct',
       });
       await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
       await putRecord('coverage-bot', 'other', { id: 1 });
 
-      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      const panels = await panelsForStore('cli', 'coverage-bot:baselines');
       expect(panels).toHaveLength(1);
       expect(panels[0].text).toContain('91');
     });
 
-    it('returns [] when the collection has no records', async () => {
-      defineCollection('coverage-bot', {
+    it('returns [] when the store has no records', async () => {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'stat',
         value: 'pct',
       });
 
-      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines');
+      const panels = await panelsForStore('cli', 'coverage-bot:baselines');
       expect(panels).toHaveLength(0);
     });
 
     it('a throwing render skips only that panel, leaving siblings intact', async () => {
-      defineCollection('coverage-bot', {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'stat',
         value: 'pct',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'badge',
         value: 'pct',
       });
@@ -254,28 +243,29 @@ describe('surfaces/render', () => {
         },
       });
 
-      const panels = await renderCollectionPanels('demo:flaky', 'coverage-bot:baselines');
+      const panels = await panelsForStore('demo:flaky', 'coverage-bot:baselines');
       expect(panels).toHaveLength(1);
       expect(panels[0].as).toBe('badge');
     });
 
     it('honours q — limit narrows which records reach render', async () => {
-      defineCollection('coverage-bot', {
+      defineStore('coverage-bot', {
         name: 'baselines',
-        schema: { type: 'object' },
+        scope: 'durable',
+        mode: 'upsert',
         key: 'branch',
       });
       registerPluginUiPanel('coverage-bot', {
         slot: 'settings.card',
-        collection: 'baselines',
+        record: 'baselines',
         as: 'timeline',
       });
       await putRecord('coverage-bot', 'baselines', { branch: 'main', pct: 91 });
       await putRecord('coverage-bot', 'baselines', { branch: 'dev', pct: 42 });
 
-      const panels = await renderCollectionPanels('cli', 'coverage-bot:baselines', { limit: 1 });
+      const panels = await panelsForStore('cli', 'coverage-bot:baselines', { limit: 1 });
       expect(panels).toHaveLength(1);
-      // timeline renders every fact it's handed — with limit:1 only one record shows.
+      // timeline renders every record it's handed — with limit:1 only one shows.
       const lines = panels[0].text.split('\n').filter((l) => l.trim().length > 0);
       expect(lines).toHaveLength(1);
     });

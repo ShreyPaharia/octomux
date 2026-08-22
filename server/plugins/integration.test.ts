@@ -10,7 +10,7 @@
  * `loadPlugins`'s `resolve` seam only skips the anchor.js/createRequire
  * bare-package lookup; an absolute-path row bypasses that seam entirely and
  * still needs a real file for `import()` to load) through mount -> HTTP ->
- * unmount, and a second fixture pair through the cross-plugin `ctx.facts`
+ * unmount, and a second fixture pair through the cross-plugin `ctx.records`
  * watch path.
  */
 import fs from 'fs';
@@ -22,7 +22,8 @@ const { default: request } = await import('supertest');
 const { loadPlugins, unloadPlugin, reloadPlugin, resetMountedPlugins } =
   await import('./loader.js');
 const { resetPluginRoutes } = await import('./http-registry.js');
-const { resetFacts, putFact, readFacts } = await import('./facts.js');
+const { resetRecords, putRecord } = await import('./records.js');
+const { readRecordsForTask } = await import('../repositories/plugin-records.js');
 const { evaluatePolicy, resetPolicy } = await import('./policy.js');
 const { acknowledgeGrants, resetPluginGrants } = await import('./grants.js');
 const { listTaskUpdates } = await import('../repositories/tasks.js');
@@ -48,7 +49,7 @@ function writeModule(name: string, source: string): string {
 }
 
 /** Fixture plugin that exercises all four SHR-253..256 registrars in one
- *  apply(): a route, a fact type + a write, a ui panel, and an effect that
+ *  apply(): a route, a record store + a write, a ui panel, and an effect that
  *  records (to a marker file, since the effect only runs post-unmount, after
  *  every registry has already been torn down) that it ran. */
 function fixtureCoverageSource(taskId: string, effectMarkerPath: string): string {
@@ -60,17 +61,19 @@ export async function apply(ctx) {
     res.status(200).json({ id: req.params.id });
   });
 
-  ctx.facts.define({
-    type: 'coverage',
+  ctx.records.define({
+    name: 'coverage',
+    scope: 'task',
+    mode: 'append',
     schema: {
       type: 'object',
       properties: { pct: { type: 'number' } },
       required: ['pct'],
     },
   });
-  await ctx.facts.put(${JSON.stringify(taskId)}, 'coverage', { pct: 92 });
+  await ctx.records.put('coverage', { pct: 92 }, { taskId: ${JSON.stringify(taskId)} });
 
-  ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', title: 'Coverage' });
+  ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', title: 'Coverage' });
 
   ctx.effect(() => {
     fs.writeFileSync(${JSON.stringify(effectMarkerPath)}, 'ran');
@@ -79,13 +82,15 @@ export async function apply(ctx) {
 `;
 }
 
-/** Fixture "A": defines+writes `coverage` facts on demand via an HTTP route,
+/** Fixture "A": defines+writes `coverage` records on demand via an HTTP route,
  *  so a test can trigger a write after A has been reloaded. */
 function fixtureWriterSource(taskId: string): string {
   return `
 export async function apply(ctx) {
-  ctx.facts.define({
-    type: 'coverage',
+  ctx.records.define({
+    name: 'coverage',
+    scope: 'task',
+    mode: 'append',
     schema: {
       type: 'object',
       properties: { pct: { type: 'number' } },
@@ -93,23 +98,23 @@ export async function apply(ctx) {
     },
   });
   ctx.http.route('POST', '/emit/:pct', async (req, res) => {
-    await ctx.facts.put(${JSON.stringify(taskId)}, 'coverage', { pct: Number(req.params.pct) });
+    await ctx.records.put('coverage', { pct: Number(req.params.pct) }, { taskId: ${JSON.stringify(taskId)} });
     res.status(200).json({ ok: true });
   });
 }
 `;
 }
 
-/** Fixture "B": watches A's QUALIFIED fact type and appends every fact it
+/** Fixture "B": watches A's QUALIFIED store and appends every record it
  *  sees to a log file, so the test can inspect delivery across A's reload
  *  and confirm the subscription only dies when B itself unmounts. */
-function fixtureWatcherSource(qualifiedType: string, watchLogPath: string): string {
+function fixtureWatcherSource(qualifiedName: string, watchLogPath: string): string {
   return `
 import fs from 'fs';
 
 export async function apply(ctx) {
-  ctx.facts.watch(${JSON.stringify(qualifiedType)}, (fact) => {
-    fs.appendFileSync(${JSON.stringify(watchLogPath)}, JSON.stringify(fact) + '\\n');
+  ctx.records.watch(${JSON.stringify(qualifiedName)}, (record) => {
+    fs.appendFileSync(${JSON.stringify(watchLogPath)}, JSON.stringify(record) + '\\n');
   });
 }
 `;
@@ -171,8 +176,8 @@ function readWatchLog(watchLogPath: string): Array<{ payload: { pct: number } }>
     .map((line) => JSON.parse(line));
 }
 
-/** Fixture that registers a route and a fact type (enough to show up in its
- *  own `provides[]`), then exercises `ctx.catalog` two ways:
+/** Fixture that registers a route and a record store (enough to show up in
+ *  its own `provides[]`), then exercises `ctx.catalog` two ways:
  *
  *  1. At `apply()` time — written to a marker file, since `loader.ts` only
  *     adds a row to `mounted` (what `listCatalog()` iterates) AFTER `apply()`
@@ -191,8 +196,10 @@ export async function apply(ctx) {
     res.status(200).json({ ok: true });
   });
 
-  ctx.facts.define({
-    type: 'seen',
+  ctx.records.define({
+    name: 'seen',
+    scope: 'task',
+    mode: 'append',
     schema: { type: 'object', properties: {} },
   });
 
@@ -212,7 +219,7 @@ beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-integration-'));
   resetMountedPlugins();
   resetPluginRoutes();
-  resetFacts();
+  resetRecords();
   resetPluginUi();
   resetPolicy();
   resetPluginGrants();
@@ -223,14 +230,14 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   resetMountedPlugins();
   resetPluginRoutes();
-  resetFacts();
+  resetRecords();
   resetPluginUi();
   resetPolicy();
   resetPluginGrants();
 });
 
 describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
-  it('serves a fixture plugin over real HTTP, then releases everything on unloadPlugin except already-written facts', async () => {
+  it('serves a fixture plugin over real HTTP, then releases everything on unloadPlugin except already-written records', async () => {
     const task = insertTestTask();
     const effectMarker = path.join(tmpDir, 'effect-ran.txt');
     const fixturePath = writeModule(
@@ -241,7 +248,7 @@ describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
 plugins:
   - id: fixture-a
     name: ${fixturePath}
-    grants: [http.route, facts.define, facts.put, ui.panel]
+    grants: [http.route, records.define, records.write, ui.panel]
 `);
 
     // 1. Mount via the real loadPlugins().
@@ -262,16 +269,16 @@ plugins:
     expect(contribRes.body.contributions[0]).toMatchObject({
       pluginId: 'fixture-a',
       slot: 'task.panel',
-      // Fact type must be QUALIFIED as `<pluginId>:coverage`, not bare.
-      factType: 'fixture-a:coverage',
+      // Store name must be QUALIFIED as `<pluginId>:coverage`, not bare.
+      recordStore: 'fixture-a:coverage',
       as: 'stat',
     });
 
-    const factsRes = await request(app).get(`/api/tasks/${task.id}/facts`);
-    expect(factsRes.status).toBe(200);
-    expect(factsRes.body.facts).toHaveLength(1);
-    expect(factsRes.body.facts[0]).toMatchObject({
-      type: 'fixture-a:coverage',
+    const recordsRes = await request(app).get(`/api/tasks/${task.id}/records`);
+    expect(recordsRes.status).toBe(200);
+    expect(recordsRes.body.records).toHaveLength(1);
+    expect(recordsRes.body.records[0]).toMatchObject({
+      store: 'fixture-a:coverage',
       payload: { pct: 92 },
     });
 
@@ -292,15 +299,15 @@ plugins:
     const contribAfter = await request(app).get('/api/plugin-ui/contributions');
     expect(contribAfter.body.contributions).toEqual([]);
 
-    // The fact TYPE is gone: a further put is rejected...
-    await expect(putFact('fixture-a', task.id, 'coverage', { pct: 1 })).rejects.toThrow(
+    // The store definition is gone: a further put is rejected...
+    await expect(putRecord('fixture-a', 'coverage', { pct: 1 }, task.id)).rejects.toThrow(
       /not defined/,
     );
-    // ...but the already-written fact survives — it dies with the task, not
-    // the plugin.
-    const factsAfter = await request(app).get(`/api/tasks/${task.id}/facts`);
-    expect(factsAfter.body.facts).toHaveLength(1);
-    expect(factsAfter.body.facts[0]).toMatchObject({ type: 'fixture-a:coverage' });
+    // ...but the already-written record survives — it dies with the task,
+    // not the plugin.
+    const recordsAfter = await request(app).get(`/api/tasks/${task.id}/records`);
+    expect(recordsAfter.body.records).toHaveLength(1);
+    expect(recordsAfter.body.records[0]).toMatchObject({ store: 'fixture-a:coverage' });
 
     // ctx.effect() ran.
     expect(fs.existsSync(effectMarker)).toBe(true);
@@ -316,7 +323,7 @@ plugins:
   });
 });
 
-describe('plugin runtime integration: cross-plugin ctx.facts.watch (SHR-255)', () => {
+describe('plugin runtime integration: cross-plugin ctx.records.watch (SHR-255)', () => {
   it("delivers A's writes to B's watcher, survives A's reload, and only dies when B unmounts", async () => {
     const task = insertTestTask();
     const watchLog = path.join(tmpDir, 'watch-log.txt');
@@ -330,7 +337,7 @@ describe('plugin runtime integration: cross-plugin ctx.facts.watch (SHR-255)', (
 plugins:
   - id: fixture-a
     name: ${writerPath}
-    grants: [http.route, facts.define, facts.put]
+    grants: [http.route, records.define, records.write]
   - id: fixture-b
     name: ${watcherPath}
 `);
@@ -380,7 +387,7 @@ describe('plugin runtime integration: ctx.catalog (SHR-268)', () => {
 plugins:
   - id: fixture-catalog
     name: ${fixturePath}
-    grants: [http.route, facts.define, workflows.register, harnesses.register, integrations.register, ui.panel]
+    grants: [http.route, records.define, workflows.register, harnesses.register, integrations.register, ui.panel]
 `);
 
     const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
@@ -424,7 +431,7 @@ plugins:
       expect.arrayContaining([
         'route:GET /ping',
         'route:GET /catalog',
-        'fact:fixture-catalog:seen',
+        'record:fixture-catalog:seen',
       ]),
     );
 
@@ -618,10 +625,10 @@ plugins:
       pluginId: 'spendcap',
     });
 
-    // Recorded as a fact — machine-readable audit.
-    const facts = await readFacts(task.id, { type: 'core:policy.decision' });
-    expect(facts).toHaveLength(1);
-    expect(facts[0].payload).toMatchObject({
+    // Recorded as a plugin_records row (SHR-282) — machine-readable audit.
+    const records = readRecordsForTask(task.id, 'core:policy.decision');
+    expect(records).toHaveLength(1);
+    expect(records[0].payload).toMatchObject({
       point: 'task.launch',
       pluginId: 'spendcap',
       decision: 'deny',
@@ -673,12 +680,12 @@ plugins:
 plugins:
   - id: widen
     name: ${fixturePath}
-    grants: [facts.put]
+    grants: [records.write]
 `;
     // First boot acknowledges whatever the row declares — the user added it.
     const manifestPath = writeManifest(narrow);
     const first = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
-    // `facts.put` alone is not enough for this fixture's apply(), so it fails —
+    // `records.write` alone is not enough for this fixture's apply(), so it fails —
     // what matters here is the ledger it left behind.
     expect(first.failed[0]?.error).toContain('policy.intercept');
 
@@ -689,14 +696,14 @@ plugins:
 plugins:
   - id: widen
     name: ${fixturePath}
-    grants: [facts.put, policy.intercept]
+    grants: [records.write, policy.intercept]
 `);
     const second = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
     expect(second.pendingGrants?.widen).toEqual(['policy.intercept']);
     expect(second.failed[0]?.error).toContain('policy.intercept');
 
     // Acknowledge it the way `octomux plugins approve` does, and it takes effect.
-    acknowledgeGrants(manifestPath, 'widen', ['facts.put', 'policy.intercept']);
+    acknowledgeGrants(manifestPath, 'widen', ['records.write', 'policy.intercept']);
     resetMountedPlugins();
     const third = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
     expect(third.failed).toEqual([]);

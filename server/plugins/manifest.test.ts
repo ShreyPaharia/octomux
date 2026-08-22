@@ -255,9 +255,9 @@ describe('grants', () => {
       ['http.route', 'ui.panel', 'policy.intercept'],
     ],
     [
-      'collections.define and collections.write (SHR-275)',
-      ['collections.define', 'collections.write'],
-      ['collections.define', 'collections.write'],
+      'records.define and records.write (SHR-282)',
+      ['records.define', 'records.write'],
+      ['records.define', 'records.write'],
     ],
     ['an empty list', [], []],
     ['duplicates, de-duped silently', ['http.route', 'http.route'], ['http.route']],
@@ -284,7 +284,7 @@ plugins:
   it.each([
     ['an unknown capability', '["policy.deny"]'],
     ['a typo of a real capability', '["http.routes"]'],
-    ['a typo of collections.write ("collections.put")', '["collections.put"]'],
+    ['a typo of records.write ("records.put")', '["records.put"]'],
     ['a non-array (string)', '"http.route"'],
     ['a non-array (object)', '{}'],
     ['an array with a non-string entry', '[42]'],

@@ -105,37 +105,31 @@ Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
 `server/plugins/grants.ts`, `PluginCapability` in
 `packages/plugin-api/src/index.ts`):
 
-| Capability              | Gates                                    |
-| ----------------------- | ---------------------------------------- |
-| `workflows.register`    | `ctx.workflows.register()`               |
-| `integrations.register` | `ctx.integrations.register()`            |
-| `harnesses.register`    | `ctx.harnesses.register()`               |
-| `compute.register`      | `ctx.compute.register()`                 |
-| `http.route`            | `ctx.http.route()`                       |
-| `facts.define`          | `ctx.facts.define()`                     |
-| `facts.put`             | `ctx.facts.put()`                        |
-| `collections.define`    | `ctx.collections.define()`               |
-| `collections.write`     | `ctx.collections.put()`                  |
-| `kv.write`              | `ctx.kv.set()`/`del()`/`begin()`/`end()` |
-| `ui.panel`              | `ctx.ui.panel()`                         |
-| `artifacts.write`       | `ctx.artifacts.write()`                  |
-| `policy.intercept`      | `ctx.policy.intercept()`                 |
-| `secrets.read`          | `ctx.secrets.resolve()`                  |
-| `services.provide`      | `ctx.services.provide()`                 |
-| `agents.run`            | `ctx.agents.run()`                       |
-| `fanout.run`            | `ctx.fanout.run()`                       |
-| `surfaces.register`     | `ctx.surfaces.register()`                |
-| `ui.action`             | `ctx.ui.action()`                        |
+| Capability              | Gates                                 |
+| ----------------------- | ------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`            |
+| `integrations.register` | `ctx.integrations.register()`         |
+| `harnesses.register`    | `ctx.harnesses.register()`            |
+| `compute.register`      | `ctx.compute.register()`              |
+| `http.route`            | `ctx.http.route()`                    |
+| `records.define`        | `ctx.records.define()`                |
+| `records.write`         | `ctx.records.put()`/`begin()`/`end()` |
+| `ui.panel`              | `ctx.ui.panel()`                      |
+| `artifacts.write`       | `ctx.artifacts.write()`               |
+| `policy.intercept`      | `ctx.policy.intercept()`              |
+| `secrets.read`          | `ctx.secrets.resolve()`               |
+| `services.provide`      | `ctx.services.provide()`              |
+| `agents.run`            | `ctx.agents.run()`                    |
+| `fanout.run`            | `ctx.fanout.run()`                    |
+| `surfaces.register`     | `ctx.surfaces.register()`             |
+| `ui.action`             | `ctx.ui.action()`                     |
 
 Reads and logging are ungated — no grant needed for `ctx.logger`,
-`ctx.settings`, `ctx.catalog.list()`, `ctx.facts.read()`/`ctx.facts.watch()`,
-`ctx.collections.query()`/`ctx.collections.watch()`, `ctx.artifacts.list()`,
+`ctx.settings`, `ctx.catalog.list()`, `ctx.records.read()`/`ctx.records.query()`/
+`ctx.records.watch()`/`ctx.records.interrupted()`, `ctx.artifacts.list()`,
 `ctx.fanout.status()`/`ctx.fanout.list()`, `ctx.services.require()`, or
-`ctx.effect()`. (`ctx.kv`
-throws regardless of grants — see [§`ctx.kv` throws today](#ctxkv-throws-today).)
-`ctx.fanout.status()`/`ctx.fanout.list()`,
-`ctx.kv.get()`/`ctx.kv.list()`/`ctx.kv.interrupted()`, or `ctx.effect()`.
-`ctx.kv.set()`/`del()`/`begin()`/`end()` need `kv.write` — see [§`ctx.kv`](#ctxkv).
+`ctx.effect()`. `ctx.records.put()`/`begin()`/`end()` need `records.write` —
+see [§`ctx.records`](#ctxrecords).
 
 ### Figuring out which grants you need
 
@@ -179,64 +173,42 @@ confirming intent, not a security check on the plugin's code. See
 ## The registrars and methods on `ctx`
 
 There are more than three now: `ctx.workflows`, `ctx.integrations`,
-`ctx.harnesses`, `ctx.compute`, `ctx.surfaces`, `ctx.http`, `ctx.facts`,
-`ctx.collections`, `ctx.services`, `ctx.attention`, `ctx.ui`, and `ctx.policy` are
+`ctx.harnesses`, `ctx.compute`, `ctx.surfaces`, `ctx.http`, `ctx.records`,
+`ctx.services`, `ctx.attention`, `ctx.ui`, and `ctx.policy` are
 **registrars** — each adds something to core's registries, or (only
 `ctx.policy`) can refuse something core was about to do. `ctx.artifacts`,
 `ctx.agents`, `ctx.fanout`, and `ctx.catalog` are **methods on `ctx`**, not
 registrars — nobody needs a different artifact/agent-run/fan-out
 implementation, they need to run one, so none of them has a `register()`.
-`ctx.effect()`, `ctx.logger`, `ctx.settings`, and `ctx.kv` round out the
-object.
+`ctx.effect()`, `ctx.logger`, `ctx.settings`, and `ctx.records`'s checkpoint
+trio round out the object.
 
-| `ctx` member                                       | What it's for                                              | This guide     | Deep reference                                                                     |
-| -------------------------------------------------- | ---------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
-| `ctx.workflows.register()`                         | register a workflow kind                                   | §below         | [api-reference.md](./api-reference.md#ctxworkflows--ctxintegrations--ctxharnesses) |
-| `ctx.integrations.register()`                      | register an integration provider                           | §below         | same                                                                               |
-| `ctx.harnesses.register()`                         | register a harness                                         | §below         | same                                                                               |
-| `ctx.compute.register()`                           | choose where a task's worktree/processes run               | §below         | [api-reference.md](./api-reference.md#ctxcompute)                                  |
-| `ctx.surfaces.register()`                          | add a place octomux presents itself to a human             | §below         | [api-reference.md](./api-reference.md#ctxsurfaces)                                 |
-| `ctx.http.route()`                                 | add an HTTP route                                          | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
-| `ctx.facts` (`define`/`put`/`read`/`watch`)        | task-scoped notes, deleted with the task                   | reference only | [api-reference.md](./api-reference.md#ctxfacts)                                    |
-| `ctx.collections` (`define`/`put`/`query`/`watch`) | durable, schema'd records that outlive a task              | reference only | [api-reference.md](./api-reference.md#ctxcollections)                              |
-| `ctx.services` (`provide`/`require`)               | depend on a capability by name, not a plugin package       | §below         | [api-reference.md](./api-reference.md#ctxservices)                                 |
-| `ctx.ui.panel()`                                   | bind a declarative panel to a fact or collection           | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
-| `ctx.policy.intercept()`                           | deny or patch a task intent at a gate point                | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
-| `ctx.artifacts` (`write`/`list`)                   | drop a file into the task's worktree                       | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
-| `ctx.agents.run()`                                 | headless, structured-output agent session                  | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
-| `ctx.attention.ask()`                              | ask a human a question, fanned out across surfaces         | reference only | [api-reference.md](./api-reference.md#ctxattention)                                |
-| `ctx.fanout.run()`                                 | run a step per item, with retry and resume                 | reference only | [api-reference.md](./api-reference.md#ctxfanout)                                   |
-| `ctx.catalog.list()`                               | read what's currently installed                            | §below         | [api-reference.md](./api-reference.md#ctxcatalog)                                  |
-| `ctx.settings`                                     | your plugin's own opaque config                            | §below         | [api-reference.md](./api-reference.md#ctxsettings)                                 |
-| `ctx.kv`                                           | throws — plugin storage hasn't landed                      | §below         | [api-reference.md](./api-reference.md#ctxkv)                                       |
-| `ctx.logger`                                       | structured logging, scoped `plugin:<id>`                   | —              | [api-reference.md](./api-reference.md#ctxlogger)                                   |
-| `ctx.effect()`                                     | register a teardown callback, run in reverse on unmount    | reference only | [api-reference.md](./api-reference.md#plugincontext)                               |
-| `ctx` member                                       | What it's for                                              | This guide     | Deep reference                                                                     |
-| -------------------------------------------------- | ---------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
-| `ctx.workflows.register()`                         | register a workflow kind                                   | §below         | [api-reference.md](./api-reference.md#ctxworkflows--ctxintegrations--ctxharnesses) |
-| `ctx.integrations.register()`                      | register an integration provider                           | §below         | same                                                                               |
-| `ctx.harnesses.register()`                         | register a harness                                         | §below         | same                                                                               |
-| `ctx.compute.register()`                           | choose where a task's worktree/processes run               | §below         | [api-reference.md](./api-reference.md#ctxcompute)                                  |
-| `ctx.surfaces.register()`                          | add a place octomux presents itself to a human             | §below         | [api-reference.md](./api-reference.md#ctxsurfaces)                                 |
-| `ctx.http.route()`                                 | add an HTTP route                                          | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
-| `ctx.facts` (`define`/`put`/`read`/`watch`)        | task-scoped notes, deleted with the task                   | reference only | [api-reference.md](./api-reference.md#ctxfacts)                                    |
-| `ctx.collections` (`define`/`put`/`query`/`watch`) | durable, schema'd records that outlive a task              | reference only | [api-reference.md](./api-reference.md#ctxcollections)                              |
-| `ctx.ui.panel()`                                   | bind a declarative panel to a fact or collection           | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
-| `ctx.policy.intercept()`                           | deny or patch a task intent at a gate point                | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
-| `ctx.artifacts` (`write`/`list`)                   | drop a file into the task's worktree                       | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
-| `ctx.agents.run()`                                 | headless, structured-output agent session                  | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
-| `ctx.fanout.run()`                                 | run a step per item, with retry and resume                 | reference only | [api-reference.md](./api-reference.md#ctxfanout)                                   |
-| `ctx.catalog.list()`                               | read what's currently installed                            | §below         | [api-reference.md](./api-reference.md#ctxcatalog)                                  |
-| `ctx.settings`                                     | your plugin's own opaque config                            | §below         | [api-reference.md](./api-reference.md#ctxsettings)                                 |
-| `ctx.kv`                                           | durable, plugin-private blobs + crash-recovery checkpoints | §below         | [api-reference.md](./api-reference.md#ctxkv)                                       |
-| `ctx.logger`                                       | structured logging, scoped `plugin:<id>`                   | —              | [api-reference.md](./api-reference.md#ctxlogger)                                   |
-| `ctx.effect()`                                     | register a teardown callback, run in reverse on unmount    | reference only | [api-reference.md](./api-reference.md#plugincontext)                               |
-| `ctx.ui.panel()` / `ctx.ui.action()`               | bind a declarative panel, or declare a host-run action     | §below         | [api-reference.md](./api-reference.md#ctxui)                                       |
+| `ctx` member                                          | What it's for                                           | This guide     | Deep reference                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `ctx.workflows.register()`                            | register a workflow kind                                | §below         | [api-reference.md](./api-reference.md#ctxworkflows--ctxintegrations--ctxharnesses) |
+| `ctx.integrations.register()`                         | register an integration provider                        | §below         | same                                                                               |
+| `ctx.harnesses.register()`                            | register a harness                                      | §below         | same                                                                               |
+| `ctx.compute.register()`                              | choose where a task's worktree/processes run            | §below         | [api-reference.md](./api-reference.md#ctxcompute)                                  |
+| `ctx.surfaces.register()`                             | add a place octomux presents itself to a human          | §below         | [api-reference.md](./api-reference.md#ctxsurfaces)                                 |
+| `ctx.http.route()`                                    | add an HTTP route                                       | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
+| `ctx.records` (`define`/`put`/`read`/`query`/`watch`) | task-scoped or durable plugin records, one shape        | §below         | [api-reference.md](./api-reference.md#ctxrecords)                                  |
+| `ctx.services` (`provide`/`require`)                  | depend on a capability by name, not a plugin package    | §below         | [api-reference.md](./api-reference.md#ctxservices)                                 |
+| `ctx.ui.panel()`                                      | bind a declarative panel to a `ctx.records` store       | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
+| `ctx.policy.intercept()`                              | deny or patch a task intent at a gate point             | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
+| `ctx.artifacts` (`write`/`list`)                      | drop a file into the task's worktree                    | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
+| `ctx.agents.run()`                                    | headless, structured-output agent session               | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
+| `ctx.attention.ask()`                                 | ask a human a question, fanned out across surfaces      | reference only | [api-reference.md](./api-reference.md#ctxattention)                                |
+| `ctx.fanout.run()`                                    | run a step per item, with retry and resume              | reference only | [api-reference.md](./api-reference.md#ctxfanout)                                   |
+| `ctx.catalog.list()`                                  | read what's currently installed                         | §below         | [api-reference.md](./api-reference.md#ctxcatalog)                                  |
+| `ctx.settings`                                        | your plugin's own opaque config                         | §below         | [api-reference.md](./api-reference.md#ctxsettings)                                 |
+| `ctx.logger`                                          | structured logging, scoped `plugin:<id>`                | —              | [api-reference.md](./api-reference.md#ctxlogger)                                   |
+| `ctx.effect()`                                        | register a teardown callback, run in reverse on unmount | reference only | [api-reference.md](./api-reference.md#plugincontext)                               |
+| `ctx.ui.panel()` / `ctx.ui.action()`                  | bind a declarative panel, or declare a host-run action  | §below         | [api-reference.md](./api-reference.md#ctxui)                                       |
 
 "Reference only" rows aren't walked through step by step in this guide — the
 full shape lives in `api-reference.md`. This file stays a guide: it covers
 `workflows`/`integrations`/`harnesses`/`compute`/`surfaces`/`ui.action` (the
-registrars that need the most explaining), plus `catalog`/`settings`/`kv`, in
+registrars that need the most explaining), plus `catalog`/`settings`/`records`, in
 depth below.
 
 Every registrar payload is typed as `Record<string, unknown>` at the type
@@ -467,7 +439,7 @@ optional slot, an optional JSON Schema, an optional confirm string. Your
 plugins:
   - id: coverage-bot
     name: '@acme/octomux-coverage-bot'
-    grants: [facts.define, facts.put, ui.panel, ui.action]
+    grants: [records.define, records.write, ui.panel, ui.action]
 ```
 
 ```js
@@ -563,63 +535,67 @@ scoped under `settings.plugins.<row-id>`, shallow-merged on `update`, and
 same as an integration's own `config` blob. Reachable from outside the plugin
 via `PATCH /api/settings` with `{ "plugins": { "<row-id>": { ... } } }`.
 
-## `ctx.kv`
+## `ctx.records`
 
-Plugin-private durable scratch: opaque blobs keyed by a string, scoped to one
-plugin id. Backed by its own `plugin_kv` table, PK `(plugin_id, key)`
-(`server/plugins/kv.ts`, wired through `context.ts`) — no other plugin, and
-nothing reading through `ctx`, can see another plugin's keys.
+The one store for plugin data (SHR-282): a task-scoped append-only log, a
+durable keyed collection, and a plugin-private opaque blob store all used to
+be three separate tables. Now they're one `RecordStoreDefinition` shape,
+picked apart by `scope` (`task` dies with the task; `durable` outlives
+unmount) and `mode` (`append` adds a row; `upsert` replaces the row sharing
+its key). Omit `schema` for an opaque store — no schema, no query language,
+the old plugin-private scratch use case.
 
-|           | `ctx.facts`        | `ctx.collections`                   | `ctx.kv`                             |
-| --------- | ------------------ | ----------------------------------- | ------------------------------------ |
-| lifetime  | dies with the task | durable                             | durable                              |
-| scope     | one task           | cross-plugin, unscoped reads        | this plugin only                     |
-| shape     | append-only log    | schema-validated, queryable records | opaque blob, get/set by key          |
-| meant for | a task's history   | records a `ctx.ui` panel renders    | scratch state only this plugin reads |
-
-If you want to query it or put it on a panel, you want a collection — kv has
-no schema and no query language on purpose.
+| `scope`/`mode`                   | lifetime           | shape                       | meant for                            |
+| -------------------------------- | ------------------ | --------------------------- | ------------------------------------ |
+| `task` / `append`                | dies with the task | append-only log             | a task's history                     |
+| `durable` / `upsert` (schema)    | durable            | schema-validated, queryable | records a `ctx.ui` panel renders     |
+| `durable` / `upsert` (no schema) | durable            | opaque blob, get/set by key | scratch state only this plugin reads |
 
 ```js
-ctx.kv.set('cursor', { lastSeenId: 42 });
-const cursor = ctx.kv.get('cursor'); // undefined if never set
-ctx.kv.del('cursor');
-for (const { key, value } of ctx.kv.list('job:')) {
-  /* ... */
-}
+ctx.records.define({
+  name: 'cursor',
+  scope: 'durable',
+  mode: 'upsert',
+  key: 'id',
+});
+await ctx.records.put('cursor', { id: 'main', lastSeenId: 42 });
+const [row] = await ctx.records.query('cursor', { where: { id: 'main' } });
 ```
 
-Gate: `kv.write` on `set`/`del`/`begin`/`end`. `get`/`list`/`interrupted` are
-ungated reads, matching `facts.read`/`artifacts.list`.
+Gate: `records.define` on `define()`; `records.write` on `put()`/`begin()`/
+`end()`. `read`/`query`/`watch`/`interrupted` are ungated reads, matching
+`artifacts.list`.
 
 ### Crash recovery — `begin` / `end` / `interrupted`
 
 Every mount of a plugin (a fresh boot, or a hot reload) gets its own mount
-id. `begin(key, value)` checkpoints an in-flight operation under that id;
-`end(key)` deletes the checkpoint once the operation finishes; `interrupted()`
-returns every checkpoint stamped by a mount **other than the current one** —
-work this plugin was in the middle of the last time its process went away,
-crash or reload alike. Call it first thing in `apply()`:
+id. `begin(name, key, value)` checkpoints an in-flight operation under that
+id; `end(name, key)` settles the checkpoint once the operation finishes;
+`interrupted(name?)` returns every checkpoint stamped by a mount **other
+than the current one** — work this plugin was in the middle of the last time
+its process went away, crash or reload alike. Call it first thing in
+`apply()`:
 
 ```js
 export async function apply(ctx) {
-  for (const { key, value, startedAt } of ctx.kv.interrupted()) {
-    ctx.logger.warn({ key, startedAt }, 'resuming an interrupted operation');
-    await resume(key, value);
-    ctx.kv.end(key);
+  for (const { key, payload } of ctx.records.interrupted('sync')) {
+    ctx.logger.warn({ key }, 'resuming an interrupted operation');
+    await resume(key, payload);
+    ctx.records.end('sync', key);
   }
 
-  ctx.kv.begin('sync:full', { startedAt: new Date().toISOString() });
+  ctx.records.begin('sync', 'full', { startedAt: new Date().toISOString() });
   await runSync();
-  ctx.kv.end('sync:full');
+  ctx.records.end('sync', 'full');
 }
 ```
 
-`begin`/`end` and `get`/`set`/`list` share the same table row per key — a
-plain `set` on a key currently marked in-flight clears the mark as a side
-effect, so prefix checkpoint keys (`sync:`, `upload:`) separately from your
-plain state keys to avoid an accidental collision wiping your own recovery
-marker.
+`name` is required on `begin`/`end` — one plugin can own several stores, and
+a flat per-plugin checkpoint key would let two of them collide.
+`begin`/`end` and an ordinary `put()` share the same row per key — a plain
+`put` on a key currently marked in-flight settles the mark as a side effect,
+so prefix checkpoint keys (`sync:`, `upload:`) separately from your plain
+state keys to avoid an accidental collision wiping your own recovery marker.
 
 This is the plugin-side analogue of core's own boot recovery
 (`recoverTasks()` in `server/task-engine/reconcile.ts`,
@@ -630,25 +606,25 @@ a new mount too — whatever it interrupted correctly shows up in
 `interrupted()` on the next `apply()`, because it really was abandoned
 mid-operation.
 
-### Unmount does not touch kv state
+### Unmount follows ROW lifetime, not registration
 
 Every _registration_ a plugin makes through `ctx` — a workflow, a route, a
-harness, a UI panel, a policy hook, a fact/collection _definition_ — is
-undone on unmount. kv **state** is not, on purpose: nothing `set`, `del`,
-`begin`, or `end` does is a registration, so nothing deregisters it on
-unmount. A hot reload re-runs `apply()` moments later expecting its own
-checkpoints still there, and a crash-recovery mechanism that lost its
-checkpoints in the very crash it exists to recover from would be pointless.
-Collection _rows_ already follow the identical rule (only the definition
-drops on unmount, never the rows). Deleting kv state is only ever explicit —
-call `ctx.kv.del()` yourself.
+harness, a UI panel, a policy hook — is undone on unmount. A `ctx.records`
+**definition** follows its rows instead: a `task`-scoped store's definition
+drops on unmount (its rows already died with their task), but a `durable`
+store's definition survives — a hot reload re-runs `apply()` moments later
+expecting its own durable records still there, and a store whose rows
+survived but whose definition vanished would be unreadable. Checkpoint state
+is not a registration either, so nothing deregisters it on unmount; deleting
+it is only ever explicit, via an ordinary `put()` on the same key.
 
 ### Limits
 
-`kv.write` gates the `ctx` surface, not the process: a plugin runs in-process
-and can read or write the `plugin_kv` table directly, the same caveat as
-every other grant. There's no size cap, no TTL, and no eviction — an
-unbounded writer grows the DB, and nothing here enforces a quota.
+`records.write` gates the `ctx` surface, not the process: a plugin runs
+in-process and can read or write the `plugin_records` table directly, the
+same caveat as every other grant. There's no size cap, no TTL, and no
+eviction on a durable store — an unbounded writer grows the DB, and nothing
+here enforces a quota.
 
 ## Failure modes
 

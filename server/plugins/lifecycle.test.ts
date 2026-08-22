@@ -3,11 +3,10 @@ import { createPluginContext } from './context.js';
 import { unmountPlugin, getPluginUnloadability } from './lifecycle.js';
 import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
 import { resetPluginUi, listUiContributions } from './ui-registry.js';
-import { resetFacts } from './facts.js';
-import { resetCollections, listPluginCollections, isCollectionDefined } from './collections.js';
-import * as collectionsModule from './collections.js';
+import { resetRecords, listPluginStores, isStoreDefined } from './records.js';
+import * as recordsModule from './records.js';
 import { resetServices, listPluginServices, getService } from './services.js';
-import { getRecord } from '../repositories/plugin-collections.js';
+import { getRecord } from '../repositories/plugin-records.js';
 import { registerWorkflow, getWorkflow } from '../workflows/registry.js';
 import { resetHarnesses, getHarness, CORE_HARNESS_IDS } from '../harnesses/registry.js';
 import { resetCompute, getCompute, CORE_COMPUTE_KINDS } from '../compute/registry.js';
@@ -80,8 +79,7 @@ beforeEach(() => {
   createTestDb();
   resetPluginRoutes();
   resetPluginUi();
-  resetFacts();
-  resetCollections();
+  resetRecords();
   resetServices();
   resetHarnesses();
   resetCompute();
@@ -128,9 +126,8 @@ describe('unmountPlugin', () => {
       'compute.register',
       'surfaces.register',
       'artifacts.write',
-      'facts.define',
-      'collections.define',
-      'collections.write',
+      'records.define',
+      'records.write',
       'ui.panel',
       'policy.intercept',
       'services.provide',
@@ -142,9 +139,9 @@ describe('unmountPlugin', () => {
     ctx.compute.register(fakeCompute('fake'));
     ctx.surfaces.register(fakeSurface('fake') as never);
     ctx.integrations.register(fakeProvider('fake'));
-    ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
-    ctx.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
-    ctx.ui.panel({ slot: 'task.panel', fact: 'observed', as: 'json' });
+    ctx.records.define({ name: 'observed', scope: 'task', mode: 'append' });
+    ctx.records.define({ name: 'baselines', scope: 'durable', mode: 'upsert', key: 'id' });
+    ctx.ui.panel({ slot: 'task.panel', record: 'observed', as: 'json' });
     ctx.policy.intercept('task.launch', () => ({ deny: 'no' }));
     ctx.services.provide('chat.send', () => {});
 
@@ -164,7 +161,7 @@ describe('unmountPlugin', () => {
     expect(getProvider(`${pluginId}:fake`)).toBeDefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(true);
     expect((await evaluatePolicy('task.launch', { data: {} })).allowed).toBe(false);
-    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(true);
+    expect(isStoreDefined(`${pluginId}:baselines`)).toBe(true);
     expect(getService('chat.send')).toBeDefined();
 
     const report = await unmountPlugin(pluginId, ctx);
@@ -179,8 +176,10 @@ describe('unmountPlugin', () => {
     expect(report.released.computeKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.surfaceKinds).toEqual([`${pluginId}:fake`]);
     expect(report.released.providerKinds).toEqual([`${pluginId}:fake`]);
-    expect(report.released.factTypes).toEqual([`${pluginId}:observed`]);
-    expect(report.released.collectionNames).toEqual([`${pluginId}:baselines`]);
+    // Only the task-scoped store's definition is released — the durable one
+    // (`baselines`) survives, same as its rows. See the dedicated
+    // "unmount drops task-scoped..." test below for that split in isolation.
+    expect(report.released.recordStores).toEqual([`${pluginId}:observed`]);
     expect(report.released.serviceNames).toEqual(['chat.send']);
     expect(report.released.effects).toBe(0);
 
@@ -192,10 +191,12 @@ describe('unmountPlugin', () => {
     expect(listSurfaces().map((s) => s.kind)).not.toContain(`${pluginId}:fake`);
     expect(getProvider(`${pluginId}:fake`)).toBeUndefined();
     expect(listUiContributions().some((c) => c.pluginId === pluginId)).toBe(false);
-    // Definitions gone (SHR-275) — but see the dedicated durability test
-    // below for the record itself surviving unmount.
-    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(false);
-    expect(listPluginCollections(pluginId)).toEqual([]);
+    // Task-scoped definition gone (SHR-282)...
+    expect(isStoreDefined(`${pluginId}:observed`)).toBe(false);
+    // ...but the durable one is still defined — see the dedicated durability
+    // test below for the record itself surviving unmount too.
+    expect(isStoreDefined(`${pluginId}:baselines`)).toBe(true);
+    expect(listPluginStores(pluginId)).toEqual([`${pluginId}:baselines`]);
     expect(getService('chat.send')).toBeUndefined();
     expect(listPluginServices(pluginId)).toEqual([]);
     // The policy hook stopped firing — the point falls back to the fast
@@ -245,8 +246,7 @@ describe('unmountPlugin', () => {
       computeKinds: [],
       surfaceKinds: [],
       providerKinds: [],
-      factTypes: [],
-      collectionNames: [],
+      recordStores: [],
       serviceNames: [],
       effects: 0,
     });
@@ -302,43 +302,53 @@ describe('unmountPlugin', () => {
     expect(report.released.routes).toBe(0);
   });
 
-  it('a record written before unmount is still readable after unmount — collections are durable, only definitions drop', async () => {
+  it('a durable record and its definition both survive unmount — only task-scoped definitions drop', async () => {
     const pluginId = 'lc-durable';
-    const ctx = createPluginContext(pluginId, ['collections.define', 'collections.write']);
-    ctx.collections.define({ name: 'baselines', key: 'branch', schema: { type: 'object' } });
-    await ctx.collections.put('baselines', { branch: 'main', pct: 87 });
+    const ctx = createPluginContext(pluginId, ['records.define', 'records.write']);
+    ctx.records.define({ name: 'baselines', scope: 'durable', mode: 'upsert', key: 'branch' });
+    await ctx.records.put('baselines', { branch: 'main', pct: 87 });
 
     await unmountPlugin(pluginId, ctx);
 
-    // The definition is gone...
-    expect(isCollectionDefined(`${pluginId}:baselines`)).toBe(false);
-    // ...but the stored record survives, read straight from the repository —
-    // this is the durability guarantee `ctx.collections` exists to provide,
-    // and a hot reload (SHR-254) depends on it still being there.
-    expect(getRecord(`${pluginId}:baselines`, 'main')?.record).toEqual({
+    // The definition survives (SHR-282: definition lifetime follows ROW
+    // lifetime, and durable rows outlive unmount)...
+    expect(isStoreDefined(`${pluginId}:baselines`)).toBe(true);
+    // ...and so does the stored record, read straight from the repository —
+    // this is the durability guarantee `ctx.records` exists to provide, and a
+    // hot reload (SHR-254) depends on it still being there.
+    expect(getRecord(`${pluginId}:baselines`, 'main')?.payload).toEqual({
       branch: 'main',
       pct: 87,
     });
   });
 
-  it('a failing unregisterPluginCollections does not strand the later steps', async () => {
-    const pluginId = 'lc-collections-fail';
+  it('a failing unregisterTaskScopedStores does not strand the later steps', async () => {
+    const pluginId = 'lc-records-fail';
     const ctx = createPluginContext(pluginId, ['harnesses.register']);
     ctx.harnesses.register(fakeHarness('fake'));
 
-    const spy = vi
-      .spyOn(collectionsModule, 'unregisterPluginCollections')
-      .mockImplementation(() => {
-        throw new Error('collections boom');
-      });
+    const spy = vi.spyOn(recordsModule, 'unregisterTaskScopedStores').mockImplementation(() => {
+      throw new Error('records boom');
+    });
     try {
       const report = await unmountPlugin(pluginId, ctx);
 
-      expect(report.failures).toContainEqual({ step: 'collections', error: 'collections boom' });
+      expect(report.failures).toContainEqual({ step: 'records', error: 'records boom' });
       // The later steps (harnesses, etc.) still ran despite the failure above.
       expect(() => getHarness(`${pluginId}:fake`)).toThrow();
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('unmount drops task-scoped store definitions and RETAINS durable ones', async () => {
+    const ctx = createPluginContext('lc-sweep', ['records.define', 'records.write']);
+    ctx.records.define({ name: 'ephemeral', scope: 'task', mode: 'append' });
+    ctx.records.define({ name: 'lasting', scope: 'durable', mode: 'upsert', key: 'id' });
+
+    await unmountPlugin('lc-sweep', ctx);
+
+    expect(isStoreDefined('lc-sweep:ephemeral')).toBe(false);
+    expect(isStoreDefined('lc-sweep:lasting')).toBe(true);
   });
 });

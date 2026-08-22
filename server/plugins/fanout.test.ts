@@ -244,7 +244,7 @@ describe('plugins/fanout', () => {
     await sleep(30);
   });
 
-  it('collection source with no resolver throws naming ctx.collections', async () => {
+  it('collection source with no resolver throws naming ctx.records', async () => {
     const api = createFanOutApi('demo');
     await expect(
       api.run({
@@ -252,7 +252,7 @@ describe('plugins/fanout', () => {
         source: { collection: 'widgets' },
         each: async () => 'ok',
       }),
-    ).rejects.toThrow(/ctx\.collections/);
+    ).rejects.toThrow(/ctx\.records/);
   });
 
   it('collection source with a resolver fans out its returned array', async () => {

@@ -4,7 +4,7 @@
  * A plugin gets exactly two rendered things today: a schedules form from
  * `config` and a run detail view from `output`, on three fixed surfaces. There
  * is no sidebar, no panel, no badge — not because rendering is hard, but
- * because there was no shared data for a panel to render. `ctx.facts` supplies
+ * because there was no shared data for a panel to render. `ctx.records` supplies
  * that; this supplies the binding.
  *
  * No plugin JavaScript ever reaches the browser. The client owns every
@@ -32,8 +32,7 @@ import type {
 } from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
 import { qualify } from './qualify.js';
-import { isFactTypeDefined } from './facts.js';
-import { isCollectionDefined } from './collections.js';
+import { isStoreDefined } from './records.js';
 import { forgetCompiledSchema, validateAgainstSchema } from '../services/output-contract.js';
 
 const logger = childLogger('plugins/ui-registry');
@@ -47,68 +46,47 @@ const UI_SLOTS: readonly UiSlot[] = [
   'settings.card',
 ];
 
-/** A binding as served to the client: the plugin's declaration with its fact
- *  or collection name qualified and its owner attached.
+/** A binding as served to the client: the plugin's declaration with its
+ *  record store name qualified and its owner attached.
  *
- * `UiPanelBinding` became a union (`UiFactPanelBinding | UiCollectionPanelBinding`)
- * in SHR-275, so `interface UiContribution extends UiPanelBinding` no longer
- * typechecks — TS can't extend an interface onto a union. An intersection
- * (`UiPanelBinding & { ... }`) has the same effect: every contribution is
- * still exactly one of the two binding shapes, plus the fields below. */
+ * SHR-282 collapsed the pre-existing `UiFactPanelBinding | UiCollectionPanelBinding`
+ * union into one `UiPanelBinding` shape (a single `record` field) — there is
+ * only one binding kind now, so this is a plain intersection, not a union. */
 export type UiContribution = UiPanelBinding & {
   /** Manifest row id of the contributing plugin. */
   pluginId: string;
-  /** Qualified fact type — `<pluginId>:<fact>`. Present only on a fact-bound panel. */
-  factType?: string;
-  /** Qualified collection name — `<pluginId>:<collection>`. Present only on a
-   *  collection-bound panel. */
-  collectionName?: string;
+  /** Qualified record store — `<pluginId>:<record>`. */
+  recordStore: string;
 };
 
 /** pluginId -> its contributions, insertion order preserved. */
 const contributions = new Map<string, UiContribution[]>();
 
-/** Qualified fact types already warned about via `listUiContributions` — logs
- *  once per type, not once per request. */
-const warnedMissingFactType = new Set<string>();
+/** Qualified record stores already warned about via `listUiContributions` —
+ *  logs once per store, not once per request. */
+const warnedMissingRecordStore = new Set<string>();
 
-/** Qualified collection names already warned about via `listUiContributions`. */
-const warnedMissingCollection = new Set<string>();
-
-/** Registers a panel binding. `binding.fact` / `binding.collection` is BARE;
- * this qualifies whichever is present.
+/** Registers a panel binding. `binding.record` is BARE; this qualifies it.
  *
  * Validates `binding.slot` against the six declared slots — an unknown slot
  * has nowhere in the client to render and is a plugin authoring bug, not a
  * degrade-gracefully case (contrast `binding.as`, an unknown renderer, which
  * the client renders as `json` rather than rejecting).
  *
- * Also requires exactly one of `binding.fact` / `binding.collection`. Neither
- * or both leaves nowhere (or two conflicting places) to resolve the panel's
- * data from — the same class of authoring bug as an unknown slot, so it
- * throws rather than degrading. `server/plugins/context.ts` used to check the
- * fact side of this (`requireLocalId(payload, 'fact', 'ui.panel')`); now that
- * `fact` is one of two valid binding targets, that check belongs here where
- * both are visible, not split across two files with the same ownership. */
+ * Also requires a non-empty `binding.record` — with nothing bound there is
+ * nowhere to resolve the panel's data from, the same class of authoring bug
+ * as an unknown slot, so it throws rather than degrading. */
 export function registerPluginUiPanel(pluginId: string, binding: UiPanelBinding): void {
   if (!UI_SLOTS.includes(binding.slot)) {
     throw new Error(
       `plugin "${pluginId}": ui.panel "slot" must be one of ${UI_SLOTS.join(', ')} (got "${binding.slot}")`,
     );
   }
-  const hasFact = binding.fact !== undefined;
-  const hasCollection = binding.collection !== undefined;
-  if (hasFact === hasCollection) {
-    throw new Error(
-      `plugin "${pluginId}": ui.panel binding must set exactly one of "fact" or "collection" ` +
-        `(got ${hasFact ? 'both' : 'neither'})`,
-    );
+  if (typeof binding.record !== 'string' || binding.record.length === 0) {
+    throw new Error(`plugin "${pluginId}": ui.panel binding requires a non-empty string "record"`);
   }
-  const factType = hasFact ? qualify(pluginId, binding.fact as string) : undefined;
-  const collectionName = hasCollection
-    ? qualify(pluginId, binding.collection as string)
-    : undefined;
-  const contribution: UiContribution = { ...binding, pluginId, factType, collectionName };
+  const recordStore = qualify(pluginId, binding.record);
+  const contribution: UiContribution = { ...binding, pluginId, recordStore };
 
   let pluginContributions = contributions.get(pluginId);
   if (!pluginContributions) {
@@ -120,8 +98,7 @@ export function registerPluginUiPanel(pluginId: string, binding: UiPanelBinding)
     {
       plugin_id: pluginId,
       slot: binding.slot,
-      fact_type: factType,
-      collection_name: collectionName,
+      record_store: recordStore,
       as: binding.as,
     },
     'plugin ui panel registered',
@@ -131,39 +108,24 @@ export function registerPluginUiPanel(pluginId: string, binding: UiPanelBinding)
 /**
  * Every contribution, for `GET /api/plugin-ui/contributions`.
  *
- * Also where a `binding.fact` typo gets its only diagnostic: checked here
+ * Also where a `binding.record` typo gets its only diagnostic: checked here
  * rather than in `registerPluginUiPanel` because ordering between
- * `facts.define()` and `ui.panel()` inside one `apply()` is the plugin
+ * `records.define()` and `ui.panel()` inside one `apply()` is the plugin
  * author's choice — checking at registration time would false-positive
  * whenever `ui.panel()` runs first. By the time anything reads this list,
- * every plugin's `apply()` has already returned, so a still-undefined type
+ * every plugin's `apply()` has already returned, so a still-undefined store
  * is a real typo, not a race. A NOT-throw: an unmatched binding renders as a
  * permanently empty panel, which is a plugin authoring bug, not a reason to
  * 500 every other plugin's panels too.
- *
- * SHR-275 extends the same check to a collection-bound binding, for the same
- * reason: `collections.define()` / `ui.panel({ collection })` ordering inside
- * one `apply()` is the plugin author's choice too.
  */
 export function listUiContributions(): UiContribution[] {
   const all = Array.from(contributions.values()).flat();
   for (const c of all) {
-    if (c.factType && !isFactTypeDefined(c.factType) && !warnedMissingFactType.has(c.factType)) {
-      warnedMissingFactType.add(c.factType);
+    if (!isStoreDefined(c.recordStore) && !warnedMissingRecordStore.has(c.recordStore)) {
+      warnedMissingRecordStore.add(c.recordStore);
       logger.warn(
-        { plugin_id: c.pluginId, slot: c.slot, fact_type: c.factType },
-        'ui.panel binds a fact type that was never defined — check binding.fact for a typo',
-      );
-    }
-    if (
-      c.collectionName &&
-      !isCollectionDefined(c.collectionName) &&
-      !warnedMissingCollection.has(c.collectionName)
-    ) {
-      warnedMissingCollection.add(c.collectionName);
-      logger.warn(
-        { plugin_id: c.pluginId, slot: c.slot, collection_name: c.collectionName },
-        'ui.panel binds a collection that was never defined — check binding.collection for a typo',
+        { plugin_id: c.pluginId, slot: c.slot, record_store: c.recordStore },
+        'ui.panel binds a record store that was never defined — check binding.record for a typo',
       );
     }
   }
@@ -188,12 +150,12 @@ const actionsById = new Map<string, UiActionRegistration>();
 /**
  * Registers an action. `def.id` is BARE; this qualifies it to
  * `<pluginId>:<id>` the same way `registerPluginUiPanel` qualifies
- * `binding.fact`/`binding.collection`.
+ * `binding.record`.
  *
  * Validates `id`/`label`/`run`/`slot` at registration time (unlike the panel
- * side's fact-type typo check, which waits until read time) — there is no
+ * side's record-store typo check, which waits until read time) — there is no
  * legitimate ordering dependency here the way there is between
- * `facts.define()` and `ui.panel()`, so a bad declaration is a load-time
+ * `records.define()` and `ui.panel()`, so a bad declaration is a load-time
  * failure, not a permanently-broken button nobody is told about.
  */
 export function registerPluginUiAction(pluginId: string, def: UiActionDefinition): void {
@@ -346,12 +308,11 @@ export function unregisterPluginUi(pluginId: string): void {
   logger.info({ plugin_id: pluginId }, 'plugin ui contributions unregistered');
 }
 
-/** Test-only: clears all contributions/actions and the missing-fact-type /
- *  missing-collection warn dedupes. */
+/** Test-only: clears all contributions/actions and the missing-record-store
+ *  warn dedupe. */
 export function resetPluginUi(): void {
   contributions.clear();
   actionsByPlugin.clear();
   actionsById.clear();
-  warnedMissingFactType.clear();
-  warnedMissingCollection.clear();
+  warnedMissingRecordStore.clear();
 }

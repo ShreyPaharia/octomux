@@ -2,19 +2,23 @@
  * server/surfaces/render.ts
  *
  * Resolves every `ctx.ui` panel binding against one surface's declared
- * renderers, loads the facts each binding needs, and renders. This is the
+ * renderers, loads the records each binding needs, and renders. This is the
  * seam the whole ticket is about: a binding written before a surface existed
  * still renders on it with zero change to the plugin that wrote the binding
  * (see `portability.test.ts`).
  */
 import { childLogger } from '../logger.js';
-import { readFacts } from '../plugins/facts.js';
+import { toEnvelope } from '../plugins/records.js';
 import { listUiContributions } from '../plugins/ui-registry.js';
 import type { UiContribution } from '../plugins/ui-registry.js';
 import { getSurface } from './registry.js';
-import { queryRecords } from '../repositories/plugin-collections.js';
-import type { CollectionRecord, QuerySpec } from '../repositories/plugin-collections.js';
-import type { Fact, SurfaceDefinition, SurfacePanel, SurfacePrompt } from '@octomux/plugin-api';
+import { readRecordsForTask, queryRecords } from '../repositories/plugin-records.js';
+import type {
+  QuerySpec,
+  SurfaceDefinition,
+  SurfacePanel,
+  SurfacePrompt,
+} from '@octomux/plugin-api';
 
 const logger = childLogger('surfaces/render');
 
@@ -41,7 +45,7 @@ function requireSurface(kind: string): SurfaceDefinition {
   return surface;
 }
 
-/** Every ui contribution resolved for one surface, WITHOUT facts. */
+/** Every ui contribution resolved for one surface, WITHOUT records. */
 export function contributionsForSurface(
   kind: string,
 ): Array<UiContribution & { renderer: string }> {
@@ -49,129 +53,28 @@ export function contributionsForSurface(
   return listUiContributions().map((c) => ({ ...c, renderer: resolveRenderer(surface, c.as) }));
 }
 
-/**
- * Loads each contribution's facts for `taskId` and renders them into this
- * surface's transport. A panel whose `render` returns `undefined` is
- * dropped. A `render` that THROWS is caught and logged — one bad panel does
- * not blank the whole surface, same fail-soft discipline as the rest of the
- * plugin runtime.
- */
-export async function panelsForSurface(kind: string, taskId: string): Promise<RenderedPanel[]> {
-  const surface = requireSurface(kind);
-  if (!surface.render) {
-    throw new Error(`surface "${kind}" has no render — the client renders it`);
-  }
-  const render = surface.render;
-  const contributions = contributionsForSurface(kind);
-  const results: RenderedPanel[] = [];
-  for (const c of contributions) {
-    // SHR-275 made a contribution's `factType` optional: a collection-bound
-    // panel has none. This path renders a TASK's panels out of the task's own
-    // facts, so a collection-bound contribution has nothing to read here and
-    // is skipped rather than rendered empty. `renderCollectionPanels` below
-    // (SHR-279) is the path that handles those bindings — deliberately a
-    // separate function, not folded into this task loop.
-    if (!c.factType) continue;
-    const facts = await readFacts(taskId, { type: c.factType });
-    const panel: SurfacePanel = {
-      pluginId: c.pluginId,
-      slot: c.slot,
-      factType: c.factType,
-      as: c.as,
-      renderer: c.renderer,
-      value: c.value,
-      delta: c.delta,
-      title: c.title,
-      facts,
-    };
-    let text: string | undefined;
-    try {
-      text = render(panel);
-    } catch (err) {
-      logger.warn(
-        { plugin_id: c.pluginId, surface_kind: kind, slot: c.slot, err },
-        'surface render threw, skipping panel',
-      );
-      continue;
-    }
-    if (text === undefined) continue;
-    results.push({
-      pluginId: c.pluginId,
-      slot: c.slot,
-      title: c.title,
-      as: c.as,
-      renderer: c.renderer,
-      text,
-    });
-  }
-  return results;
-}
-
-/** Adapts collection records into `Fact[]`, mirroring `recordsAsFacts` in
- *  `src/components/PluginPanels.tsx` exactly, so a collection panel reads
- *  the same whether the browser or a server surface draws it. `seq` is the
- *  record's position in this response (a collection has no fact sequence),
- *  `taskId` is empty (a collection is task-independent), `type` is the
- *  qualified collection name, and `createdAt` reads the record's
- *  `updatedAt` — a renderer's "when" column should reflect the last write,
- *  not the original insert. */
-function recordsAsFacts(records: CollectionRecord[]): Fact[] {
-  return records.map((r, i) => ({
-    seq: i,
-    taskId: '',
-    type: r.collection,
-    payload: r.record,
-    createdAt: r.updatedAt,
-  }));
-}
-
-/**
- * Renders every panel bound to one durable collection on one surface —
- * the collection-bound counterpart to `panelsForSurface`, which only ever
- * walks a task's facts. `collectionName` must already be QUALIFIED
- * (`<pluginId>:<collection>`, what `UiContribution.collectionName` holds) —
- * there is no plugin identity at this call site to qualify a bare name
- * against.
- *
- * Same preamble as `panelsForSurface`: throws on an unknown surface, and
- * throws the same "the client renders it" error when `surface.render` is
- * absent — that is how the `web` surface DECLARES IT CANNOT render
- * server-side, and this path keeps that behaviour rather than working
- * around it.
- *
- * Records are read ONCE via `queryRecords` (unscoped, like `facts.read`) —
- * `q` lets a caller pass a `limit`/`orderBy` for a large collection; the
- * default is unbounded. Same fail-soft discipline as `panelsForSurface`: a
- * `render` that throws is caught, logged, and skipped; a `render` returning
- * `undefined` is dropped. Not filtered by slot, same as `panelsForSurface` —
- * the slot rides along in the result.
- */
-export async function renderCollectionPanels(
+async function renderContributions(
   kind: string,
-  collectionName: string,
-  q?: QuerySpec,
+  contributions: Array<UiContribution & { renderer: string }>,
+  recordsFor: (c: UiContribution & { renderer: string }) => SurfacePanel['records'],
 ): Promise<RenderedPanel[]> {
   const surface = requireSurface(kind);
   if (!surface.render) {
     throw new Error(`surface "${kind}" has no render — the client renders it`);
   }
   const render = surface.render;
-  const contributions = contributionsForSurface(kind).filter(
-    (c) => c.collectionName === collectionName,
-  );
-  const facts = recordsAsFacts(queryRecords(collectionName, q));
   const results: RenderedPanel[] = [];
   for (const c of contributions) {
     const panel: SurfacePanel = {
       pluginId: c.pluginId,
       slot: c.slot,
-      collectionName: c.collectionName,
+      recordStore: c.recordStore,
       as: c.as,
       renderer: c.renderer,
       value: c.value,
       delta: c.delta,
       title: c.title,
-      facts,
+      records: recordsFor(c),
     };
     let text: string | undefined;
     try {
@@ -194,6 +97,60 @@ export async function renderCollectionPanels(
     });
   }
   return results;
+}
+
+/** Two entry points, differing by WHAT is rendered — a task's panels, or one
+ *  store's board — not by binding kind. The binding-kind branch is gone; the
+ *  second function is not, because panelsForStore carries a QuerySpec that
+ *  windows an unbounded store ("a 2,000-record board does not need every row in
+ *  a Slack message"). A merged walk has nowhere to put per-store limit/offset,
+ *  and one window shared across stores with different schemas is meaningless. */
+
+/**
+ * Loads each contribution's records for `taskId` and renders them into this
+ * surface's transport. A panel whose `render` returns `undefined` is
+ * dropped. A `render` that THROWS is caught and logged — one bad panel does
+ * not blank the whole surface, same fail-soft discipline as the rest of the
+ * plugin runtime.
+ *
+ * `readRecordsForTask` is scoped to `taskId`, so a binding on a DURABLE store
+ * (whose rows all carry `taskId: null`) naturally comes back empty here —
+ * no separate check needed to keep a durable-store panel off the task walk.
+ */
+export async function panelsForTask(kind: string, taskId: string): Promise<RenderedPanel[]> {
+  const contributions = contributionsForSurface(kind);
+  return renderContributions(kind, contributions, (c) =>
+    readRecordsForTask(taskId, c.recordStore).map(toEnvelope),
+  );
+}
+
+/**
+ * Renders every panel bound to one record store on one surface — the
+ * durable-board counterpart to `panelsForTask`, which only ever walks a
+ * task's rows. `store` must already be QUALIFIED (`<pluginId>:<record>`,
+ * what `UiContribution.recordStore` holds) — there is no plugin identity at
+ * this call site to qualify a bare name against.
+ *
+ * Same preamble as `panelsForTask`: throws on an unknown surface, and throws
+ * the same "the client renders it" error when `surface.render` is absent —
+ * that is how the `web` surface DECLARES IT CANNOT render server-side, and
+ * this path keeps that behaviour rather than working around it.
+ *
+ * Records are read ONCE via `queryRecords` (unscoped) — `q` lets a caller
+ * pass a `limit`/`orderBy` for a large store; the default is unbounded. Same
+ * fail-soft discipline as `panelsForTask`: a `render` that throws is caught,
+ * logged, and skipped; a `render` returning `undefined` is dropped. Not
+ * filtered by slot, same as `panelsForTask` — the slot rides along in the
+ * result.
+ */
+export async function panelsForStore(
+  kind: string,
+  store: string,
+  q?: QuerySpec,
+): Promise<RenderedPanel[]> {
+  const contributions = contributionsForSurface(kind).filter((c) => c.recordStore === store);
+  const records = queryRecords(store, q).map(toEnvelope);
+  return renderContributions(kind, contributions, () => records);
 }
 
 /** Puts a question to a human on a surface. Throws on an unknown kind, and

@@ -13,13 +13,8 @@ vi.mock('./event-source', () => ({
 }));
 
 const { renderHook, waitFor, act } = await import('@testing-library/react');
-const {
-  usePluginUiContributions,
-  usePluginFacts,
-  usePluginCollection,
-  usePluginUiActions,
-  invokePluginAction,
-} = await import('./plugin-ui');
+const { usePluginUiContributions, usePluginRecords, usePluginUiActions, invokePluginAction } =
+  await import('./plugin-ui');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -30,8 +25,8 @@ describe('usePluginUiContributions', () => {
   it('fetches contributions and filters by slot', async () => {
     requestMock.mockResolvedValue({
       contributions: [
-        { pluginId: 'a', slot: 'task.panel', fact: 'x', factType: 'a:x', as: 'stat' },
-        { pluginId: 'b', slot: 'task.badge', fact: 'y', factType: 'b:y', as: 'badge' },
+        { pluginId: 'a', slot: 'task.panel', record: 'x', recordStore: 'a:x', as: 'stat' },
+        { pluginId: 'b', slot: 'task.badge', record: 'y', recordStore: 'b:y', as: 'badge' },
       ],
     });
 
@@ -70,38 +65,40 @@ describe('usePluginUiContributions', () => {
   });
 });
 
-describe('usePluginFacts', () => {
+describe('usePluginRecords', () => {
   const contribution = {
     pluginId: 'coverage-bot',
     slot: 'task.panel' as const,
-    fact: 'coverage',
-    factType: 'coverage-bot:coverage',
+    record: 'coverage',
+    recordStore: 'coverage-bot:coverage',
     as: 'stat',
   };
 
-  it('fetches facts scoped to the task and qualified fact type', async () => {
+  it('with a taskId, fetches task-scoped records for the qualified store', async () => {
     requestMock.mockResolvedValue({
-      facts: [
+      records: [
         {
           seq: 1,
+          store: 'coverage-bot:coverage',
           taskId: 't1',
-          type: 'coverage-bot:coverage',
+          key: null,
           payload: { pct: 90 },
           createdAt: 'x',
+          updatedAt: 'x',
         },
       ],
     });
 
-    const { result } = renderHook(() => usePluginFacts('t1', contribution));
+    const { result } = renderHook(() => usePluginRecords(contribution, 't1'));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(requestMock).toHaveBeenCalledWith('/tasks/t1/facts?type=coverage-bot%3Acoverage');
-    expect(result.current.facts).toHaveLength(1);
+    expect(requestMock).toHaveBeenCalledWith('/tasks/t1/records?store=coverage-bot%3Acoverage');
+    expect(result.current.records).toHaveLength(1);
   });
 
   it('refetches when an event carries the same taskId', async () => {
-    requestMock.mockResolvedValue({ facts: [] });
-    renderHook(() => usePluginFacts('t1', contribution));
+    requestMock.mockResolvedValue({ records: [] });
+    renderHook(() => usePluginRecords(contribution, 't1'));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
 
     act(() => {
@@ -112,8 +109,8 @@ describe('usePluginFacts', () => {
   });
 
   it('ignores events for a different task', async () => {
-    requestMock.mockResolvedValue({ facts: [] });
-    renderHook(() => usePluginFacts('t1', contribution));
+    requestMock.mockResolvedValue({ records: [] });
+    renderHook(() => usePluginRecords(contribution, 't1'));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
 
     act(() => {
@@ -124,74 +121,32 @@ describe('usePluginFacts', () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fetch for a collection-bound contribution (no factType)', async () => {
-    const collectionContribution = {
-      pluginId: 'coverage-bot',
-      slot: 'task.panel' as const,
-      collection: 'baselines',
-      collectionName: 'coverage-bot:baselines',
-      as: 'stat',
-    };
-
-    const { result } = renderHook(() => usePluginFacts('t1', collectionContribution));
-
-    await new Promise((r) => setTimeout(r, 50));
-    expect(requestMock).not.toHaveBeenCalled();
-    expect(result.current.facts).toEqual([]);
-    expect(result.current.loading).toBe(false);
-  });
-});
-
-describe('usePluginCollection', () => {
-  const contribution = {
-    pluginId: 'coverage-bot',
-    slot: 'task.panel' as const,
-    collection: 'baselines',
-    collectionName: 'coverage-bot:baselines',
-    as: 'stat',
-  };
-
-  it('fetches records from the qualified collection endpoint, URL-encoding the ":"', async () => {
+  it('with no taskId, queries the unscoped store endpoint, URL-encoding the ":"', async () => {
     requestMock.mockResolvedValue({
       records: [
         {
-          collection: 'coverage-bot:baselines',
+          seq: 1,
+          store: 'coverage-bot:coverage',
+          taskId: null,
           key: 'main',
-          record: { pct: 90 },
+          payload: { pct: 90 },
           createdAt: 'c',
           updatedAt: 'u',
         },
       ],
     });
 
-    const { result } = renderHook(() => usePluginCollection(contribution));
+    const { result } = renderHook(() => usePluginRecords(contribution));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(requestMock).toHaveBeenCalledWith('/plugin-collections/coverage-bot%3Abaselines');
+    expect(requestMock).toHaveBeenCalledWith('/plugin-records/coverage-bot%3Acoverage');
     expect(result.current.records).toHaveLength(1);
     expect(result.current.records[0].key).toBe('main');
   });
 
-  it('does not fetch for a fact-bound contribution (no collectionName)', async () => {
-    const factContribution = {
-      pluginId: 'coverage-bot',
-      slot: 'task.panel' as const,
-      fact: 'coverage',
-      factType: 'coverage-bot:coverage',
-      as: 'stat',
-    };
-
-    const { result } = renderHook(() => usePluginCollection(factContribution));
-
-    await new Promise((r) => setTimeout(r, 50));
-    expect(requestMock).not.toHaveBeenCalled();
-    expect(result.current.records).toEqual([]);
-    expect(result.current.loading).toBe(false);
-  });
-
-  it('does not refetch on a WS event — no broadcast exists yet for collection writes', async () => {
+  it('with no taskId, does not refetch on a WS event — no broadcast exists yet for store writes', async () => {
     requestMock.mockResolvedValue({ records: [] });
-    renderHook(() => usePluginCollection(contribution));
+    renderHook(() => usePluginRecords(contribution));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
 
     act(() => {

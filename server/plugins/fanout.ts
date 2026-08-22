@@ -49,7 +49,7 @@ const logger = childLogger('plugins/fanout');
 
 export const DEFAULT_FANOUT_CONCURRENCY = 4;
 
-/** Resolves a `{ collection, query }` source. Set by ctx.collections (SHR-275) when it lands. */
+/** Resolves a `{ collection, query }` source. Set by a `ctx.records` query source, when it lands. */
 export type CollectionResolver = (
   pluginId: string,
   collection: string,
@@ -199,7 +199,7 @@ async function resolveRun<T>(
   } else {
     if (!collectionResolver) {
       throw new Error(
-        'fanout.run: collection sources need ctx.collections (SHR-275), which has not landed yet — pass { items } in the meantime',
+        'fanout.run: collection sources need a ctx.records query resolver, which has not landed yet — pass { items } in the meantime',
       );
     }
     items = (await collectionResolver(pluginId, source.collection, source.query)) as T[];

@@ -3,8 +3,8 @@
  * Reverses, in reverse registration order, everything a plugin's `apply()`
  * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> collections -> ui -> policy -> services -> the
- * five registries (workflow kinds, harnesses, compute providers, surfaces,
+ * Order: routes -> records -> ui -> policy -> services -> the five
+ * registries (workflow kinds, harnesses, compute providers, surfaces,
  * providers) -> ctx.effect() disposers
  *
  * Capability grants are NOT released as an explicit step here — that already
@@ -21,8 +21,7 @@ import { childLogger } from '../logger.js';
 import { broadcast } from '../events.js';
 import { disposePluginContext } from './context.js';
 import { unregisterPluginRoutes } from './http-registry.js';
-import { unregisterPluginFacts } from './facts.js';
-import { unregisterPluginCollections } from './collections.js';
+import { unregisterTaskScopedStores } from './records.js';
 import { unregisterPluginUi } from './ui-registry.js';
 import { unregisterPluginPolicy } from './policy.js';
 import { unregisterPluginServices } from './services.js';
@@ -56,10 +55,10 @@ export interface UnmountReleased {
   computeKinds: string[];
   surfaceKinds: string[];
   providerKinds: string[];
-  factTypes: string[];
-  /** `ctx.collections.define()` names dropped (SHR-275). Records survive —
-   *  see the `collections` step below. */
-  collectionNames: string[];
+  /** `ctx.records.define()` qualified store names dropped (SHR-282) —
+   *  task-scoped only. Durable stores' definitions survive unmount, same as
+   *  their rows — see the `records` step below. */
+  recordStores: string[];
   /** `ctx.services.provide()` names dropped (SHR-260). A queued second
    *  provider of the same name is promoted implicitly when this one goes —
    *  see the tie-break doc in `services.ts`. */
@@ -157,14 +156,14 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
 
   await step(pluginId, failures, 'routes', () => unregisterPluginRoutes(pluginId));
 
-  await step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
-
-  // Drops this plugin's collection DEFINITIONS only. Deliberately does NOT
-  // delete stored records — collections are durable, that's the whole point
-  // of the API, and a hot reload (SHR-254) re-runs apply() moments later
-  // expecting its records still there. If a future change here starts
+  // Drops this plugin's TASK-SCOPED store definitions only — durable ones
+  // survive unmount, same rule their rows already follow (see
+  // `unregisterTaskScopedStores`'s doc comment). Deliberately does NOT delete
+  // any stored rows — a hot reload (SHR-254) re-runs apply() moments later
+  // expecting durable records still there. If a future change here starts
   // deleting rows, that is a bug, not a missing cleanup.
-  await step(pluginId, failures, 'collections', () => unregisterPluginCollections(pluginId));
+  const recordStores =
+    (await step(pluginId, failures, 'records', () => unregisterTaskScopedStores(pluginId))) ?? [];
 
   await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
 
@@ -209,8 +208,7 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
     computeKinds: registered.computeKinds,
     surfaceKinds: registered.surfaceKinds,
     providerKinds: registered.providerKinds,
-    factTypes: registered.factTypes,
-    collectionNames: registered.collectionNames,
+    recordStores,
     serviceNames,
     effects: effectFailures.length,
   };

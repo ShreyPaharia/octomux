@@ -74,7 +74,7 @@ plugins:
 plugins:
   - id: policy-bot
     name: policy-bot-plugin
-    grants: [policy.intercept, facts.put]
+    grants: [policy.intercept, records.write]
   - id: quiet-plugin
     name: quiet-plugin
 `);
@@ -87,7 +87,7 @@ plugins:
 
     const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(output).toContain('GRANTS');
-    expect(output).toContain('policy.intercept, facts.put');
+    expect(output).toContain('policy.intercept, records.write');
     expect(output).toContain('—');
   });
 
@@ -206,7 +206,7 @@ plugins:
 plugins:
   - id: demo
     name: demo-plugin
-    grants: [policy.intercept, facts.put]
+    grants: [policy.intercept, records.write]
 `);
       const manifestBefore = fs.readFileSync(manifestPath, 'utf-8');
 
@@ -218,11 +218,11 @@ plugins:
 
       const ledgerFile = grantLedgerPath(manifestPath);
       const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf-8'));
-      expect(ledger.demo).toEqual(['policy.intercept', 'facts.put']);
+      expect(ledger.demo).toEqual(['policy.intercept', 'records.write']);
 
       expect(logSpy).toHaveBeenCalled();
       const printed = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
-      expect(printed).toContain('policy.intercept, facts.put');
+      expect(printed).toContain('policy.intercept, records.write');
       expect(printed).toContain('previously acknowledged: none');
     });
 

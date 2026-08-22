@@ -20,10 +20,17 @@ import { registerHarness, getHarness } from '../harnesses/registry.js';
 import { registerCompute } from '../compute/registry.js';
 import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
-import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
-import { defineCollection, putRecord, queryCollection, watchCollection } from './collections.js';
+import {
+  defineStore,
+  putRecord as putStoreRecord,
+  readStore,
+  queryStore,
+  watchStore,
+  beginCheckpoint,
+  endCheckpoint,
+  interruptedFor,
+} from './records.js';
 import { registerService, requireService, getService } from './services.js';
-import { kvGet, kvSet, kvDel, kvList, kvBegin, kvEnd, kvInterrupted } from './kv.js';
 import { listSecrets, resolveSecrets } from '../secrets/store.js';
 import { registerPluginUiPanel, registerPluginUiAction } from './ui-registry.js';
 import { listCatalog } from './catalog.js';
@@ -39,16 +46,15 @@ import type {
   AttentionApi,
   AttentionAsk,
   PluginSettingsScope,
-  PluginKv,
   WorkflowRegistrar,
   IntegrationRegistrar,
   HarnessRegistrar,
   ComputeRegistrar,
   SurfaceRegistrar,
   HttpRegistrar,
-  FactsRegistrar,
-  CollectionsRegistrar,
-  CollectionDefinition,
+  RecordsRegistrar,
+  RecordStoreDefinition,
+  RecordEnvelope,
   QuerySpec,
   ServicesRegistrar,
   ServiceHandle,
@@ -66,9 +72,6 @@ import type {
   PluginHarness,
   PluginCompute,
   SurfaceDefinition,
-  Fact,
-  FactQuery,
-  FactTypeDefinition,
   HttpMethod,
   PluginRouteHandler,
   UiPanelBinding,
@@ -205,11 +208,12 @@ export function createPluginContext(
 
   const logger = childLogger(`plugin:${id}`);
 
-  // Identifies THIS mount for the `ctx.kv` crash-recovery marks (begin/end/
-  // interrupted). One per `createPluginContext()` call — a fresh mount after
-  // a crash or a hot reload gets a fresh id, so `interrupted()` correctly
-  // sees whatever the PREVIOUS mount left stamped and never sees its own.
-  const kvMountId = nanoid(12);
+  // Identifies THIS mount for the `ctx.records` crash-recovery marks (begin/
+  // end/interrupted). One per `createPluginContext()` call — a fresh mount
+  // after a crash or a hot reload gets a fresh id, so `interrupted()`
+  // correctly sees whatever the PREVIOUS mount left stamped and never sees
+  // its own.
+  const recordsMountId = nanoid(12);
 
   // Flipped by `revokePluginContext()` when the loader's apply() timeout
   // fires. `apply()` itself is never cancelled (see revokePluginContext's
@@ -324,74 +328,66 @@ export function createPluginContext(
     },
   };
 
-  // Declared before the registrars that push onto it (facts.watch) — see the
+  // Declared before the registrars that push onto it (records.watch) — see the
   // auto-dispose note there.
   const effects: Array<() => void | Promise<void>> = [];
 
-  const facts: FactsRegistrar = {
-    define(def: FactTypeDefinition) {
-      assertLive('facts.define');
-      assertGranted(id, 'facts.define');
-      requireLocalId(def as unknown as Record<string, unknown>, 'type', 'facts.define');
-      defineFactType(id, def);
+  // `ctx.records` — the single store for plugin data (SHR-282, collapsing the
+  // old facts/collections/kv split into one). See `./records.js`'s module doc
+  // for the full shape; this registrar is just the grant/revoke wiring
+  // around it.
+  const records: RecordsRegistrar = {
+    define(def: RecordStoreDefinition) {
+      assertLive('records.define');
+      assertGranted(id, 'records.define');
+      requireLocalId(def as unknown as Record<string, unknown>, 'name', 'records.define');
+      defineStore(id, def);
     },
-    put(taskId: string, localType: string, payload: unknown) {
-      // Deliberately NOT gated on `assertLive`: `put` is a write a plugin makes
-      // during normal operation, long after apply() returned. The revoke guard
-      // exists to stop a timed-out apply() from mutating the REGISTRIES, not to
-      // stop a healthy plugin from logging a fact. It IS grant-checked, though —
-      // `facts.put` is a listed capability regardless of the (separate) revoke
-      // lifecycle.
-      assertGranted(id, 'facts.put');
-      return putFact(id, taskId, localType, payload);
+    // Deliberately NOT `assertLive`: the revoke guard stops a timed-out apply()
+    // from mutating the REGISTRIES, not a healthy plugin from writing data
+    // long after apply() returned. Grant-checked regardless.
+    //
+    // `async`, so a synchronous `assertGranted` throw surfaces as a rejected
+    // promise, matching `RecordsRegistrar.put`'s `Promise<void>` signature —
+    // same reasoning as `ctx.attention.ask`'s doc comment below.
+    async put(name: string, record: unknown, opts?: { taskId?: string }) {
+      assertGranted(id, 'records.write');
+      return putStoreRecord(id, name, record, opts?.taskId);
     },
-    read(taskId: string, opts?: FactQuery) {
-      return readFacts(taskId, opts);
+    // Ungated and unscoped — any
+    // plugin may read any store, its own or a sibling's. `async` for the
+    // same reason `put` above is — a missing `opts.taskId` should reject the
+    // returned promise, not throw synchronously.
+    async read(name: string, opts?: { taskId: string }) {
+      if (!opts?.taskId) {
+        throw new Error(`plugin "${id}": ctx.records.read() requires opts.taskId`);
+      }
+      return readStore(id, name, opts.taskId);
     },
-    watch(qualifiedType: string, onFact: (fact: Fact) => void) {
-      assertLive('facts.watch');
-      const unsubscribe = watchFacts(qualifiedType, onFact);
-      // Auto-disposed on unmount, as the plugin-api doc promises. This is the
-      // ONLY thing that unsubscribes a watcher on a type the plugin does not
-      // own: `unregisterPluginFacts(pluginId)` can only reach watchers on types
-      // that plugin DEFINED, so a plugin watching `core:diff` or a sibling
-      // plugin's type would otherwise keep firing forever after it unmounts.
-      // Idempotent — a plugin that also calls the returned unsubscribe itself
-      // is fine, `watchFacts` tolerates a double unsubscribe.
+    query(name: string, q?: QuerySpec) {
+      return queryStore(id, name, q);
+    },
+    watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void) {
+      assertLive('records.watch');
+      const unsubscribe = watchStore(id, qualifiedName, onRecord);
+      // Auto-disposed on unmount
+      // — a watcher on a sibling's store would otherwise keep firing forever
+      // after this plugin unmounts.
       effects.push(unsubscribe);
       return unsubscribe;
     },
-  };
-
-  const collections: CollectionsRegistrar = {
-    define(def: CollectionDefinition) {
-      assertLive('collections.define');
-      assertGranted(id, 'collections.define');
-      requireLocalId(def as unknown as Record<string, unknown>, 'name', 'collections.define');
-      requireLocalId(def as unknown as Record<string, unknown>, 'key', 'collections.define');
-      defineCollection(id, def);
+    // Checkpoints. Grant-checked like every other
+    // write above; reads (`interrupted`) stay ungated below.
+    begin(name: string, key: string, value: unknown) {
+      assertGranted(id, 'records.write');
+      beginCheckpoint(id, name, key, value, recordsMountId);
     },
-    // Not `assertLive` — same split as `facts.put`: the revoke guard stops a
-    // timed-out apply() from mutating the REGISTRIES, not a healthy plugin
-    // from writing a record. Grant-checked regardless.
-    put(collection: string, record: unknown) {
-      assertGranted(id, 'collections.write');
-      return putRecord(id, collection, record);
+    end(name: string, key: string) {
+      assertGranted(id, 'records.write');
+      endCheckpoint(id, name, key);
     },
-    // Ungated and unscoped, like facts.read: any plugin may read any
-    // collection, its own or a sibling's.
-    query(collection: string, q?: QuerySpec) {
-      return queryCollection(id, collection, q);
-    },
-    watch(qualifiedName: string, cb: (record: unknown) => void) {
-      assertLive('collections.watch');
-      const unsubscribe = watchCollection(qualifiedName, cb);
-      // Auto-disposed on unmount, same as facts.watch — and for the same
-      // reason: `unregisterPluginCollections` can only reach names this
-      // plugin DEFINED, so a watcher on a sibling's collection would
-      // otherwise keep firing after this plugin is gone.
-      effects.push(unsubscribe);
-      return unsubscribe;
+    interrupted(name?: string) {
+      return interruptedFor(id, recordsMountId, name);
     },
   };
 
@@ -400,7 +396,7 @@ export function createPluginContext(
   // implementation into a namespace every other plugin can read, so it's
   // gated like any other registration; `require` only records that THIS
   // plugin needs a name — a statement about itself, not a reach into
-  // anyone else's — so it's ungated, same call as facts.read/catalog.list.
+  // anyone else's — so it's ungated, same call as records.read/catalog.list.
   // Unregistration on unmount happens in `lifecycle.ts` (calling
   // `unregisterPluginServices`), same as every other registry here — not
   // via `ctx.effect`, because that's plugin-owned teardown, not core's.
@@ -430,49 +426,6 @@ export function createPluginContext(
     },
   };
 
-  // Not a registrar — a durable store, same as `collections`/`facts`. Writes
-  // (`set`/`del`/`begin`/`end`) are grant-checked on `kv.write`; reads
-  // (`get`/`list`/`interrupted`) are ungated, same split as
-  // `collections.put` vs `collections.query`.
-  //
-  // Deliberately NOT `assertLive`: like `facts.put`/`collections.put`, a kv
-  // write happens long after `apply()` returns — the revoke guard exists to
-  // stop a timed-out `apply()` from mutating the live REGISTRIES, and kv is
-  // a data store, not a registry.
-  //
-  // Nothing here is pushed onto the effect stack, and there is no
-  // `unregisterPluginKv` for `lifecycle.ts` to call. kv rows deliberately
-  // OUTLIVE unmount — a hot-reloaded or restarted plugin must find both its
-  // ordinary state and its in-flight checkpoints still there when `apply()`
-  // runs again.
-  const kv: PluginKv = {
-    get<T>(key: string) {
-      return kvGet(id, key) as T | undefined;
-    },
-    set(key: string, value: unknown) {
-      assertGranted(id, 'kv.write');
-      kvSet(id, key, value);
-    },
-    del(key: string) {
-      assertGranted(id, 'kv.write');
-      kvDel(id, key);
-    },
-    list(prefix?: string) {
-      return kvList(id, prefix);
-    },
-    begin(key: string, value: unknown) {
-      assertGranted(id, 'kv.write');
-      kvBegin(id, kvMountId, key, value);
-    },
-    end(key: string) {
-      assertGranted(id, 'kv.write');
-      kvEnd(id, key);
-    },
-    interrupted() {
-      return kvInterrupted(id, kvMountId);
-    },
-  };
-
   // Not a registrar, same as artifacts/agents — nobody needs a different
   // secret store, they need to read one. There is no write path here: a
   // secret is written by a human (UI/CLI/API), never by a plugin, so nothing
@@ -491,15 +444,15 @@ export function createPluginContext(
     },
   };
 
-  // Not a registrar — a method on ctx, same as facts.put/facts.read. Nobody
+  // Not a registrar — a method on ctx, same as records.put/records.read. Nobody
   // needs a different artifact implementation; they need to write one. There
   // is no `artifacts.register()` and there will not be.
   const artifacts: ArtifactsApi = {
     // `pluginId` is always this closure's `id`, never anything the caller
     // could pass in `input` — a plugin can write only into its own artifact
-    // namespace, same discipline as `facts.put`'s `id` argument to `putFact`.
+    // namespace, same discipline as `records.put`'s `id` argument to `putRecord`.
     // Deliberately NOT gated on `assertLive`, for the same reason
-    // `facts.put`/`facts.read` aren't (see the comment there): the revoke
+    // `records.put`/`records.read` aren't (see the comment there): the revoke
     // guard exists to stop a timed-out `apply()` from mutating the live
     // REGISTRIES, not to stop a healthy plugin from writing output long after
     // `apply()` returned. No teardown either — an artifact is a file in the
@@ -512,7 +465,7 @@ export function createPluginContext(
       assertGranted(id, 'artifacts.write');
       return toArtifactEntry(taskId, writeTaskArtifact(taskId, id, input));
     },
-    // Unscoped, like facts.read: every plugin's artifacts on the task, not
+    // Unscoped, like records.read: every plugin's artifacts on the task, not
     // just this plugin's own.
     async list(taskId) {
       return listTaskArtifacts(taskId).map((r) => toArtifactEntry(taskId, r));
@@ -526,7 +479,7 @@ export function createPluginContext(
   // not get a `runs` row.
   const agents: AgentRunner = {
     async run<T = unknown>(opts: AgentRunOptions): Promise<T> {
-      // Gated on `assertLive`, unlike `facts.put`/`artifacts.write` above:
+      // Gated on `assertLive`, unlike `records.put`/`artifacts.write` above:
       // those flush output the plugin already earned, but this SPAWNS A NEW
       // SUBPROCESS. A context is revoked both when `apply()` overruns its
       // timeout and — via `disposePluginContext`, which revokes last — on
@@ -570,7 +523,7 @@ export function createPluginContext(
   // `ctx.attention` — ask a human a question and wait for an answer. Not a
   // registrar, same as `agents`/`artifacts`: nobody needs a different
   // attention implementation, they need to ask one question. Gated on
-  // `assertLive`, like `agents.run` and UNLIKE `facts.put`/`artifacts.write`:
+  // `assertLive`, like `agents.run` and UNLIKE `records.put`/`artifacts.write`:
   // `ask` interrupts a HUMAN, so a plugin that has already been unmounted
   // must not be able to start a new one. Nothing is pushed onto `effects`
   // here: `ask` doesn't REGISTER anything, so there's nothing to deregister
@@ -613,7 +566,7 @@ export function createPluginContext(
     },
   };
 
-  // Deliberately NOT gated on `assertLive` — same reasoning as `facts.put`
+  // Deliberately NOT gated on `assertLive` — same reasoning as `records.put`
   // above: this is a read, not a registration. A revoked context still has a
   // perfectly good view of what's installed; the revoke guard exists to stop
   // a timed-out apply() from mutating the live registries, not to blind a
@@ -640,12 +593,12 @@ export function createPluginContext(
   // implementation, they need to run one. `run` is grant-gated here rather
   // than inside the engine so every capability check in the plugin runtime
   // lives in one file; `status`/`list` are ungated reads, matching
-  // `facts.read` and `artifacts.list`.
+  // `records.read` and `artifacts.list`.
   //
   // Deliberately NOT `assertLive`: a fan-out is work a healthy plugin starts
   // long after `apply()` returned. The revoke guard exists to stop a
   // timed-out `apply()` from mutating the REGISTRIES — same reasoning as
-  // `facts.put` above.
+  // `records.put` above.
   const fanoutApi = createFanOutApi(id);
   const fanout: FanOutApi = {
     run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>) {
@@ -660,15 +613,13 @@ export function createPluginContext(
     id,
     logger,
     settings,
-    kv,
     workflows,
     integrations,
     harnesses,
     compute,
     surfaces,
     http,
-    facts,
-    collections,
+    records,
     services,
     artifacts,
     secrets,

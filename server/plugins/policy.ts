@@ -19,14 +19,14 @@
  * ## The record
  *
  * A deny or a patch on a task-scoped intent is written twice: a
- * `core:policy.decision` fact (machine-readable audit, `ctx.facts`) and a
+ * `core:policy.decision` record (machine-readable audit, `ctx.records`) and a
  * `task_updates` row of kind `policy` (what a human sees in the task's Activity
  * panel). Recording is best-effort — a failed write is logged and never
  * propagates, because the decision itself already happened.
  */
 import type { PolicyDecision, PolicyHook, PolicyIntent, PolicyPoint } from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
-import { putCoreFact } from './facts.js';
+import { publishCoreRecord } from './records.js';
 import { addTaskUpdate } from '../repositories/tasks.js';
 
 const logger = childLogger('plugins/policy');
@@ -185,12 +185,12 @@ type DecisionDetail =
   | { decision: 'deny'; reason: string }
   | { decision: 'patch'; patch: Record<string, unknown> };
 
-/** Writes the `core:policy.decision` fact and the `policy` task-update row for
- *  a task-scoped deny/patch. No-ops (nothing to record against) when the
- *  intent carries no `taskId` — facts and task updates are both task-scoped.
- *  Each write is independently best-effort: a failed audit write is logged
- *  and never propagates, because the actual policy decision already happened
- *  and must not be reversed by a broken log statement. */
+/** Writes the `core:policy.decision` record and the `policy` task-update row
+ *  for a task-scoped deny/patch. No-ops (nothing to record against) when the
+ *  intent carries no `taskId` — records and task updates are both
+ *  task-scoped. Each write is independently best-effort: a failed audit
+ *  write is logged and never propagates, because the actual policy decision
+ *  already happened and must not be reversed by a broken log statement. */
 async function recordDecision(
   taskId: string | undefined,
   point: PolicyPoint,
@@ -200,11 +200,11 @@ async function recordDecision(
   if (!taskId) return;
 
   try {
-    await putCoreFact(taskId, 'core:policy.decision', { point, pluginId, ...detail });
+    publishCoreRecord('core:policy.decision', taskId, { point, pluginId, ...detail });
   } catch (err) {
     logger.warn(
       { task_id: taskId, point, plugin_id: pluginId, err },
-      'failed to record policy decision fact',
+      'failed to record policy decision record',
     );
   }
 

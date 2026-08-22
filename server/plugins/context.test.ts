@@ -41,7 +41,7 @@ vi.mock('fs', (importOriginal) => {
 // context.ts imports ../artifact-task.js statically (for ctx.artifacts), so
 // this mock must also be registered before context.ts is pulled in — same
 // reason as the fs mock above. Mocking the direct dependency (not the DB
-// layer it wraps) mirrors how the ctx.facts tests below would mock ./facts.js.
+// layer it wraps) mirrors how the ctx.records tests below would mock ./records.js.
 // `toArtifactEntry` is NOT stubbed — it's the pure record->wire-shape mapper
 // that owns the url format these tests assert. Stubbing it would leave them
 // asserting the mock instead of the real thing.
@@ -127,7 +127,7 @@ const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreComput
   await import('../compute/registry.js');
 const { listSurfaces, resetSurfaces, registerCoreSurfaces } = await import('../surfaces/index.js');
 const { resetPluginGrants } = await import('./grants.js');
-const { resetCollections } = await import('./collections.js');
+const { resetRecords } = await import('./records.js');
 const { resetServices } = await import('./services.js');
 const { createTestDb } = await import('../test-helpers.js');
 const { putSecret } = await import('../secrets/store.js');
@@ -179,7 +179,7 @@ beforeEach(() => {
   resetSurfaces();
   registerCoreSurfaces();
   resetPluginGrants();
-  resetCollections();
+  resetRecords();
   resetServices();
   createTestDb();
   process.env.OCTOMUX_SECRET_KEY = TEST_SECRET_KEY;
@@ -197,12 +197,9 @@ const ALL_CAPS = [
   'integrations.register',
   'harnesses.register',
   'http.route',
-  'facts.define',
-  'facts.put',
-  'collections.define',
-  'collections.write',
+  'records.define',
+  'records.write',
   'services.provide',
-  'kv.write',
   'ui.panel',
   'policy.intercept',
 ] as const;
@@ -255,111 +252,115 @@ describe('ctx.settings', () => {
   });
 });
 
-describe('ctx.kv', () => {
-  it('round-trips a value through set → get without the kv.write grant blocking a read', () => {
-    const ctx = createPluginContext('kv-plugin', ['kv.write']);
-    ctx.kv.set('key', { n: 1 });
-    expect(ctx.kv.get('key')).toEqual({ n: 1 });
+// The checkpoint trio (begin/end/interrupted) lives on `ctx.records` now,
+// scoped per store rather than flat per plugin. `records.ts`'s own test file
+// covers the full behavioral surface (schema validation, key extraction,
+// checkpoint isolation across stores); this block only pins the ctx-level
+// WIRING — grant checks and mount isolation.
+describe('ctx.records checkpoints (begin/end/interrupted)', () => {
+  it('round-trips a value through put → query without records.write blocking a read', async () => {
+    const ctx = createPluginContext('rec-plugin', ['records.define', 'records.write']);
+    ctx.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await ctx.records.put('s', { id: 'key', n: 1 });
+    expect((await ctx.records.query('s')).map((r) => r.payload)).toEqual([{ id: 'key', n: 1 }]);
   });
 
-  it('get on a missing key is undefined', () => {
-    const ctx = createPluginContext('kv-plugin');
-    expect(ctx.kv.get('key')).toBeUndefined();
+  it('query on an undefined store is empty, not a throw', async () => {
+    const ctx = createPluginContext('rec-plugin-2');
+    await expect(ctx.records.query('nope')).resolves.toEqual([]);
   });
 
-  it('del removes the key', () => {
-    const ctx = createPluginContext('kv-plugin', ['kv.write']);
-    ctx.kv.set('key', 1);
-    ctx.kv.del('key');
-    expect(ctx.kv.get('key')).toBeUndefined();
-  });
-
-  it('list reflects set/del', () => {
-    const ctx = createPluginContext('kv-plugin', ['kv.write']);
-    ctx.kv.set('a', 1);
-    ctx.kv.set('b', 2);
-    expect(ctx.kv.list()).toEqual([
-      { key: 'a', value: 1 },
-      { key: 'b', value: 2 },
+  it('query returns records in write order by default', async () => {
+    const ctx = createPluginContext('rec-plugin-3', ['records.define', 'records.write']);
+    ctx.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await ctx.records.put('s', { id: 'a', n: 1 });
+    await ctx.records.put('s', { id: 'b', n: 2 });
+    expect((await ctx.records.query('s')).map((r) => r.payload)).toEqual([
+      { id: 'a', n: 1 },
+      { id: 'b', n: 2 },
     ]);
   });
 
-  it('is isolated per plugin id', () => {
-    const ctxA = createPluginContext('kv-plugin-a', ['kv.write']);
-    const ctxB = createPluginContext('kv-plugin-b', ['kv.write']);
-    ctxA.kv.set('k', 'a-value');
-    expect(ctxB.kv.get('k')).toBeUndefined();
+  it('is isolated per plugin id — qualify() namespaces every store', async () => {
+    const ctxA = createPluginContext('rec-plugin-a', ['records.define', 'records.write']);
+    const ctxB = createPluginContext('rec-plugin-b', ['records.define', 'records.write']);
+    ctxA.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    ctxB.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await ctxA.records.put('s', { id: 'k', v: 'a-value' });
+    await expect(ctxB.records.query('s')).resolves.toEqual([]);
   });
 
-  it('set, del, begin, end throw without the kv.write grant', () => {
-    const ctx = createPluginContext('kv-nogrant');
-    expect(() => ctx.kv.set('key', 1)).toThrow(/not granted/);
-    expect(() => ctx.kv.del('key')).toThrow(/not granted/);
-    expect(() => ctx.kv.begin('key', 1)).toThrow(/not granted/);
-    expect(() => ctx.kv.end('key')).toThrow(/not granted/);
+  it('put, begin, end throw/reject without the records.write grant', async () => {
+    const ctx = createPluginContext('rec-nogrant', ['records.define']);
+    ctx.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await expect(ctx.records.put('s', { id: '1' })).rejects.toThrow(/not granted/);
+    expect(() => ctx.records.begin('s', 'key', 1)).toThrow(/not granted/);
+    expect(() => ctx.records.end('s', 'key')).toThrow(/not granted/);
   });
 
-  it('set, del, begin, end succeed with the kv.write grant', () => {
-    const ctx = createPluginContext('kv-grant', ['kv.write']);
-    expect(() => ctx.kv.set('key', 1)).not.toThrow();
-    expect(() => ctx.kv.begin('job', { step: 1 })).not.toThrow();
-    expect(() => ctx.kv.end('job')).not.toThrow();
-    expect(() => ctx.kv.del('key')).not.toThrow();
+  it('put, begin, end succeed with the records.write grant', async () => {
+    const ctx = createPluginContext('rec-grant', ['records.define', 'records.write']);
+    ctx.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await expect(ctx.records.put('s', { id: '1' })).resolves.toBeUndefined();
+    expect(() => ctx.records.begin('s', 'job', { step: 1 })).not.toThrow();
+    expect(() => ctx.records.end('s', 'job')).not.toThrow();
   });
 
-  it('get, list, interrupted work ungated (no grant needed)', () => {
-    const ctx = createPluginContext('kv-reader');
-    expect(() => ctx.kv.get('key')).not.toThrow();
-    expect(() => ctx.kv.list()).not.toThrow();
-    expect(() => ctx.kv.interrupted()).not.toThrow();
+  it('query and interrupted work ungated (no grant needed)', async () => {
+    const ctx = createPluginContext('rec-reader');
+    await expect(ctx.records.query('s')).resolves.toEqual([]);
+    expect(() => ctx.records.interrupted()).not.toThrow();
   });
 
   describe('crash recovery (begin/end/interrupted)', () => {
     it('a fresh context (new mount) sees a checkpoint left by a previous mount', async () => {
-      const first = createPluginContext('kv-crash', ['kv.write']);
-      first.kv.begin('job:1', { step: 'fetch' });
+      const first = createPluginContext('rec-crash', ['records.write']);
+      first.records.begin('jobs', 'job:1', { step: 'fetch' });
       await disposePluginContext(first);
 
-      const second = createPluginContext('kv-crash', ['kv.write']);
-      const interrupted = second.kv.interrupted();
+      const second = createPluginContext('rec-crash', ['records.write']);
+      const interrupted = second.records.interrupted('jobs');
       expect(interrupted).toHaveLength(1);
-      expect(interrupted[0]).toMatchObject({ key: 'job:1', value: { step: 'fetch' } });
-      expect(typeof interrupted[0].startedAt).toBe('string');
+      expect(interrupted[0]).toMatchObject({ key: 'job:1', payload: { step: 'fetch' } });
+      expect(typeof interrupted[0].updatedAt).toBe('string');
     });
 
     it('the same context does not see its own in-flight mark as interrupted', () => {
-      const ctx = createPluginContext('kv-crash-self', ['kv.write']);
-      ctx.kv.begin('job:1', { step: 'fetch' });
-      expect(ctx.kv.interrupted()).toEqual([]);
+      const ctx = createPluginContext('rec-crash-self', ['records.write']);
+      ctx.records.begin('jobs', 'job:1', { step: 'fetch' });
+      expect(ctx.records.interrupted('jobs')).toEqual([]);
     });
 
     it('end clears the mark so no later mount sees it', () => {
-      const first = createPluginContext('kv-crash-end', ['kv.write']);
-      first.kv.begin('job:1', { step: 'fetch' });
-      first.kv.end('job:1');
+      const first = createPluginContext('rec-crash-end', ['records.write']);
+      first.records.begin('jobs', 'job:1', { step: 'fetch' });
+      first.records.end('jobs', 'job:1');
 
-      const second = createPluginContext('kv-crash-end', ['kv.write']);
-      expect(second.kv.interrupted()).toEqual([]);
-      expect(second.kv.get('job:1')).toBeUndefined();
+      const second = createPluginContext('rec-crash-end', ['records.write']);
+      expect(second.records.interrupted('jobs')).toEqual([]);
     });
 
-    it('a plain set settles an in-flight mark on that key', () => {
-      const first = createPluginContext('kv-crash-set', ['kv.write']);
-      first.kv.begin('job:1', { step: 'fetch' });
-      first.kv.set('job:1', { step: 'done' });
+    it('a plain put settles an in-flight mark on that key', async () => {
+      const first = createPluginContext('rec-crash-put', ['records.define', 'records.write']);
+      first.records.define({ name: 'jobs', scope: 'durable', mode: 'upsert', key: 'id' });
+      first.records.begin('jobs', 'job:1', { step: 'fetch' });
+      await first.records.put('jobs', { id: 'job:1', step: 'done' });
 
-      const second = createPluginContext('kv-crash-set', ['kv.write']);
-      expect(second.kv.interrupted()).toEqual([]);
+      const second = createPluginContext('rec-crash-put', ['records.write']);
+      expect(second.records.interrupted('jobs')).toEqual([]);
     });
   });
 
-  it('state survives a simulated unmount: dispose then a fresh context still reads it back', async () => {
-    const ctx = createPluginContext('kv-survives-unmount', ['kv.write']);
-    ctx.kv.set('sticky', { seen: true });
+  it('a durable record survives a simulated unmount: dispose then a fresh context still reads it back', async () => {
+    const ctx = createPluginContext('rec-survives-unmount', ['records.define', 'records.write']);
+    ctx.records.define({ name: 's', scope: 'durable', mode: 'upsert', key: 'id' });
+    await ctx.records.put('s', { id: 'sticky', seen: true });
     await disposePluginContext(ctx);
 
-    const reborn = createPluginContext('kv-survives-unmount');
-    expect(reborn.kv.get('sticky')).toEqual({ seen: true });
+    const reborn = createPluginContext('rec-survives-unmount');
+    expect((await reborn.records.query('s')).map((r) => r.payload)).toEqual([
+      { id: 'sticky', seen: true },
+    ]);
   });
 });
 
@@ -836,7 +837,7 @@ describe('ctx.artifacts', () => {
     ]);
   });
 
-  it('write() still works on a REVOKED context — deliberate, not a bug: same reasoning as facts.put, do not gate this on assertLive', async () => {
+  it('write() still works on a REVOKED context — deliberate, not a bug: same reasoning as records.put, do not gate this on assertLive', async () => {
     vi.mocked(mockWriteTaskArtifact).mockReturnValue({
       pluginId: 'revoked-plugin',
       name: 'report.md',
@@ -886,21 +887,17 @@ describe('grant checks (SHR-259)', () => {
       /not granted/,
     );
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/not granted/);
-    expect(() => ctx.facts.define({ type: 'x', schema: {} })).toThrow(/not granted/);
-    expect(() => ctx.facts.put('task-1', 'x', {})).toThrow(/not granted/);
-    expect(() => ctx.collections.define({ name: 'x', key: 'id', schema: {} })).toThrow(
+    expect(() => ctx.records.define({ name: 's', scope: 'task', mode: 'append' })).toThrow(
       /not granted/,
     );
-    expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
+    await expect(ctx.records.put('s', { n: 1 }, { taskId: 't1' })).rejects.toThrow(/not granted/);
     // SHR-260: services.provide is gated the same way; services.require is
     // deliberately NOT in this list — it's ungated, see the ctx.services
     // describe block below.
     expect(() => ctx.services.provide('chat.send', {})).toThrow(/not granted/);
-    expect(() => ctx.kv.set('x', 1)).toThrow(/not granted/);
-    expect(() => ctx.kv.del('x')).toThrow(/not granted/);
-    expect(() => ctx.kv.begin('x', 1)).toThrow(/not granted/);
-    expect(() => ctx.kv.end('x')).toThrow(/not granted/);
-    expect(() => ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' })).toThrow(
+    expect(() => ctx.records.begin('s', 'x', 1)).toThrow(/not granted/);
+    expect(() => ctx.records.end('s', 'x')).toThrow(/not granted/);
+    expect(() => ctx.ui.panel({ slot: 'task.panel', record: 'x', as: 'stat' })).toThrow(
       /not granted/,
     );
     // SHR-257: ctx.ui.action() is gated on ui.action, separately from ui.panel.
@@ -928,7 +925,7 @@ describe('grant checks (SHR-259)', () => {
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/"http\.route"/);
   });
 
-  it('artifacts.list stays ungated — reads are ungated by design, same as facts.read (SHR-273)', async () => {
+  it('artifacts.list stays ungated — reads are ungated by design, same as records.read (SHR-273)', async () => {
     const ctx = createPluginContext('nogrants3');
     // Asserts the grant check specifically, not success: the mocked
     // listTaskArtifacts returns undefined here, so this call rejects either
@@ -936,18 +933,22 @@ describe('grant checks (SHR-259)', () => {
     await expect(ctx.artifacts.list('task-1')).rejects.not.toThrow(/not granted/);
   });
 
-  it('reads (facts.read, facts.watch, collections.query, collections.watch, kv.get/list/interrupted) and self-owned members (settings, logger, effect) stay ungated', () => {
+  it('reads (records.query, records.watch, records.interrupted) and self-owned members (settings, logger, effect) stay ungated', async () => {
     const ctx = createPluginContext('nogrants3');
-    expect(() => ctx.facts.read('task-1')).not.toThrow();
-    expect(() => ctx.facts.watch('other:type', () => {})).not.toThrow();
-    expect(() => ctx.collections.query('other:things')).not.toThrow();
-    expect(() => ctx.collections.watch('other:things', () => {})).not.toThrow();
+    await expect(ctx.records.query('other:things')).resolves.toEqual([]);
+    expect(() => ctx.records.watch('other:things', () => {})).not.toThrow();
     expect(() => ctx.effect(() => {})).not.toThrow();
     expect(typeof ctx.settings.get).toBe('function');
-    // kv READS stay ungated even though kv WRITES are gated on kv.write.
-    expect(() => ctx.kv.get('key')).not.toThrow();
-    expect(() => ctx.kv.list()).not.toThrow();
-    expect(() => ctx.kv.interrupted()).not.toThrow();
+    // records READS stay ungated even though records WRITES are gated on
+    // records.write.
+    expect(() => ctx.records.interrupted()).not.toThrow();
+  });
+
+  // SHR-282: reads stay ungated for the collapsed store, matching the old
+  // records.read/catalog.list precedent.
+  it('records reads stay ungated, matching records.read and catalog.list', async () => {
+    const ctx = createPluginContext('nogrants4');
+    await expect(ctx.records.query('s')).resolves.toEqual([]);
   });
 
   it.each([
@@ -975,25 +976,26 @@ describe('grant checks (SHR-259)', () => {
       (ctx: ReturnType<typeof createPluginContext>) => ctx.http.route('GET', '/x', async () => {}),
     ],
     [
-      'facts.define',
-      (ctx: ReturnType<typeof createPluginContext>) => ctx.facts.define({ type: 'x', schema: {} }),
+      'records.define',
+      (ctx: ReturnType<typeof createPluginContext>) =>
+        ctx.records.define({ name: 's', scope: 'task', mode: 'append' }),
     ],
     [
-      'facts.put',
-      // The type was never `ctx.facts.define()`d for this plugin id (this row
-      // grants ONLY facts.put), so the returned promise rejects downstream in
-      // facts.ts — irrelevant here, this test only asserts the grant check
-      // itself doesn't throw synchronously. Silence the rejection so it
-      // doesn't surface as an unhandled rejection.
+      'records.write',
+      // The store was never `ctx.records.define()`d for this plugin id (this
+      // row grants ONLY records.write), so the returned promise rejects
+      // downstream in records.ts — irrelevant here, this test only asserts
+      // the grant check itself doesn't reject for lack of a grant. Silence
+      // the rejection so it doesn't surface as an unhandled rejection.
       (ctx: ReturnType<typeof createPluginContext>) => {
-        const result = ctx.facts.put('task-1', 'x', {});
+        const result = ctx.records.put('s', { n: 1 }, { taskId: 't' });
         result.catch(() => {});
       },
     ],
     [
       'ui.panel',
       (ctx: ReturnType<typeof createPluginContext>) =>
-        ctx.ui.panel({ slot: 'task.panel', fact: 'x', as: 'stat' }),
+        ctx.ui.panel({ slot: 'task.panel', record: 'x', as: 'stat' }),
     ],
     [
       'ui.action',
@@ -1003,7 +1005,7 @@ describe('grant checks (SHR-259)', () => {
     [
       // SHR-272: ctx.agents.run() is async and, with no real harness/substrate
       // wired in this test file, rejects downstream once past the grant
-      // check. Same pattern as the facts.put row above — only the synchronous
+      // check. Same pattern as the records.put row above — only the synchronous
       // grant check is asserted; silence the rejection so it doesn't surface
       // as an unhandled rejection.
       'agents.run',
@@ -1013,26 +1015,9 @@ describe('grant checks (SHR-259)', () => {
       },
     ],
     [
-      'collections.define',
-      (ctx: ReturnType<typeof createPluginContext>) =>
-        ctx.collections.define({ name: 'x', key: 'id', schema: {} }),
-    ],
-    [
-      'collections.write',
-      // Same reasoning as facts.put above: the collection was never defined
-      // for this plugin id, so the returned promise rejects downstream in
-      // collections.ts — irrelevant here, this only pins the grant check
-      // itself not throwing synchronously. Silence the rejection.
-      (ctx: ReturnType<typeof createPluginContext>) => {
-        const result = ctx.collections.put('x', { id: '1' });
-        result.catch(() => {});
-      },
-    ],
-    [
       'services.provide',
       (ctx: ReturnType<typeof createPluginContext>) => ctx.services.provide('chat.send', {}),
     ],
-    ['kv.write', (ctx: ReturnType<typeof createPluginContext>) => ctx.kv.set('x', 1)],
   ])('a call granted only "%s" is allowed through, everything else stays denied', (cap, call) => {
     const ctx = createPluginContext('onegrant', [cap as (typeof ALL_CAPS)[number]]);
     expect(() => call(ctx)).not.toThrow();
@@ -1079,65 +1064,59 @@ describe('ctx.policy', () => {
   });
 });
 
-describe('ctx.collections (SHR-275)', () => {
-  it('define throws without collections.define, succeeds with it', () => {
-    const ctx = createPluginContext('coll-define');
-    expect(() => ctx.collections.define({ name: 'x', key: 'id', schema: {} })).toThrow(
-      /not granted/,
-    );
-
-    const granted = createPluginContext('coll-define-2', ['collections.define']);
+describe('ctx.records (SHR-282)', () => {
+  it('define throws without records.define, succeeds with it', () => {
+    const ctx = createPluginContext('rec-define');
     expect(() =>
-      granted.collections.define({ name: 'x', key: 'id', schema: { type: 'object' } }),
+      ctx.records.define({ name: 'x', scope: 'durable', mode: 'upsert', key: 'id' }),
+    ).toThrow(/not granted/);
+
+    const granted = createPluginContext('rec-define-2', ['records.define']);
+    expect(() =>
+      granted.records.define({ name: 'x', scope: 'durable', mode: 'upsert', key: 'id' }),
     ).not.toThrow();
   });
 
-  it('put throws without collections.write, succeeds (and actually stores) with it', async () => {
-    const ctx = createPluginContext('coll-write');
-    expect(() => ctx.collections.put('x', { id: '1' })).toThrow(/not granted/);
+  it('put throws/rejects without records.write, succeeds (and actually stores) with it', async () => {
+    const ctx = createPluginContext('rec-write', ['records.define']);
+    ctx.records.define({ name: 'x', scope: 'durable', mode: 'upsert', key: 'id' });
+    await expect(ctx.records.put('x', { id: '1' })).rejects.toThrow(/not granted/);
 
-    const granted = createPluginContext('coll-write-2', [
-      'collections.define',
-      'collections.write',
+    const granted = createPluginContext('rec-write-2', ['records.define', 'records.write']);
+    granted.records.define({ name: 'baselines', scope: 'durable', mode: 'upsert', key: 'id' });
+    await expect(granted.records.put('baselines', { id: '1', ok: true })).resolves.toBeUndefined();
+    expect((await granted.records.query('baselines')).map((r) => r.payload)).toEqual([
+      { id: '1', ok: true },
     ]);
-    granted.collections.define({ name: 'baselines', key: 'id', schema: { type: 'object' } });
-    await expect(
-      granted.collections.put('baselines', { id: '1', ok: true }),
-    ).resolves.toBeUndefined();
-    expect(await granted.collections.query('baselines')).toEqual([{ id: '1', ok: true }]);
   });
 
-  it('query and watch work without any grant — reads are ungated, like facts.read', async () => {
-    const owner = createPluginContext('coll-owner-read', [
-      'collections.define',
-      'collections.write',
-    ]);
-    owner.collections.define({ name: 'things', key: 'id', schema: { type: 'object' } });
-    await owner.collections.put('things', { id: '1' });
+  it('query and watch work without any grant — reads are ungated, like records.read', async () => {
+    const owner = createPluginContext('rec-owner-read', ['records.define', 'records.write']);
+    owner.records.define({ name: 'things', scope: 'durable', mode: 'upsert', key: 'id' });
+    await owner.records.put('things', { id: '1' });
 
-    const reader = createPluginContext('coll-reader-noGrant');
-    await expect(reader.collections.query('coll-owner-read:things')).resolves.toEqual([
-      { id: '1' },
-    ]);
-    expect(() => reader.collections.watch('coll-owner-read:things', () => {})).not.toThrow();
+    const reader = createPluginContext('rec-reader-noGrant');
+    const rows = await reader.records.query('rec-owner-read:things');
+    expect(rows.map((r) => r.payload)).toEqual([{ id: '1' }]);
+    expect(() => reader.records.watch('rec-owner-read:things', () => {})).not.toThrow();
   });
 
-  it("watch's unsubscribe is auto-disposed by disposePluginContext — a watcher on a sibling's collection stops firing once the watching plugin is disposed", async () => {
-    const owner = createPluginContext('coll-owner-3', ['collections.define', 'collections.write']);
-    owner.collections.define({ name: 'events', key: 'id', schema: { type: 'object' } });
+  it("watch's unsubscribe is auto-disposed by disposePluginContext — a watcher on a sibling's store stops firing once the watching plugin is disposed", async () => {
+    const owner = createPluginContext('rec-owner-3', ['records.define', 'records.write']);
+    owner.records.define({ name: 'events', scope: 'durable', mode: 'upsert', key: 'id' });
 
-    const watcherCtx = createPluginContext('coll-watcher-3');
+    const watcherCtx = createPluginContext('rec-watcher-3');
     const seen: unknown[] = [];
-    watcherCtx.collections.watch('coll-owner-3:events', (record) => seen.push(record));
+    watcherCtx.records.watch('rec-owner-3:events', (rec) => seen.push(rec.payload));
 
-    await owner.collections.put('events', { id: '1' });
+    await owner.records.put('events', { id: '1' });
     expect(seen).toEqual([{ id: '1' }]);
 
     await disposePluginContext(watcherCtx);
 
-    await owner.collections.put('events', { id: '2' });
+    await owner.records.put('events', { id: '2' });
     // The watcher's own plugin was disposed, so its subscription is gone —
-    // even though `owner` (which defines and owns the collection) was never
+    // even though `owner` (which defines and owns the store) was never
     // touched.
     expect(seen).toEqual([{ id: '1' }]);
   });
@@ -1221,7 +1200,7 @@ describe('ctx.fanout', () => {
     expect(fanoutCalls).toEqual([]);
   });
 
-  // Reads follow the facts.read / artifacts.list precedent: ungated.
+  // Reads follow the records.read / artifacts.list precedent: ungated.
   it.each([
     [
       'status',
@@ -1250,7 +1229,7 @@ describe('ctx.fanout', () => {
   });
 
   // Deliberately NOT assertLive-gated: a fan-out is work a healthy plugin
-  // starts long after apply() returned, same as facts.put / artifacts.write.
+  // starts long after apply() returned, same as records.put / artifacts.write.
   it('still runs after revoke, given the grant', async () => {
     const ctx = createPluginContext('fan-revoked', ['fanout.run']);
     revokePluginContext(ctx);

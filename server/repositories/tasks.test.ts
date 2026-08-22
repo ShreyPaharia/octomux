@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
+import { appendRecord, upsertRecord, readRecordsForTask, getRecord } from './plugin-records.js';
 import {
   getTask,
   listTasks,
@@ -332,6 +333,17 @@ describe('repositories/tasks', () => {
       hardDeleteTask(id);
       const row = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id);
       expect(row).toBeUndefined();
+    });
+
+    it('hardDeleteTask sweeps task-scoped plugin_records and leaves durable ones', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      appendRecord('p:log', id, { n: 1 });
+      upsertRecord('p:leads', null, 'a', { v: 1 });
+
+      hardDeleteTask(id);
+
+      expect(readRecordsForTask(id)).toHaveLength(0);
+      expect(getRecord('p:leads', 'a')).toBeDefined();
     });
   });
 

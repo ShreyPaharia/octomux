@@ -51,12 +51,12 @@ function formatScalar(v) {
  * Returns `undefined` when there is nothing to show — the panel is then
  * OMITTED by the caller, never rendered as an empty block.
  *
- * @param {{ renderer: string; title?: string; value?: string; facts: Array<{ payload: unknown }> }} panel
+ * @param {{ renderer: string; title?: string; value?: string; records: Array<{ payload: unknown }> }} panel
  * @returns {string | undefined}
  */
 export function render(panel) {
-  if (panel.facts.length === 0) return undefined;
-  const latest = panel.facts[panel.facts.length - 1];
+  if (panel.records.length === 0) return undefined;
+  const latest = panel.records[panel.records.length - 1];
   const heading = panel.title ? `**${panel.title}**\n` : '';
   if (panel.renderer === 'markdown') {
     const value = primaryValue(panel, latest.payload);
@@ -154,8 +154,8 @@ export async function apply(ctx) {
 if (import.meta.main) {
   const assert = await import('node:assert');
 
-  // render(): empty facts → undefined, never a blank block.
-  assert.strictEqual(render({ renderer: 'markdown', facts: [] }), undefined);
+  // render(): empty records → undefined, never a blank block.
+  assert.strictEqual(render({ renderer: 'markdown', records: [] }), undefined);
 
   // render(): markdown renderer, scalar payload via declared `value` key.
   assert.strictEqual(
@@ -163,14 +163,14 @@ if (import.meta.main) {
       renderer: 'markdown',
       title: 'Coverage',
       value: 'summary',
-      facts: [{ payload: { summary: '87% covered' } }],
+      records: [{ payload: { summary: '87% covered' } }],
     }),
     '**Coverage**\n87% covered',
   );
 
   // render(): json fallback — pretty-printed payload in a fenced code block.
   assert.strictEqual(
-    render({ renderer: 'json', facts: [{ payload: { pct: 42 } }] }),
+    render({ renderer: 'json', records: [{ payload: { pct: 42 } }] }),
     '```json\n' + JSON.stringify({ pct: 42 }, null, 2) + '\n```',
   );
 

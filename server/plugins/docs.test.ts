@@ -64,9 +64,9 @@ function pluginContextMembers(): string[] {
   if (!body) throw new Error('could not locate `interface PluginContext` in @octomux/plugin-api');
   const members: string[] = [];
   for (const line of body[1].split('\n')) {
-    // `readonly facts: FactsRegistrar;` and `effect(dispose: …): void;` — the
-    // two shapes the interface actually uses. JSDoc lines start with `*` and
-    // match neither.
+    // `readonly records: RecordsRegistrar;` and `effect(dispose: …): void;` —
+    // the two shapes the interface actually uses. JSDoc lines start with `*`
+    // and match neither.
     const member = line.match(/^\s*(?:readonly\s+)?(\w+)\s*[:(]/);
     if (member && member[1] !== 'id') members.push(member[1]);
   }

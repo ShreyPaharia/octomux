@@ -37,20 +37,20 @@ export interface PluginContext {
   readonly id: string; // manifest row id (bare, unqualified)
   readonly logger: PluginLogger;
   readonly settings: PluginSettingsScope;
-  readonly kv: PluginKv;
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
   readonly compute: ComputeRegistrar;
   readonly http: HttpRegistrar;
-  readonly facts: FactsRegistrar;
-  readonly collections: CollectionsRegistrar;
+  readonly records: RecordsRegistrar;
   readonly services: ServicesRegistrar;
   readonly artifacts: ArtifactsApi;
+  readonly secrets: SecretsApi;
   readonly agents: AgentRunner;
   readonly ui: UiRegistrar;
   readonly policy: PolicyRegistrar;
   readonly surfaces: SurfaceRegistrar;
+  readonly attention: AttentionApi;
   readonly fanout: FanOutApi;
   readonly catalog: CatalogReader;
   effect(dispose: () => void | Promise<void>): void;
@@ -65,14 +65,12 @@ member:
 | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
 | [`ctx.logger`](#ctxlogger)                                         | structured logging — ungated                                       |
 | [`ctx.settings`](#ctxsettings)                                     | this plugin's own settings blob — ungated                          |
-| [`ctx.kv`](#ctxkv)                                                 | durable, plugin-private key/value storage + crash-recovery marks   |
 | [`ctx.workflows`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a cron-schedulable workflow kind                         |
 | [`ctx.integrations`](#ctxworkflows--ctxintegrations--ctxharnesses) | registers an outbound integration provider                         |
 | [`ctx.harnesses`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a coding-agent harness                                   |
 | [`ctx.compute`](#ctxcompute)                                       | registers where a task's worktree/processes live                   |
 | [`ctx.http`](#ctxhttp)                                             | registers a route at `/api/p/<pluginId>/...`                       |
-| [`ctx.facts`](#ctxfacts)                                           | task-scoped, append-only observation log                           |
-| [`ctx.collections`](#ctxcollections)                               | durable, keyed, schema-validated records                           |
+| [`ctx.records`](#ctxrecords)                                       | the one store for plugin data — task-scoped or durable, one shape  |
 | [`ctx.services`](#ctxservices)                                     | depend on a capability by name, not on a plugin package            |
 | [`ctx.artifacts`](#ctxartifacts)                                   | files written into a task's worktree                               |
 | [`ctx.agents`](#ctxagents)                                         | runs a headless, structured-output agent session                   |
@@ -117,108 +115,6 @@ shallow-merges the patch onto the existing blob. Backed by
 under `settings.plugins.<row-id>` in the same settings file octomux already
 uses, and **never validated** — your config shape is your own business.
 External access: `PATCH /api/settings` with `{ "plugins": { "<id>": {...} } }`.
-
-### `ctx.kv`
-
-```ts
-interface PluginKv {
-  get<T>(key: string): T | undefined;
-  set(key: string, value: unknown): void;
-  del(key: string): void;
-  list(prefix?: string): Array<{ key: string; value: unknown }>;
-  /** Marks an operation in flight, checkpointing what this plugin needs to resume it. */
-  begin(key: string, value: unknown): void;
-  /** The operation finished. Deletes the checkpoint. */
-  end(key: string): void;
-  /** Checkpoints left by a PREVIOUS mount — a crash, or a hot reload mid-operation. */
-  interrupted(): Array<{ key: string; value: unknown; startedAt: string }>;
-}
-```
-
-Plugin-private durable scratch. Opaque blobs keyed by a string, scoped to one
-plugin id — backed by its own `plugin_kv` table, PK `(plugin_id, key)`
-(`server/plugins/kv.ts`, wired through `createKv` in `context.ts`). No
-schema, no query language, nothing to render.
-
-|          | `ctx.facts`        | `ctx.collections`                | `ctx.kv`                             |
-| -------- | ------------------ | -------------------------------- | ------------------------------------ |
-| lifetime | dies with the task | durable                          | durable                              |
-| scope    | one task           | cross-plugin, unscoped reads     | this plugin only                     |
-| shape    | append-only log    | schema-validated, queryable      | opaque blob by key                   |
-| for      | a task's history   | records a `ctx.ui` panel renders | scratch state only this plugin reads |
-
-Want to query it, filter it, or put it on a panel? That's `ctx.collections`,
-not this. `ctx.kv` is the answer only when nobody but this plugin ever needs
-to read the value back.
-
-```js
-ctx.kv.set('cursor', { lastSeenId: 42 });
-ctx.kv.get('cursor'); // { lastSeenId: 42 }, undefined if never set
-ctx.kv.del('cursor');
-ctx.kv.list('job:'); // [{ key: 'job:1', value: {...} }, ...]
-```
-
-Gate: `kv.write` on `set`/`del`/`begin`/`end`. `get`, `list`, `interrupted`
-are ungated reads, matching `facts.read`/`artifacts.list`.
-
-#### Crash recovery — `begin`, `end`, `interrupted`
-
-Each `PluginContext` gets a fresh mount id for its lifetime (one per boot, or
-per hot reload). `begin(key, value)` stamps that mount id onto a checkpoint
-row holding whatever this plugin needs to resume the operation; `end(key)`
-deletes it once the operation completes. `interrupted()` returns every
-checkpoint stamped by a mount **other than the current one** — exactly the
-set of operations still open the last time this plugin's process went away.
-Calling it first in `apply()` answers "what was I doing when I died":
-
-```js
-export async function apply(ctx) {
-  for (const { key, value, startedAt } of ctx.kv.interrupted()) {
-    ctx.logger.warn({ key, startedAt }, 'resuming interrupted operation');
-    await resume(key, value);
-    ctx.kv.end(key);
-  }
-
-  ctx.kv.begin('report:42', { stage: 'uploading' });
-  await uploadReport(42);
-  ctx.kv.end('report:42');
-}
-```
-
-`begin`/`end` and `get`/`set`/`list` address the same row per key — a plain
-`set` on a key currently marked in-flight settles the mark as a side effect,
-so prefix checkpoint keys separately from plain state keys to avoid an
-accidental collision wiping your own recovery marker.
-
-This is the plugin-side analogue of core's own boot recovery —
-`recoverTasks()` (`server/task-engine/reconcile.ts`) and
-`rehydrateConversations()` (`server/index.ts`). The recovery point is a
-plugin's own `apply()`; core runs no separate boot pass for plugin state and
-there is no parallel resume mechanism a plugin hooks into. A hot reload also
-mints a new mount id, so an operation the reload interrupted correctly shows
-up in `interrupted()` on the next `apply()` — it really was abandoned
-mid-operation, the same as a crash.
-
-#### Unmount is asymmetric here, deliberately
-
-Every _registration_ a plugin makes through `ctx` — workflows, routes,
-harnesses, UI panels, policy hooks, fact/collection _definitions_ — is torn
-down on unmount. kv **state** is not: `set`/`del`/`begin`/`end` aren't
-registrations, so nothing about unmount touches the rows they write. A hot
-reload re-runs `apply()` seconds later expecting its own checkpoints to
-still be there; a crash-recovery mechanism that erased its checkpoints on
-the very crash it exists to recover from would be self-defeating. Collection
-_rows_ already follow this rule (the definition drops, the rows don't) — kv
-state follows it too. The only way kv state goes away is an explicit
-`ctx.kv.del()`.
-
-#### Limits
-
-`kv.write` gates the `ctx` surface, not the process — a plugin runs
-in-process and can read or write the `plugin_kv` table directly, the same
-caveat as every other grant in this reference. There is no size cap, no TTL,
-and no eviction: an unbounded writer grows the DB with nothing here to stop
-it.
 
 ### `ctx.workflows` / `ctx.integrations` / `ctx.harnesses`
 
@@ -416,7 +312,7 @@ const names = await ctx.secrets.list(); // metadata only, ungated
 const token = await ctx.secrets.resolve('slack-bot');
 ```
 
-Gate: `secrets.read` on `resolve`. `list` is ungated, matching `facts.read` and
+Gate: `secrets.read` on `resolve`. `list` is ungated, matching `records.read` and
 `artifacts.list` — knowing a secret exists is not knowing its value.
 
 Config referencing uses `${secret:NAME}`, mirroring `${env:VAR}`. Unlike
@@ -433,102 +329,75 @@ failure the store exists to prevent.
 Values are redacted from logs at the stream destination and from
 `runs.result_json`, so no call site has to remember.
 
-### `ctx.facts`
+### `ctx.records`
 
 ```ts
-interface FactsRegistrar {
-  define(def: FactTypeDefinition): void;
-  put(taskId: string, localType: string, payload: unknown): Promise<void>;
-  read(taskId: string, opts?: FactQuery): Promise<Fact[]>;
-  watch(qualifiedType: string, onFact: (fact: Fact) => void): () => void;
+interface RecordStoreDefinition {
+  name: string; // BARE local name — the host qualifies it to `<pluginId>:<name>`.
+  schema?: Record<string, unknown>; // JSON Schema validated on write. Omit for an opaque store.
+  key?: string; // Record field used as identity. Required when `mode` is 'upsert'.
+  scope: 'task' | 'durable'; // 'task' rows die with their task; 'durable' rows outlive unmount.
+  mode: 'append' | 'upsert'; // 'append' adds a row; 'upsert' replaces the row with the same key.
 }
-interface FactTypeDefinition {
-  type: string; // BARE local type. The host qualifies it to `<pluginId>:<type>`.
-  schema: Record<string, unknown>; // JSON Schema for the payload — also drives ctx.ui.
-}
-interface FactQuery {
-  type?: string; // Qualified fact type to filter on.
-  sinceSeq?: number; // Only facts with `seq` strictly greater than this.
-}
-interface Fact {
+interface RecordEnvelope {
   seq: number;
-  taskId: string;
-  type: string; // Qualified — `core:diff`, `coverage-bot:coverage`.
+  store: string; // qualified — `<pluginId>:<name>`
+  taskId: string | null; // null for a durable row
+  key: string | null; // null for an appended row
   payload: unknown;
   createdAt: string;
+  updatedAt: string;
 }
-```
-
-A typed, task-scoped, append-only log every plugin can write to and read
-from. Before this the only wire between plugin types was `HookEnvelope`:
-seven fixed event names, outbound only, fire-and-forget, with no read path at
-all. This is an observation log, not event sourcing — tasks remain the
-source of truth.
-
-`define()` declares a BARE local type; the host qualifies it to
-`<pluginId>:<type>` (`qualify()`), so a plugin can add `coverage-bot:coverage`
-and can never overwrite `core:diff`. Core itself publishes exactly two fact
-types today — `core:review.published` and `core:policy.decision`
-(`CORE_FACT_TYPES`, `server/plugins/facts.ts`) — a plugin reads those, never
-writes them.
-
-`put(taskId, localType, payload)` validates `payload` against the type's
-schema and rejects a violation with the plugin/type named in the error.
-`read(taskId, opts?)` is **unscoped** — every plugin's facts on that task,
-not just this one's own, same discipline as `ctx.collections.query`.
-`watch(qualifiedType, cb)` takes a QUALIFIED type and returns an unsubscribe
-that is also auto-disposed on unmount.
-
-```js
-ctx.facts.define({
-  type: 'coverage',
-  schema: { type: 'object', required: ['pct'], properties: { pct: { type: 'number' } } },
-});
-await ctx.facts.put(taskId, 'coverage', { pct: 87.4 });
-const all = await ctx.facts.read(taskId);
-```
-
-Gates: `facts.define`, `facts.put`. `read`/`watch` are ungated.
-
-Unmount drops this plugin's fact **type definitions**, never facts already
-written — those die with their task, not with the plugin. Watchers this
-plugin registered via `ctx.facts.watch` are auto-unsubscribed; a _sibling_
-plugin's watcher on one of this plugin's types is deliberately left running.
-`unregisterPluginFacts` can only reach watchers registered by the plugin
-unmounting — a reload (not an unload) redefines the same qualified type
-moments later, so tearing down every watcher on it would silently kill a
-sibling's live subscription with no error and no log
-(`server/plugins/facts.ts`).
-
-### `ctx.collections`
-
-```ts
-interface CollectionsRegistrar {
-  define(def: { name: string; schema: Record<string, unknown>; key: string }): void;
-  put(collection: string, record: unknown): Promise<void>;
-  query(collection: string, q?: QuerySpec): Promise<unknown[]>;
-  watch(qualifiedName: string, cb: (record: unknown) => void): () => void;
-}
-
 interface QuerySpec {
-  where?: Record<string, unknown>; // exact match on top-level record fields
-  orderBy?: string; // top-level record field; default `updatedAt`
+  where?: Record<string, unknown>; // exact match on top-level payload fields
+  orderBy?: string; // top-level payload field; default `updatedAt`
   order?: 'asc' | 'desc'; // default `asc`
   limit?: number;
   offset?: number;
 }
+interface RecordsRegistrar {
+  define(def: RecordStoreDefinition): void;
+  put(name: string, record: unknown, opts?: { taskId?: string }): Promise<void>;
+  read(name: string, opts?: { taskId: string }): Promise<RecordEnvelope[]>;
+  query(name: string, q?: QuerySpec): Promise<RecordEnvelope[]>;
+  watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void): () => void;
+  begin(name: string, key: string, value: unknown): void; // checkpoint
+  end(name: string, key: string): void; // checkpoint settled
+  interrupted(name?: string): RecordEnvelope[]; // checkpoints left by a PREVIOUS mount
+}
 ```
 
-Durable, keyed, schema-validated records. The half of plugin storage
-`ctx.facts` deliberately is not: a fact is an append-only entry scoped to one
-task and deleted with it, while a collection record has no task at all and
-survives every task, every plugin reload, and the plugin's own uninstall.
+The one store for plugin data (SHR-282), replacing three prior APIs — a
+task-scoped append-only log, a durable keyed collection, and a plugin-private
+opaque blob store — with one `RecordStoreDefinition` shape. `scope` and
+`mode` pick which of the three prior lifetimes a store has:
+
+| `scope`   | `mode`   | `key`    | `schema` | Recovers the old…                           |
+| --------- | -------- | -------- | -------- | ------------------------------------------- |
+| `task`    | `append` | omit     | typical  | task-scoped, append-only observation log    |
+| `durable` | `upsert` | required | typical  | durable, keyed, schema-validated collection |
+| `durable` | `upsert` | required | omit     | plugin-private opaque blob store            |
+
+`mode:'append'` with a `key`, or `mode:'upsert'` without one, are both
+rejected at `define()` time. A `core:` name is refused — core stores are
+published by core, never defined via `ctx.records`.
 
 ```js
 export default {
   async apply(ctx) {
-    ctx.collections.define({
+    ctx.records.define({
+      name: 'coverage',
+      scope: 'task',
+      mode: 'append',
+      schema: { type: 'object', required: ['pct'], properties: { pct: { type: 'number' } } },
+    });
+    await ctx.records.put('coverage', { pct: 87.4 }, { taskId });
+    const all = await ctx.records.read('coverage', { taskId });
+
+    ctx.records.define({
       name: 'baselines',
+      scope: 'durable',
+      mode: 'upsert',
       key: 'repo',
       schema: {
         type: 'object',
@@ -537,57 +406,88 @@ export default {
         additionalProperties: false,
       },
     });
-
     // Upserts on `repo`. Writing the same repo twice replaces, never appends.
-    await ctx.collections.put('baselines', { repo: '/src/api', pct: 87.4 });
-
-    const low = await ctx.collections.query('baselines', {
-      orderBy: 'pct',
-      order: 'asc',
-      limit: 10,
-    });
+    await ctx.records.put('baselines', { repo: '/src/api', pct: 87.4 });
+    const low = await ctx.records.query('baselines', { orderBy: 'pct', order: 'asc', limit: 10 });
   },
 };
 ```
 
-Manifest grants: `collections.define` for `define`, `collections.write` for
-`put`. `query` and `watch` are ungated, like `facts.read`.
+`define()` declares a BARE local name; the host qualifies it to
+`<pluginId>:<name>` (`qualify()`). `put(name, record, opts?)` validates scope
+against `opts.taskId` (a `task` store requires it, a `durable` store rejects
+it), then `record` against the store's schema if any, then — for
+`mode:'upsert'` — extracts and validates the key field. `read(name, opts)` is
+task-scoped and requires `opts.taskId`; `query(name, q?)` is unscoped —
+`name` may be bare or already-qualified, so any plugin can query a sibling's
+store, same discipline every read here has always had. `watch(qualifiedName,
+cb)` takes a QUALIFIED name and returns an unsubscribe that is also
+auto-disposed on unmount.
 
-Rules worth knowing before you design against it:
+Gates: `records.define` on `define()`; `records.write` on `put()`,
+`begin()`, `end()`. `read`, `query`, `watch`, `interrupted` are ungated —
+reading what's already written isn't the thing capability grants exist to
+flag.
 
-- **Names qualify**, exactly like fact types — you declare `baselines`, it
-  stores `<your-plugin-id>:baselines`. A `core:` name is refused.
-- **`put` takes a BARE name.** Cross-plugin writes are out of scope; a
-  qualified name here is an error, not a write to someone else's collection.
-- **`query` takes bare OR qualified**, and reads are unscoped — you can read
-  a sibling's collection by its qualified name, same as `facts.read` reads
-  every plugin's facts on a task.
-- **The key must be a top-level `string` or finite `number` field** named by
-  `def.key`. A record missing it, or holding an object there, is rejected.
-- **`QuerySpec` is deliberately tiny.** Exact matches, an order, a window.
-  No operators, no joins, no aggregates. A plugin that needs those has
-  outgrown this API rather than found a gap in it.
-- **Unmount drops the definition, never the rows.** Durability is the whole
-  point, and a hot reload re-runs `apply()` expecting its records still
-  there. Redefining a name with a different schema on reload is honoured (the
-  compiled-schema cache is busted), but there is **no schema migration** of
-  records already stored — that is explicitly out of scope.
-- Not `ctx.kv`: kv is opaque, plugin-private blobs keyed by a string, with no
-  schema and no query language — see [`ctx.kv`](#ctxkv). This is
-  schema-validated and queryable, and reads are unscoped across plugins; kv
-  is neither.
+**Definition lifetime follows ROW lifetime.** A `task`-scoped store's
+definition drops on unmount, same as rows written into it die with their
+task. A `durable` store's rows outlive unmount, so its definition must too —
+a durable store whose rows survive but whose definition vanished would be
+unreadable. Watchers this plugin registered via `ctx.records.watch` are
+auto-unsubscribed on unmount; a _sibling_ plugin's watcher on one of this
+plugin's stores is deliberately left running — a reload redefines the same
+qualified name moments later, and tearing down every watcher on it would
+silently kill a sibling's live subscription with no error and no log.
 
-This is also what makes a durable UI panel possible. `ctx.ui.panel()` binds to
-either a `fact` or a `collection`:
+#### Checkpoints — `begin`, `end`, `interrupted`
+
+The crash-recovery pair recovered from the old plugin-private blob store.
+Each `PluginContext` gets a fresh mount id for its lifetime (one per boot, or
+per hot reload). `begin(name, key, value)` stamps that mount id onto a
+checkpoint row holding whatever this plugin needs to resume the operation;
+`end(name, key)` settles it once the operation completes, without changing
+the underlying record's payload. `interrupted(name?)` returns every
+checkpoint stamped by a mount **other than the current one** — exactly the
+set of operations still open the last time this plugin's process went away.
+`name` is required on `begin`/`end` (one plugin can own several stores, and a
+flat per-plugin checkpoint key would let two of them collide); omit it on
+`interrupted()` for every store this plugin owns.
 
 ```js
-ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', value: 'pct' });
-ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
+export async function apply(ctx) {
+  for (const { key, payload } of ctx.records.interrupted('sync')) {
+    ctx.logger.warn({ key }, 'resuming interrupted operation');
+    await resume(key, payload);
+    ctx.records.end('sync', key);
+  }
+
+  ctx.records.begin('sync', 'report:42', { stage: 'uploading' });
+  await uploadReport(42);
+  ctx.records.end('sync', 'report:42');
+}
 ```
 
-A fact-bound panel renders that task's facts; a collection-bound panel renders
-the collection's records, with no task involved. Records reach the SPA over
-`GET /api/plugin-collections/<qualified-name>`.
+This is the plugin-side analogue of core's own boot recovery —
+`recoverTasks()` (`server/task-engine/reconcile.ts`) and
+`rehydrateConversations()` (`server/index.ts`). A hot reload also mints a new
+mount id, so an operation the reload interrupted correctly shows up in
+`interrupted()` on the next `apply()` — it really was abandoned
+mid-operation, the same as a crash. Checkpoint writes are not registrations,
+so unmount does not touch them; the only way a checkpoint row goes away is an
+ordinary `put()` on the same key, which settles `owner` back to `NULL` as a
+side effect.
+
+This is also what makes a durable UI panel possible. `ctx.ui.panel()` binds
+to a store:
+
+```js
+ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', record: 'baselines', as: 'table' });
+```
+
+A task-scoped store's panel renders that task's records; a durable store's
+panel renders the store's records, with no task involved. Records reach the
+SPA over `GET /api/plugin-records/<qualified-name>`.
 
 ### `ctx.services`
 
@@ -652,7 +552,7 @@ export default {
 
 Gate: `services.provide`. `require` is ungated — declaring a dependency is a
 statement about your own plugin, not a reach into anyone else's, same
-reasoning as `facts.read`/`catalog.list`.
+reasoning as `records.read`/`catalog.list`.
 
 Providing plugins show up in `ctx.catalog.list()` as `service:<name>` entries.
 
@@ -693,7 +593,7 @@ filesystem alone). Rejects if the task has no worktree yet. `name` must match
 Artifacts land in the task's git worktree — they diff, and they outlive both
 the plugin and a DB wipe. There is no unmount teardown: an artifact is output
 a plugin already produced, not a live registration. `list(taskId)` is
-**unscoped**, like `facts.read` — every plugin's artifacts on that task, not
+**unscoped**, like `records.read` — every plugin's artifacts on that task, not
 just this one's own. `server/services/run-detail.ts` surfaces them on
 `GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
 further core change.
@@ -888,7 +788,7 @@ interface FanOutApi {
 
 type FanOutSource<T> =
   | { items: readonly T[] } // a plain array — e.g. the previous step's output
-  | { collection: string; query?: Record<string, unknown> } // a ctx.collections query
+  | { collection: string; query?: Record<string, unknown> } // a ctx.records query
   | { resume: string }; // redrive a previous run
 
 interface FanOutSpec<T, R> {
@@ -945,7 +845,7 @@ collection and querying it from the next step. There is also no HTTP redrive
 route: a redrive needs your live `each` closure, which cannot be persisted.
 Expose one yourself with `ctx.http.route` if you want a button.
 
-Until `ctx.collections` lands, a `{ collection }` source throws with a message
+Until a `ctx.records` query resolver lands, a `{ collection }` source throws with a message
 saying so — pass `{ items }` in the meantime.
 
 ### `ctx.policy`
@@ -969,7 +869,7 @@ type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<PolicyDecis
 ```
 
 The one member of `ctx` that can say **no**, not just add. Every other
-registrar is additive — a workflow, a route, a fact, a panel. `intercept`
+registrar is additive — a workflow, a route, a record, a panel. `intercept`
 runs a hook between "a run wants to start" and "a run starts," and that hook
 may deny it with a reason or patch it on the way through.
 
@@ -990,7 +890,7 @@ as no opinion — **fails open**, so a crashing plugin can't wedge every
 launch in the install.
 
 A deny or a patch on a task-scoped intent is recorded twice: a
-`core:policy.decision` fact (via `ctx.facts`) and a `task_updates` row of
+`core:policy.decision` record (via `ctx.records`) and a `task_updates` row of
 kind `policy`, which shows up in the task's Activity panel. Each write is
 best-effort — a failed audit write is logged and never reverses the decision
 that already happened.
@@ -1031,25 +931,14 @@ type UiSlot =
   | 'settings.card';
 type UiRenderer = 'stat' | 'table' | 'timeline' | 'badge' | 'markdown' | 'json' | 'diff' | 'log';
 
-interface UiFactPanelBinding {
+interface UiPanelBinding {
   slot: UiSlot;
+  record: string; // BARE local store name — qualified like `records.define`
   as: UiRenderer | string; // unknown renderer degrades to `json`, never a blank
   value?: string;
   delta?: string;
   title?: string;
-  fact: string; // BARE local fact type — qualified like `facts.define`
-  collection?: never;
 }
-interface UiCollectionPanelBinding {
-  slot: UiSlot;
-  as: UiRenderer | string;
-  value?: string;
-  delta?: string;
-  title?: string;
-  collection: string; // BARE local collection name — qualified like `collections.define`
-  fact?: never;
-}
-type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
 
 interface UiActionDefinition {
   id: string; // BARE local id — qualified to `<pluginId>:<id>`
@@ -1082,7 +971,7 @@ interface UiActionContribution {
 ```
 
 Declarative BINDINGS and DECLARATIONS, never components. `panel` is the read
-half: a binding names a slot, a renderer, and a fact type or collection; the
+half: a binding names a slot, a renderer, and a `ctx.records` store; the
 client owns every renderer and looks it up by name. `action` (SHR-257) is
 the write half: a plugin names a handler and the HOST holds it — `def.run`
 is a real function value that never crosses to a client. What a client gets
@@ -1096,16 +985,15 @@ no custom sidebar: that ceiling is what keeps a panel or an action written
 today renderable on a surface that doesn't exist yet — see `ctx.surfaces`
 below.
 
-`UiPanelBinding` is a union: exactly one of `fact` (bare local fact type) or
-`collection` (bare local collection name). `registerPluginUiPanel`
-(`server/plugins/ui-registry.ts`) rejects a binding that sets neither or
-both. An unknown `as` renderer name is not rejected at registration — the
-client (or a `ctx.surfaces` implementation) degrades it to `json` rather
-than dropping the panel.
+`binding.record` names a BARE local `ctx.records` store — task-scoped or
+durable, whichever the store was defined as — and `registerPluginUiPanel`
+(`server/plugins/ui-registry.ts`) qualifies it. An unknown `as` renderer name
+is not rejected at registration — the client (or a `ctx.surfaces`
+implementation) degrades it to `json` rather than dropping the panel.
 
 ```js
-ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', value: 'pct' });
-ctx.ui.panel({ slot: 'nav.section', collection: 'baselines', as: 'table' });
+ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', record: 'baselines', as: 'table' });
 ```
 
 Gate: `ui.panel`. Unmount: every contribution this plugin registered is
@@ -1141,7 +1029,7 @@ it — the same schema-driven form the schedules UI already builds from a
 workflow's `config` schema — and the host validates the submitted `input`
 against that schema before `run` ever sees it (`invokeUiAction`,
 `server/plugins/ui-registry.ts`, via the same `validateAgainstSchema` call
-`ctx.facts.put` uses). Omit `schema` and the action takes no input; the host
+`ctx.records.put` uses). Omit `schema` and the action takes no input; the host
 still requires `input` to be a plain object (or absent) and rejects anything
 else. `def.command: true` surfaces the action in whatever command palette
 the surface offers — independent of `slot`, so an action can be
@@ -1162,7 +1050,7 @@ REST (`server/routes/plugin-ui.ts`):
 
 Gate: `ui.action` on `ctx.ui.action()` — declaring an action is the gated
 act; invoking one already declared is not separately gated, and neither is
-listing them, matching `ui.panel`'s read side and `facts.read`/
+listing them, matching `ui.panel`'s read side and `records.read`/
 `catalog.list`. Unmount: every action this plugin registered is removed
 alongside its panels (`unregisterPluginUi`) — same map, same call, one line
 of teardown for both halves of `ctx.ui`.
@@ -1275,13 +1163,13 @@ compute provider — nothing keeps serving a dead plugin's panels.
 interface SurfacePanel {
   pluginId: string; // manifest row id of the plugin that declared the binding
   slot: UiSlot;
-  factType: string; // qualified — "<pluginId>:<fact>"
+  recordStore: string; // qualified — "<pluginId>:<record>"
   as: string; // renderer the binding asked for
   renderer: string; // renderer this surface actually draws — `as`, or the fallback
   value?: string;
   delta?: string;
   title?: string;
-  facts: Fact[]; // this binding's facts on the task being rendered, oldest first
+  records: RecordEnvelope[]; // this binding's records — a task's rows or the store's full board, oldest first
 }
 
 interface SurfacePrompt {
@@ -1462,7 +1350,7 @@ A manifest row declares the `ctx` capabilities its plugin actually uses:
 plugins:
   - id: coverage-bot
     name: '@acme/octomux-coverage-bot'
-    grants: [facts.define, facts.put, ui.panel]
+    grants: [records.define, records.write, ui.panel]
 ```
 
 ### Deny by default
@@ -1486,33 +1374,31 @@ decision.
 All 17 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
 `PluginCapability` in `@octomux/plugin-api`):
 
-| Capability              | Gates                                    | Undone on unmount?                                                                   |
-| ----------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| `workflows.register`    | `ctx.workflows.register()`               | yes                                                                                  |
-| `integrations.register` | `ctx.integrations.register()`            | yes                                                                                  |
-| `harnesses.register`    | `ctx.harnesses.register()`               | yes                                                                                  |
-| `compute.register`      | `ctx.compute.register()`                 | yes                                                                                  |
-| `http.route`            | `ctx.http.route()`                       | yes                                                                                  |
-| `facts.define`          | `ctx.facts.define()`                     | yes — the type definition; facts written survive                                     |
-| `facts.put`             | `ctx.facts.put()`                        | n/a — a write, not a registration                                                    |
-| `collections.define`    | `ctx.collections.define()`               | yes — the definition; records survive                                                |
-| `collections.write`     | `ctx.collections.put()`                  | n/a — a write, not a registration                                                    |
-| `kv.write`              | `ctx.kv.set()`/`del()`/`begin()`/`end()` | n/a — a write; state deliberately outlives unmount, only explicit `del()` removes it |
-| `ui.panel`              | `ctx.ui.panel()`                         | yes                                                                                  |
-| `artifacts.write`       | `ctx.artifacts.write()`                  | n/a — files land in the worktree and outlive the plugin                              |
-| `policy.intercept`      | `ctx.policy.intercept()`                 | yes                                                                                  |
-| `agents.run`            | `ctx.agents.run()`                       | n/a — an in-flight run settles on its own                                            |
-| `fanout.run`            | `ctx.fanout.run()`                       | n/a — an in-flight run is aborted, not "undone"                                      |
-| `surfaces.register`     | `ctx.surfaces.register()`                | yes                                                                                  |
-| `ui.action`             | `ctx.ui.action()`                        | yes                                                                                  |
-| `secrets.read`          | `ctx.secrets.resolve()`                  | n/a — a read, not a registration                                                     |
+| Capability              | Gates                                 | Undone on unmount?                                                                 |
+| ----------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`            | yes                                                                                |
+| `integrations.register` | `ctx.integrations.register()`         | yes                                                                                |
+| `harnesses.register`    | `ctx.harnesses.register()`            | yes                                                                                |
+| `compute.register`      | `ctx.compute.register()`              | yes                                                                                |
+| `http.route`            | `ctx.http.route()`                    | yes                                                                                |
+| `records.define`        | `ctx.records.define()`                | yes — the definition; records written survive                                      |
+| `records.write`         | `ctx.records.put()`/`begin()`/`end()` | n/a — a write, not a registration; a task-scoped row dies with its task regardless |
+| `services.provide`      | `ctx.services.provide()`              | yes                                                                                |
+| `ui.panel`              | `ctx.ui.panel()`                      | yes                                                                                |
+| `artifacts.write`       | `ctx.artifacts.write()`               | n/a — files land in the worktree and outlive the plugin                            |
+| `policy.intercept`      | `ctx.policy.intercept()`              | yes                                                                                |
+| `agents.run`            | `ctx.agents.run()`                    | n/a — an in-flight run settles on its own                                          |
+| `fanout.run`            | `ctx.fanout.run()`                    | n/a — an in-flight run is aborted, not "undone"                                    |
+| `surfaces.register`     | `ctx.surfaces.register()`             | yes                                                                                |
+| `attention.ask`         | `ctx.attention.ask()`                 | n/a — an in-flight ask is withdrawn, not "undone"                                  |
+| `ui.action`             | `ctx.ui.action()`                     | yes                                                                                |
+| `secrets.read`          | `ctx.secrets.resolve()`               | n/a — a read, not a registration                                                   |
 
 ### What's ungated, and why
 
-Reads: `ctx.logger`, `ctx.settings`, `ctx.catalog.list`, `ctx.facts.read`,
-`ctx.facts.watch`, `ctx.collections.query`, `ctx.collections.watch`,
-`ctx.artifacts.list`, `ctx.fanout.status`/`ctx.fanout.list`,
-`ctx.kv.get`/`ctx.kv.list`/`ctx.kv.interrupted`, `ctx.effect()`.
+Reads: `ctx.logger`, `ctx.settings`, `ctx.catalog.list`, `ctx.records.read`,
+`ctx.records.query`, `ctx.records.watch`, `ctx.records.interrupted`,
+`ctx.artifacts.list`, `ctx.fanout.status`/`ctx.fanout.list`, `ctx.effect()`.
 None of these pick a behavior or produce a side effect worth a human's
 second look — a plugin reading what's installed, what a task's facts say, or
 a fan-out run's status isn't the thing capability grants exist to flag.
@@ -1640,7 +1526,7 @@ doesn't get a registrar — it goes straight on `ctx`, or nowhere at all.
    A plugin influences it through `ctx.policy` (`task.launch` /
    `harness.resume` can patch `model`), not through a registrar.
 4. **History / task lifecycle.** Tasks remain the source of truth.
-   `ctx.facts` is an observation log, not event sourcing — a plugin does not
+   `ctx.records` is an observation log, not event sourcing — a plugin does not
    get to redefine what a task is.
 5. **Artifacts.** A method on `ctx`, not a registrar (see
    [`ctx.artifacts`](#ctxartifacts) above) — nobody needs a different
@@ -1651,12 +1537,10 @@ doesn't get a registrar — it goes straight on `ctx`, or nowhere at all.
    preference — the public docs say so. `ctx.compute` decides only _where_
    that worktree lives, never whether one exists. It is not a pluggable
    isolation strategy.
-8. **Storage.** `ctx.facts` (task-scoped, dies with the task),
-   `ctx.collections` (durable, keyed, schema-validated, unscoped cross-plugin
-   reads), and `ctx.kv` (durable, plugin-private, opaque, with a
-   `begin`/`end`/`interrupted` crash-recovery pair) are the three storage
-   shapes, and none of them is a registrar — a plugin does not bring its own
-   storage engine.
+8. **Storage.** `ctx.records` covers the three storage shapes a plugin
+   needs — task-scoped and dies with the task, durable and keyed/queryable,
+   or durable and opaque (`scope`/`mode`/`schema` pick which) — and is not a
+   registrar; a plugin does not bring its own storage engine.
 
 The rule that generalises all eight: a purely read-only view over state core
 already owns belongs on `ctx` directly, and something that has exactly one
