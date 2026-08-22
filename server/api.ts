@@ -26,7 +26,7 @@ import { router as secretsRouter } from './routes/secrets.js';
 import { router as runsRouter } from './routes/runs.js';
 import { router as agentsCrudRouter } from './routes/agents-crud.js';
 import { router as pluginUiRouter } from './routes/plugin-ui.js';
-import { router as pluginFactsRouter } from './routes/plugin-facts.js';
+import { router as pluginRecordsRouter } from './routes/plugin-records.js';
 import { router as pluginCollectionsRouter } from './routes/plugin-collections.js';
 import { router as taskArtifactsRouter } from './routes/task-artifacts.js';
 import { router as fanoutRouter } from './routes/fanout.js';
@@ -58,7 +58,7 @@ export function setupRoutes(app: Express): void {
   // than trying to unmount express middleware, which express 5 cannot do.
   app.use('/api/p', createPluginParentRouter());
   app.use(pluginUiRouter);
-  app.use(pluginFactsRouter);
+  app.use(pluginRecordsRouter);
   app.use(pluginCollectionsRouter);
   app.use(taskArtifactsRouter);
   app.use(fanoutRouter);

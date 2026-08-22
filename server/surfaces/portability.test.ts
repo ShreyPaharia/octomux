@@ -2,7 +2,7 @@
  * server/surfaces/portability.test.ts
  *
  * This is the point of the whole `ctx.surfaces` ticket: a `ctx.ui` panel
- * binding is a declarative fact-type + renderer-name pairing, never a DOM
+ * binding is a declarative record-store + renderer-name pairing, never a DOM
  * node, a Block Kit block, or an ANSI escape. So a binding a plugin
  * registered a year before some surface existed still renders on it, with
  * zero change to the plugin that wrote the binding.
@@ -11,11 +11,18 @@
  * surface is registered afterward, by nobody coverage-bot knows about, and
  * coverage-bot's panel shows up on it anyway — degraded to whatever renderer
  * Discord actually declared.
+ *
+ * Two describe blocks, kept deliberately separate (SHR-282 rewrite of
+ * SHR-279's original split): the first covers the task-scoped path through
+ * `panelsForTask`, the second the durable/no-task path through
+ * `panelsForStore` — and the SHR-279 regression itself, where a durable
+ * binding rendered nothing at all. Collapsing to one block because "there's
+ * one binding kind now" would let a broken durable path pass the whole suite
+ * silently — SHR-279's exact failure mode, one level deeper.
  */
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
-import { defineFactType, putFact, resetFacts } from '../plugins/facts.js';
-import { defineCollection, putRecord, resetCollections } from '../plugins/collections.js';
+import { defineStore, putRecord, resetRecords } from '../plugins/records.js';
 import {
   registerPluginUiPanel,
   listUiContributions,
@@ -28,35 +35,33 @@ import {
   freezeCoreSurfaces,
 } from './registry.js';
 import { registerCoreSurfaces } from './core.js';
-import { panelsForSurface, renderCollectionPanels } from './render.js';
+import { panelsForTask, panelsForStore } from './render.js';
 
 describe('surfaces portability', () => {
   beforeEach(() => {
     const db = createTestDb();
     insertTask(db, { id: 'task-1' });
-    resetFacts();
+    resetRecords();
     resetPluginUi();
     resetSurfaces();
     registerCoreSurfaces();
     freezeCoreSurfaces();
   });
 
-  it('a binding registered before a surface existed renders on that surface once added, unchanged', async () => {
-    // Step 1: coverage-bot declares its fact type and its panel binding, and
-    // writes a fact — all of this happens with ZERO surfaces beyond core's
-    // four in existence. coverage-bot has no idea Discord will ever exist.
-    defineFactType('coverage-bot', {
-      type: 'coverage',
-      schema: { type: 'object', properties: { pct: { type: 'number' } } },
-    });
+  it('a binding registered before a surface existed renders on it once added — task-scoped', async () => {
+    // Step 1: coverage-bot declares its record store and its panel binding,
+    // and writes a record — all of this happens with ZERO surfaces beyond
+    // core's four in existence. coverage-bot has no idea Discord will ever
+    // exist.
+    defineStore('coverage-bot', { name: 'coverage', scope: 'task', mode: 'append' });
     registerPluginUiPanel('coverage-bot', {
       slot: 'task.panel',
-      fact: 'coverage',
+      record: 'coverage',
       as: 'stat',
       value: 'pct',
       title: 'Coverage',
     });
-    await putFact('coverage-bot', 'task-1', 'coverage', { pct: 87 });
+    await putRecord('coverage-bot', 'coverage', { pct: 87 }, 'task-1');
 
     // Step 2: only NOW does a Discord surface show up — registered by a
     // totally different plugin, which ships zero coverage-bot-aware code.
@@ -66,14 +71,14 @@ describe('surfaces portability', () => {
       renderers: ['markdown'],
       fallback: 'markdown',
       render(panel) {
-        return panel.facts.length === 0 ? undefined : `**${panel.title}**: rendered`;
+        return panel.records.length === 0 ? undefined : `**${panel.title}**: rendered`;
       },
     });
 
     // Step 3: coverage-bot's `stat` binding degrades to Discord's declared
     // `markdown` fallback and still renders — non-empty text, no code from
     // coverage-bot involved.
-    const discordPanels = await panelsForSurface('demo:discord', 'task-1');
+    const discordPanels = await panelsForTask('demo:discord', 'task-1');
     expect(discordPanels).toHaveLength(1);
     expect(discordPanels[0].pluginId).toBe('coverage-bot');
     expect(discordPanels[0].as).toBe('stat');
@@ -82,7 +87,7 @@ describe('surfaces portability', () => {
 
     // Step 4: the SAME binding also renders on `cli`, which draws `stat`
     // natively — no fallback needed there.
-    const cliPanels = await panelsForSurface('cli', 'task-1');
+    const cliPanels = await panelsForTask('cli', 'task-1');
     expect(cliPanels).toHaveLength(1);
     expect(cliPanels[0].pluginId).toBe('coverage-bot');
     expect(cliPanels[0].renderer).toBe('stat');
@@ -94,55 +99,57 @@ describe('surfaces portability', () => {
     const stillListed = listUiContributions().find((c) => c.pluginId === 'coverage-bot');
     expect(stillListed).toBeDefined();
 
-    const cliPanelsAfter = await panelsForSurface('cli', 'task-1');
+    const cliPanelsAfter = await panelsForTask('cli', 'task-1');
     expect(cliPanelsAfter).toHaveLength(1);
     expect(cliPanelsAfter[0].renderer).toBe('stat');
 
-    await expect(panelsForSurface('demo:discord', 'task-1')).rejects.toThrow(
+    await expect(panelsForTask('demo:discord', 'task-1')).rejects.toThrow(
       /unknown surface "demo:discord"/,
     );
   });
 });
 
 /**
- * The same property, for a COLLECTION-bound binding (SHR-279).
- *
- * SHR-275 made a panel bindable to a durable collection instead of a
- * task-scoped fact, and for a while nothing rendered those at all. The
- * binding model is only half true if portability holds for one kind of
- * binding and not the other — a plugin picked `collection` over `fact` for a
- * storage reason, not a rendering one, and that choice must not decide which
- * surfaces its panel can ever appear on.
+ * The same property, for a DURABLE-store binding rendered through
+ * `panelsForStore` (the original SHR-279 regression: a durable binding that
+ * registers, lists in `ctx.catalog`, and is drawn by nothing).
  *
  * "pipeline-bot" here never mentions Discord either, and never mentions a
  * task: its records outlive every task in the workspace.
  */
-describe('surfaces portability — collection bindings', () => {
+describe('surfaces portability — durable stores', () => {
   beforeEach(() => {
     createTestDb();
-    resetFacts();
-    resetCollections();
+    resetRecords();
     resetPluginUi();
     resetSurfaces();
     registerCoreSurfaces();
     freezeCoreSurfaces();
   });
 
-  it('a collection-bound binding registered before a surface existed renders on that surface once added, unchanged', async () => {
-    // Step 1: pipeline-bot defines a durable collection, binds a panel to it
-    // and writes records — with zero surfaces beyond core's four in
-    // existence, and no task anywhere in the story.
-    defineCollection('pipeline-bot', {
-      name: 'deals',
-      schema: {
-        type: 'object',
-        properties: { id: { type: 'string' }, stage: { type: 'string' } },
-      },
-      key: 'id',
+  it('the same holds for a durable store rendered via panelsForStore', async () => {
+    defineStore('pipeline-bot', { name: 'leads', scope: 'durable', mode: 'upsert', key: 'id' });
+    registerPluginUiPanel('pipeline-bot', { slot: 'settings.card', record: 'leads', as: 'table' });
+    await putRecord('pipeline-bot', 'leads', { id: 'd-1', stage: 'won' });
+
+    registerSurface({
+      kind: 'demo:discord',
+      renderers: ['table'],
+      render: (p) => `${p.records.length} rows`,
     });
+
+    const panels = await panelsForStore('demo:discord', 'pipeline-bot:leads', { limit: 10 });
+    expect(panels).toHaveLength(1);
+  });
+
+  it('a durable-store binding registered before a surface existed renders on that surface once added, unchanged', async () => {
+    // Step 1: pipeline-bot defines a durable store, binds a panel to it and
+    // writes records — with zero surfaces beyond core's four in existence,
+    // and no task anywhere in the story.
+    defineStore('pipeline-bot', { name: 'deals', scope: 'durable', mode: 'upsert', key: 'id' });
     registerPluginUiPanel('pipeline-bot', {
       slot: 'settings.card',
-      collection: 'deals',
+      record: 'deals',
       as: 'table',
       title: 'Pipeline',
     });
@@ -151,21 +158,22 @@ describe('surfaces portability — collection bindings', () => {
 
     // Step 2: a Discord surface shows up, registered by a different plugin
     // that ships zero pipeline-bot-aware code — and, crucially, zero
-    // collection-aware code. It reads `panel.facts`, the only data field
-    // `SurfacePanel` has ever had.
+    // store-aware code. It reads `panel.records`, the only data field
+    // `SurfacePanel` has since SHR-282.
     registerSurface({
       kind: 'demo:discord',
       renderers: ['markdown'],
       fallback: 'markdown',
       render(panel) {
-        return panel.facts.length === 0 ? undefined : `**${panel.title}**: ${panel.facts.length}`;
+        return panel.records.length === 0
+          ? undefined
+          : `**${panel.title}**: ${panel.records.length}`;
       },
     });
 
     // Step 3: the `table` binding degrades to Discord's declared `markdown`
-    // fallback and renders both records — no code from pipeline-bot, and no
-    // collection handling from Discord, involved.
-    const discordPanels = await renderCollectionPanels('demo:discord', 'pipeline-bot:deals');
+    // fallback and renders both records — no code from pipeline-bot involved.
+    const discordPanels = await panelsForStore('demo:discord', 'pipeline-bot:deals');
     expect(discordPanels).toHaveLength(1);
     expect(discordPanels[0].pluginId).toBe('pipeline-bot');
     expect(discordPanels[0].as).toBe('table');
@@ -174,7 +182,7 @@ describe('surfaces portability — collection bindings', () => {
 
     // Step 4: the SAME binding renders on `cli`, which draws `table`
     // natively — no fallback needed there.
-    const cliPanels = await renderCollectionPanels('cli', 'pipeline-bot:deals');
+    const cliPanels = await panelsForStore('cli', 'pipeline-bot:deals');
     expect(cliPanels).toHaveLength(1);
     expect(cliPanels[0].renderer).toBe('table');
     expect(cliPanels[0].text).toContain('d-1');
@@ -182,26 +190,20 @@ describe('surfaces portability — collection bindings', () => {
 
     // Step 5: removing Discord must not orphan the binding — still listed,
     // still renders on cli, and asking the dead surface throws the same way
-    // it does for a fact-bound panel.
+    // it does for the task-scoped path.
     expect(unregisterSurface('demo:discord')).toBe(true);
     expect(listUiContributions().find((c) => c.pluginId === 'pipeline-bot')).toBeDefined();
-    expect(await renderCollectionPanels('cli', 'pipeline-bot:deals')).toHaveLength(1);
-    await expect(renderCollectionPanels('demo:discord', 'pipeline-bot:deals')).rejects.toThrow(
+    expect(await panelsForStore('cli', 'pipeline-bot:deals')).toHaveLength(1);
+    await expect(panelsForStore('demo:discord', 'pipeline-bot:deals')).rejects.toThrow(
       /unknown surface "demo:discord"/,
     );
   });
 
-  it('web declares it cannot render server-side — for a collection exactly as for a task', async () => {
-    defineCollection('pipeline-bot', { name: 'deals', schema: {}, key: 'id' });
-    registerPluginUiPanel('pipeline-bot', {
-      slot: 'settings.card',
-      collection: 'deals',
-      as: 'table',
-    });
+  it('web declares it cannot render server-side — for a durable store exactly as for a task', async () => {
+    defineStore('pipeline-bot', { name: 'deals', scope: 'durable', mode: 'upsert', key: 'id' });
+    registerPluginUiPanel('pipeline-bot', { slot: 'settings.card', record: 'deals', as: 'table' });
     await putRecord('pipeline-bot', 'deals', { id: 'd-1' });
 
-    await expect(renderCollectionPanels('web', 'pipeline-bot:deals')).rejects.toThrow(
-      /has no render/,
-    );
+    await expect(panelsForStore('web', 'pipeline-bot:deals')).rejects.toThrow(/has no render/);
   });
 });

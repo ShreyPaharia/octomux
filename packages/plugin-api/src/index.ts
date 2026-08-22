@@ -603,15 +603,14 @@ export interface UiPanelBinding {
  * surface and every `ctx.ui` panel that already exists appears on it.
  *
  * That works only because `ctx.ui` panels are declarative BINDINGS, not
- * components (see `UiRegistrar`). A binding names a fact type (or, since
- * SHR-279, a collection) and a renderer; it never names a DOM, a Block Kit
- * block or an ANSI escape. So a panel written a year before Discord existed
- * as a surface still renders on Discord, with no change to the plugin that
- * wrote it. This is the entire reason the binding model was chosen, and
- * there is a test that holds it to it. A collection-bound binding renders
- * the same way: its records reach `render` adapted into `SurfacePanel.facts`
- * (see that type's doc), so `render` itself never branches on which kind of
- * binding it is drawing.
+ * components (see `UiRegistrar`). A binding names a `ctx.records` store (SHR-282
+ * collapsed the prior fact/collection split into one binding shape) and a
+ * renderer; it never names a DOM, a Block Kit block or an ANSI escape. So a
+ * panel written a year before Discord existed as a surface still renders on
+ * Discord, with no change to the plugin that wrote it. This is the entire
+ * reason the binding model was chosen, and there is a test that holds it to
+ * it. `render` never branches on binding kind — every binding reaches it as
+ * the same `SurfacePanel.records` shape (see that type's doc).
  *
  * ## The renderer contract
  *
@@ -656,25 +655,16 @@ export interface SurfaceRegistrar {
 }
 
 /** One `ctx.ui` panel binding, resolved for one surface and loaded with the
- *  facts it renders. What `SurfaceDefinition.render` receives.
+ *  records it renders. What `SurfaceDefinition.render` receives.
  *
- *  Exactly one of `factType` / `collectionName` is set, mirroring
- *  `UiPanelBinding` (SHR-279). `facts` is populated either way: a
- *  collection-bound panel's records arrive here adapted into the same
- *  `Fact` shape (see `renderCollectionPanels` in `server/surfaces/render.ts`),
- *  so `render` never has to know which kind of binding it is drawing — a
- *  `render` written before collections existed still draws a collection
- *  panel with zero change. */
+ *  Replaces the pre-collapse `factType` / `collectionName` pair (SHR-282):
+ *  one binding shape, one store, so there is nothing left to branch on. */
 export interface SurfacePanel {
   /** Manifest row id of the plugin that declared the binding. */
   pluginId: string;
   slot: UiSlot;
-  /** Qualified fact type — `<pluginId>:<fact>`. Present iff this is a
-   *  fact-bound panel. */
-  factType?: string;
-  /** Qualified collection name — `<pluginId>:<collection>`. Present iff
-   *  this is a collection-bound panel (SHR-279). */
-  collectionName?: string;
+  /** Qualified store name — `<pluginId>:<record>`. */
+  recordStore: string;
   /** Renderer the binding asked for. */
   as: string;
   /** Renderer this surface will draw — `as`, or the surface's fallback. */
@@ -682,10 +672,9 @@ export interface SurfacePanel {
   value?: string;
   delta?: string;
   title?: string;
-  /** Facts for this binding on the task being rendered, oldest first — or,
-   *  for a collection-bound panel, its records adapted into the same shape.
-   *  See the type doc above. */
-  facts: Fact[];
+  /** This binding's records — a task's rows via `panelsForTask`, or a
+   *  store's full board via `panelsForStore`. Oldest first. */
+  records: RecordEnvelope[];
 }
 
 /** A question put to a human on a surface. */

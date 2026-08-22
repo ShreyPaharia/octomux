@@ -47,7 +47,11 @@ const definitions = new Map<string, StoreRegistration>();
 /** Qualified store name -> listeners subscribed via `watch`. */
 const watchers = new Map<string, Set<(rec: RecordEnvelope) => void>>();
 
-function toEnvelope(row: RecordRow): RecordEnvelope {
+/** Exported for `server/surfaces/render.ts` and `server/routes/plugin-records.ts` —
+ *  both read `RecordRow`s straight from the repository (unscoped, no
+ *  `pluginId` at hand) and need the same row -> wire-shape conversion this
+ *  module already does for every `ctx.records` call. */
+export function toEnvelope(row: RecordRow): RecordEnvelope {
   return {
     seq: row.seq,
     store: row.store,

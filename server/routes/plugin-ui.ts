@@ -19,8 +19,8 @@ import {
   CORE_SURFACE_KINDS,
   listSurfaces,
   contributionsForSurface,
-  panelsForSurface,
-  renderCollectionPanels,
+  panelsForTask,
+  panelsForStore,
 } from '../surfaces/index.js';
 import { ServiceError } from '../services/errors.js';
 import { loadTaskOrFail } from './_shared.js';
@@ -83,7 +83,7 @@ router.get('/api/tasks/:id/panels', async (req: Request, res: Response) => {
   }
   let panels;
   try {
-    panels = await panelsForSurface(surfaceKind, task.id);
+    panels = await panelsForTask(surfaceKind, task.id);
   } catch (err) {
     throw surfaceServiceError(err);
   }
@@ -91,22 +91,24 @@ router.get('/api/tasks/:id/panels', async (req: Request, res: Response) => {
 });
 
 /**
- * The collection-bound counterpart to `/api/tasks/:id/panels` (SHR-279).
+ * The durable-store counterpart to `/api/tasks/:id/panels` (SHR-279,
+ * generalized to any `ctx.records` store under SHR-282).
  *
- * A collection-bound panel has no task in its binding, so it can never be
+ * A durable-store panel has no task in its binding, so it can never be
  * reached through the task route — and without this it could not be reached
  * from outside the process at all, which was exactly the bug: a panel that
  * registers, lists in `ctx.catalog`, and is drawn by nothing.
  *
- * `:name` is the QUALIFIED collection name, same as
- * `GET /api/plugin-collections/:name`, which serves the RAW records for the
+ * `:name` is the QUALIFIED store name, same as `GET /api/plugin-records/:name`
+ * (`server/routes/plugin-records.ts`), which serves the RAW records for the
  * SPA to draw itself. This one serves the records already rendered into a
  * surface's transport, for the surfaces that render server-side. `web` has no
  * `render` and 400s here by design — the browser is the renderer there.
  *
- * `limit`/`offset`/`orderBy`/`order` window the collection exactly as they do
- * on the raw-records route; a 2,000-record board does not need every row in a
- * Slack message.
+ * `limit`/`offset`/`orderBy`/`order` window the store exactly as they do on
+ * the raw-records route; a 2,000-record board does not need every row in a
+ * Slack message. Route path unchanged from its `plugin-collections` origin —
+ * only the data source moved, not the URL.
  */
 router.get('/api/plugin-collections/:name/panels', async (req: Request, res: Response) => {
   const surfaceKind = typeof req.query.surface === 'string' ? req.query.surface : undefined;
@@ -116,7 +118,7 @@ router.get('/api/plugin-collections/:name/panels', async (req: Request, res: Res
   const { name } = req.params as Record<string, string>;
   let panels;
   try {
-    panels = await renderCollectionPanels(surfaceKind, name, parseCollectionQuery(req.query));
+    panels = await panelsForStore(surfaceKind, name, parseCollectionQuery(req.query));
   } catch (err) {
     throw surfaceServiceError(err);
   }

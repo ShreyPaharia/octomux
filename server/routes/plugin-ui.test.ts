@@ -14,8 +14,7 @@ const { getDb } = await import('../db.js');
 const { createApp } = await import('../app.js');
 const { registerPluginUiPanel, resetPluginUi, registerPluginUiAction } =
   await import('../plugins/ui-registry.js');
-const { defineFactType, putFact, resetFacts } = await import('../plugins/facts.js');
-const { defineCollection, putRecord, resetCollections } = await import('../plugins/collections.js');
+const { defineStore, putRecord, resetRecords } = await import('../plugins/records.js');
 const { registerSurface, unregisterSurface } = await import('../surfaces/index.js');
 const { renderPanelText } = await import('../surfaces/text.js');
 
@@ -25,20 +24,20 @@ describe('plugin-ui routes', () => {
   beforeEach(() => {
     createTestDb();
     resetPluginUi();
-    resetFacts();
+    resetRecords();
   });
 
   afterEach(() => {
     resetPluginUi();
-    resetFacts();
+    resetRecords();
     unregisterSurface('test-narrow');
   });
 
-  function seedPanel(overrides: Partial<{ slot: string; fact: string; as: string }> = {}) {
-    defineFactType(PLUGIN_ID, { type: overrides.fact ?? 'metric', schema: {} });
+  function seedPanel(overrides: Partial<{ slot: string; record: string; as: string }> = {}) {
+    defineStore(PLUGIN_ID, { name: overrides.record ?? 'metric', scope: 'task', mode: 'append' });
     registerPluginUiPanel(PLUGIN_ID, {
       slot: (overrides.slot ?? 'task.panel') as never,
-      fact: overrides.fact ?? 'metric',
+      record: overrides.record ?? 'metric',
       as: overrides.as ?? 'stat',
     });
   }
@@ -110,8 +109,8 @@ describe('plugin-ui routes', () => {
   it('GET /api/tasks/:id/panels?surface=cli renders a seeded panel', async () => {
     const db = getDb();
     insertTask(db, { id: 'panels-task-1' });
-    seedPanel({ fact: 'metric', as: 'stat' });
-    await putFact(PLUGIN_ID, 'panels-task-1', 'metric', { value: 42 });
+    seedPanel({ record: 'metric', as: 'stat' });
+    await putRecord(PLUGIN_ID, 'metric', { value: 42 }, 'panels-task-1');
 
     const app = createApp();
     const res = await request(app).get('/api/tasks/panels-task-1/panels?surface=cli').expect(200);
@@ -133,8 +132,8 @@ describe('plugin-ui routes', () => {
     });
     const db = getDb();
     insertTask(db, { id: 'panels-task-2' });
-    seedPanel({ fact: 'metric', as: 'stat' });
-    await putFact(PLUGIN_ID, 'panels-task-2', 'metric', { value: 7 });
+    seedPanel({ record: 'metric', as: 'stat' });
+    await putRecord(PLUGIN_ID, 'metric', { value: 7 }, 'panels-task-2');
 
     const app = createApp();
     const res = await request(app)
@@ -175,30 +174,29 @@ describe('plugin-ui routes', () => {
 });
 
 /**
- * `GET /api/plugin-collections/:name/panels` (SHR-279) — the collection-bound
- * counterpart to `/api/tasks/:id/panels`. No task anywhere in these tests:
- * that is the point of the route.
+ * `GET /api/plugin-collections/:name/panels` (SHR-279, generalized to any
+ * `ctx.records` store under SHR-282) — the durable-store counterpart to
+ * `/api/tasks/:id/panels`. No task anywhere in these tests: that is the
+ * point of the route.
  */
-describe('plugin collection panels route', () => {
+describe('plugin record-store panels route', () => {
   beforeEach(() => {
     createTestDb();
     resetPluginUi();
-    resetFacts();
-    resetCollections();
+    resetRecords();
   });
 
   afterEach(() => {
     resetPluginUi();
-    resetFacts();
-    resetCollections();
+    resetRecords();
     unregisterSurface('test-narrow');
   });
 
-  async function seedCollectionPanel(as = 'table') {
-    defineCollection(PLUGIN_ID, { name: 'deals', schema: {}, key: 'id' });
+  async function seedStorePanel(as = 'table') {
+    defineStore(PLUGIN_ID, { name: 'deals', scope: 'durable', mode: 'upsert', key: 'id' });
     registerPluginUiPanel(PLUGIN_ID, {
       slot: 'settings.card',
-      collection: 'deals',
+      record: 'deals',
       as: as as never,
       title: 'Pipeline',
     });
@@ -206,8 +204,8 @@ describe('plugin collection panels route', () => {
     await putRecord(PLUGIN_ID, 'deals', { id: 'd-2', stage: 'lost' });
   }
 
-  it('renders a collection-bound panel on cli, with no task involved', async () => {
-    await seedCollectionPanel();
+  it('renders a store-bound panel on cli, with no task involved', async () => {
+    await seedStorePanel();
 
     const app = createApp();
     const res = await request(app)
@@ -229,7 +227,7 @@ describe('plugin collection panels route', () => {
       fallback: 'json',
       render: renderPanelText,
     });
-    await seedCollectionPanel();
+    await seedStorePanel();
 
     const app = createApp();
     const res = await request(app)
@@ -242,8 +240,8 @@ describe('plugin collection panels route', () => {
     expect(res.body.panels[0].renderer).toBe('json');
   });
 
-  it('windows the collection with limit/orderBy', async () => {
-    await seedCollectionPanel();
+  it('windows the store with limit/orderBy', async () => {
+    await seedStorePanel();
 
     const app = createApp();
     const res = await request(app)
@@ -257,7 +255,7 @@ describe('plugin collection panels route', () => {
   });
 
   it('an unusable orderBy field is a 400, not a 500', async () => {
-    await seedCollectionPanel();
+    await seedStorePanel();
 
     const app = createApp();
     await request(app)
@@ -267,8 +265,8 @@ describe('plugin collection panels route', () => {
       .expect(400);
   });
 
-  it('a collection nothing binds to renders no panels rather than 404ing', async () => {
-    await seedCollectionPanel();
+  it('a store nothing binds to renders no panels rather than 404ing', async () => {
+    await seedStorePanel();
 
     const app = createApp();
     const res = await request(app)
@@ -277,8 +275,8 @@ describe('plugin collection panels route', () => {
     expect(res.body.panels).toEqual([]);
   });
 
-  it('surface=web 400s — the browser draws collection panels itself', async () => {
-    await seedCollectionPanel();
+  it('surface=web 400s — the browser draws these panels itself', async () => {
+    await seedStorePanel();
 
     const app = createApp();
     const res = await request(app)
@@ -290,7 +288,7 @@ describe('plugin collection panels route', () => {
   });
 
   it('missing surface query param 400s; an unknown surface 404s', async () => {
-    await seedCollectionPanel();
+    await seedStorePanel();
 
     const app = createApp();
     const name = encodeURIComponent(`${PLUGIN_ID}:deals`);

@@ -27,8 +27,8 @@ export { renderPanelText } from './text.js';
 export {
   resolveRenderer,
   contributionsForSurface,
-  panelsForSurface,
-  renderCollectionPanels,
+  panelsForTask,
+  panelsForStore,
   promptOn,
 } from './render.js';
 export type { RenderedPanel } from './render.js';
