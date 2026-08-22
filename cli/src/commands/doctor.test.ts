@@ -146,7 +146,7 @@ describe('octomux doctor', () => {
       failed: [],
       manifestPath: '/fake/octomux.yml',
       safeMode: false,
-      grants: { 'policy-bot': ['policy.intercept', 'facts.put'], 'quiet-plugin': [] },
+      grants: { 'policy-bot': ['policy.intercept', 'records.write'], 'quiet-plugin': [] },
     } as LoadReport);
 
     vi.spyOn(process.stdout, 'isTTY', 'get').mockReturnValue(true);
@@ -155,7 +155,7 @@ describe('octomux doctor', () => {
     await program.parseAsync(['node', 'octomux', 'doctor']);
 
     const output = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(output).toContain('grants: policy.intercept, facts.put');
+    expect(output).toContain('grants: policy.intercept, records.write');
     expect(output).toContain('grants: none');
   });
 

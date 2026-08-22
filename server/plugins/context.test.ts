@@ -41,7 +41,7 @@ vi.mock('fs', (importOriginal) => {
 // context.ts imports ../artifact-task.js statically (for ctx.artifacts), so
 // this mock must also be registered before context.ts is pulled in — same
 // reason as the fs mock above. Mocking the direct dependency (not the DB
-// layer it wraps) mirrors how the ctx.facts tests below would mock ./facts.js.
+// layer it wraps) mirrors how the ctx.records tests below would mock ./records.js.
 // `toArtifactEntry` is NOT stubbed — it's the pure record->wire-shape mapper
 // that owns the url format these tests assert. Stubbing it would leave them
 // asserting the mock instead of the real thing.
@@ -127,7 +127,7 @@ const { registerCompute, getCompute, listCompute, resetCompute, freezeCoreComput
   await import('../compute/registry.js');
 const { listSurfaces, resetSurfaces, registerCoreSurfaces } = await import('../surfaces/index.js');
 const { resetPluginGrants } = await import('./grants.js');
-const { resetCollections } = await import('./collections.js');
+const { resetRecords } = await import('./records.js');
 const { resetServices } = await import('./services.js');
 const { createTestDb } = await import('../test-helpers.js');
 const { putSecret } = await import('../secrets/store.js');
@@ -179,7 +179,7 @@ beforeEach(() => {
   resetSurfaces();
   registerCoreSurfaces();
   resetPluginGrants();
-  resetCollections();
+  resetRecords();
   resetServices();
   createTestDb();
   process.env.OCTOMUX_SECRET_KEY = TEST_SECRET_KEY;
@@ -252,12 +252,11 @@ describe('ctx.settings', () => {
   });
 });
 
-// SHR-282: `ctx.kv` is gone — its checkpoint semantics (begin/end/interrupted)
-// live on `ctx.records` now, scoped per store rather than flat per plugin.
-// `records.ts`'s own test file covers the full behavioral surface (schema
-// validation, key extraction, checkpoint isolation across stores); this
-// block only pins the ctx-level WIRING — grant checks and mount isolation —
-// same division of labor the old ctx.facts/ctx.collections/ctx.kv blocks had.
+// The checkpoint trio (begin/end/interrupted) lives on `ctx.records` now,
+// scoped per store rather than flat per plugin. `records.ts`'s own test file
+// covers the full behavioral surface (schema validation, key extraction,
+// checkpoint isolation across stores); this block only pins the ctx-level
+// WIRING — grant checks and mount isolation.
 describe('ctx.records checkpoints (begin/end/interrupted)', () => {
   it('round-trips a value through put → query without records.write blocking a read', async () => {
     const ctx = createPluginContext('rec-plugin', ['records.define', 'records.write']);
@@ -838,7 +837,7 @@ describe('ctx.artifacts', () => {
     ]);
   });
 
-  it('write() still works on a REVOKED context — deliberate, not a bug: same reasoning as facts.put, do not gate this on assertLive', async () => {
+  it('write() still works on a REVOKED context — deliberate, not a bug: same reasoning as records.put, do not gate this on assertLive', async () => {
     vi.mocked(mockWriteTaskArtifact).mockReturnValue({
       pluginId: 'revoked-plugin',
       name: 'report.md',
@@ -926,7 +925,7 @@ describe('grant checks (SHR-259)', () => {
     expect(() => ctx.http.route('GET', '/x', async () => {})).toThrow(/"http\.route"/);
   });
 
-  it('artifacts.list stays ungated — reads are ungated by design, same as facts.read (SHR-273)', async () => {
+  it('artifacts.list stays ungated — reads are ungated by design, same as records.read (SHR-273)', async () => {
     const ctx = createPluginContext('nogrants3');
     // Asserts the grant check specifically, not success: the mocked
     // listTaskArtifacts returns undefined here, so this call rejects either
@@ -946,8 +945,8 @@ describe('grant checks (SHR-259)', () => {
   });
 
   // SHR-282: reads stay ungated for the collapsed store, matching the old
-  // facts.read/catalog.list precedent.
-  it('records reads stay ungated, matching facts.read and catalog.list', async () => {
+  // records.read/catalog.list precedent.
+  it('records reads stay ungated, matching records.read and catalog.list', async () => {
     const ctx = createPluginContext('nogrants4');
     await expect(ctx.records.query('s')).resolves.toEqual([]);
   });
@@ -1006,7 +1005,7 @@ describe('grant checks (SHR-259)', () => {
     [
       // SHR-272: ctx.agents.run() is async and, with no real harness/substrate
       // wired in this test file, rejects downstream once past the grant
-      // check. Same pattern as the facts.put row above — only the synchronous
+      // check. Same pattern as the records.put row above — only the synchronous
       // grant check is asserted; silence the rejection so it doesn't surface
       // as an unhandled rejection.
       'agents.run',
@@ -1091,7 +1090,7 @@ describe('ctx.records (SHR-282)', () => {
     ]);
   });
 
-  it('query and watch work without any grant — reads are ungated, like facts.read', async () => {
+  it('query and watch work without any grant — reads are ungated, like records.read', async () => {
     const owner = createPluginContext('rec-owner-read', ['records.define', 'records.write']);
     owner.records.define({ name: 'things', scope: 'durable', mode: 'upsert', key: 'id' });
     await owner.records.put('things', { id: '1' });
@@ -1201,7 +1200,7 @@ describe('ctx.fanout', () => {
     expect(fanoutCalls).toEqual([]);
   });
 
-  // Reads follow the facts.read / artifacts.list precedent: ungated.
+  // Reads follow the records.read / artifacts.list precedent: ungated.
   it.each([
     [
       'status',
@@ -1230,7 +1229,7 @@ describe('ctx.fanout', () => {
   });
 
   // Deliberately NOT assertLive-gated: a fan-out is work a healthy plugin
-  // starts long after apply() returned, same as facts.put / artifacts.write.
+  // starts long after apply() returned, same as records.put / artifacts.write.
   it('still runs after revoke, given the grant', async () => {
     const ctx = createPluginContext('fan-revoked', ['fanout.run']);
     revokePluginContext(ctx);

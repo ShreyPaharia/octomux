@@ -14,7 +14,7 @@ import { manifestPath as defaultManifestPath } from './paths.js';
 import { listHarnesses, resetHarnesses, getHarness } from '../harnesses/registry.js';
 import { getWorkflow } from '../workflows/registry.js';
 import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
-import { resetFacts } from './facts.js';
+import { resetRecords } from './records.js';
 import { subscribeServerEvents } from '../events.js';
 import { resetPluginGrants } from './grants.js';
 import { resetServices } from './services.js';
@@ -38,9 +38,9 @@ function writeModule(name: string, source: string): string {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loader-test-'));
   nodeModulesDir = path.join(tmpDir, 'node_modules');
-  // ctx.kv now reads/writes real SQLite (plugin_kv) rather than throwing a
-  // stub — give it an in-memory DB so the "hands apply() a real context"
-  // test below can exercise it without touching the real data dir.
+  // ctx.records now reads/writes real SQLite (plugin_records) rather than
+  // throwing a stub — give it an in-memory DB so the "hands apply() a real
+  // context" test below can exercise it without touching the real data dir.
   createTestDb();
 });
 
@@ -449,20 +449,22 @@ plugins:
   it('hands apply() a real context, not a silent no-op', async () => {
     // The default makeContext must be the real createPluginContext: a stub
     // whose registrars do nothing would report this plugin as loaded while
-    // registering nothing. This row declares no grants, so ctx.kv.get()
-    // (an ungated read) works while ctx.kv.set() (gated on kv.write) throws
-    // "not granted" — the cheapest observable proof the real context, with
-    // its real grant wiring, arrived.
+    // registering nothing. This row declares no grants, so ctx.records.query()
+    // (an ungated read) works while ctx.records.put() (gated on records.write)
+    // throws "not granted" — the cheapest observable proof the real context,
+    // with its real grant wiring, arrived.
     const abs = writeModule(
       'ctx-plugin.mjs',
-      `export function apply(ctx) {
+      `export async function apply(ctx) {
+         let queryWorks = false;
+         try { await ctx.records.query('x'); queryWorks = true; } catch {}
+         let putThrowsNotGranted = false;
+         try { await ctx.records.put('x', 1); }
+         catch (err) { putThrowsNotGranted = /not granted/.test(String(err)); }
          globalThis.__octomuxCtxProbe = {
            id: ctx.id,
-           kvGetWorks: (() => { try { ctx.kv.get('x'); return true; } catch { return false; } })(),
-           kvSetThrowsNotGranted: (() => {
-             try { ctx.kv.set('x', 1); return false; }
-             catch (err) { return /not granted/.test(String(err)); }
-           })(),
+           queryWorks,
+           putThrowsNotGranted,
          };
        }\n`,
     );
@@ -477,8 +479,8 @@ plugins:
     expect(report.failed).toEqual([]);
     expect((globalThis as Record<string, unknown>).__octomuxCtxProbe).toEqual({
       id: 'ctxplug',
-      kvGetWorks: true,
-      kvSetThrowsNotGranted: true,
+      queryWorks: true,
+      putThrowsNotGranted: true,
     });
     delete (globalThis as Record<string, unknown>).__octomuxCtxProbe;
   });
@@ -681,7 +683,7 @@ describe('unloadPlugin / reloadPlugin', () => {
     resetMountedPlugins();
     resetHarnesses();
     resetPluginRoutes();
-    resetFacts();
+    resetRecords();
     resetPluginGrants();
   });
 
@@ -973,9 +975,9 @@ plugins:
     expect(getMountedPlugin('rollbackbad')).toBeUndefined();
   });
 
-  it('a plugin that registers a route and a fact type and THEN throws in apply() leaves nothing registered, so a later reload of the same id succeeds', async () => {
+  it('a plugin that registers a route and a record store and THEN throws in apply() leaves nothing registered, so a later reload of the same id succeeds', async () => {
     // Finding 5: before the fix, a partial apply() failure only revoked the
-    // context — the route/fact registered before the throw leaked forever,
+    // context — the route/store registered before the throw leaked forever,
     // `mounted` never got an entry, and the next reload skipped the unmount
     // (mounted.has() === false) and hit "already registered"/"already
     // defined" against those leftovers.
@@ -984,7 +986,7 @@ plugins:
       modPath,
       `export async function apply(ctx) {
          ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+         ctx.records.define({ name: 'observed', scope: 'task', mode: 'append', schema: { type: 'object' } });
          throw new Error('boom after partial registration');
        }\n`,
       'utf-8',
@@ -993,7 +995,7 @@ plugins:
 plugins:
   - id: partialfail
     name: ${modPath}
-    grants: [http.route, facts.define]
+    grants: [http.route, records.define]
 `);
 
     const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -1011,7 +1013,7 @@ plugins:
       modPath,
       `export async function apply(ctx) {
          ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+         ctx.records.define({ name: 'observed', scope: 'task', mode: 'append', schema: { type: 'object' } });
        }\n`,
       'utf-8',
     );

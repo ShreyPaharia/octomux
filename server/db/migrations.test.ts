@@ -135,6 +135,79 @@ describe('runMigrations (isolated)', () => {
     expect(t).toHaveLength(1);
   });
 
+  it('migrates rows from plugin_facts/plugin_collections/plugin_kv into plugin_records and drops the old tables', () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    // Simulate a pre-collapse DB: create the old tables by hand (SCHEMA/migrations
+    // no longer create them) and seed one row in each before running migrations.
+    db.exec(`
+      CREATE TABLE plugin_facts (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, type TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE TABLE plugin_collections (
+        collection TEXT NOT NULL, key TEXT NOT NULL, record TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (collection, key)
+      );
+      CREATE TABLE plugin_kv (
+        plugin_id TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL DEFAULT 'null', owner TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (plugin_id, key)
+      );
+    `);
+    db.prepare(
+      `INSERT INTO plugin_facts (task_id, type, payload) VALUES ('t1','p:log','{"a":1}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO plugin_collections (collection, key, record) VALUES ('p:leads','k1','{"b":2}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO plugin_kv (plugin_id, key, value, owner) VALUES ('p','k2','{"c":3}','mount1')`,
+    ).run();
+
+    runMigrations(db);
+
+    const tables = (
+      db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name);
+    expect(tables).not.toContain('plugin_facts');
+    expect(tables).not.toContain('plugin_collections');
+    expect(tables).not.toContain('plugin_kv');
+
+    const rows = db
+      .prepare(`SELECT store, task_id, key, payload, owner FROM plugin_records ORDER BY seq`)
+      .all() as Array<{
+      store: string;
+      task_id: string | null;
+      key: string | null;
+      payload: string;
+      owner: string | null;
+    }>;
+    expect(rows).toEqual([
+      { store: 'p:log', task_id: 't1', key: null, payload: '{"a":1}', owner: null },
+      { store: 'p:leads', task_id: null, key: 'k1', payload: '{"b":2}', owner: null },
+      { store: 'p:kv', task_id: null, key: 'k2', payload: '{"c":3}', owner: 'mount1' },
+    ]);
+  });
+
+  it('a fresh database skips the collapse and never creates plugin_kv', () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    expect(() => runMigrations(db)).not.toThrow();
+    const tables = (
+      db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name);
+    expect(tables).not.toContain('plugin_facts');
+    expect(tables).not.toContain('plugin_collections');
+    expect(tables).not.toContain('plugin_kv');
+    expect(tables).toContain('plugin_records');
+  });
+
   describe('retired current_summary columns', () => {
     /**
      * Simulate a pre-retirement DB: SCHEMA no longer creates these columns, so

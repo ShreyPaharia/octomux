@@ -345,19 +345,19 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes nine registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes ten registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
 `ctx.compute.register()` (see "Compute providers" above), `ctx.surfaces.register()` (below),
-`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`),
-`ctx.collections` (`define`/`put`/`query`/`watch`),
+`ctx.http.route()`, `ctx.records` (`define`/`put`/`read`/`query`/`watch`, plus a
+`begin`/`end`/`interrupted` checkpoint trio — see below),
 `ctx.services` (`provide()`/`require()`, below), `ctx.ui.panel()`,
-`ctx.policy.intercept()`, `ctx.agents.run()`, `ctx.fanout.run()` and
-`ctx.catalog.list()` — plus
+and `ctx.policy.intercept()` — plus non-registrar methods `ctx.agents.run()`,
+`ctx.fanout.run()`, `ctx.attention.ask()`, and the read-only `ctx.catalog.list()`.
 `ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
 artifact implementation, they need to write one. `write(taskId, {name, mime, body})` drops a file
 at `<worktree>/.octomux/artifacts/<pluginId>/<name>` (metadata in a sibling `index.json`, since
 `mime` isn't recoverable from the filesystem) and `list(taskId)` reads back every plugin's
-artifacts on that task, unscoped, exactly like `facts.read`. `server/services/run-detail.ts`
+artifacts on that task, unscoped, exactly like `records.read`. `server/services/run-detail.ts`
 surfaces them on `GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
 further core change. Files land in the task's git worktree — they diff, and they outlive both
 the plugin and a DB wipe.
@@ -375,8 +375,8 @@ no host `node_modules` tree to import a runtime value from even by accident.
 - **Boot order is the correctness property.** `await loadPlugins(...)` runs in `server/index.ts`
   between `acquireInstanceLock()` and the synchronous `createApp()` — `createApp()` snapshots
   the workflow/capability registries, so a workflow or capability registered after it is a
-  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.facts`, `ctx.collections` and `ctx.ui` are lookup
-  tables rather than express mounts: those four CAN be registered and unregistered at any
+  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.records` and `ctx.ui` are lookup
+  tables rather than express mounts: those three CAN be registered and unregistered at any
   time, which is what makes hot reload possible at all. Core
   harnesses/integrations register and freeze (`freezeCoreHarnesses()` etc.) before any plugin
   row loads; a plugin can never redefine `claude-code`, `cursor`, `jira`, or `linear`.
@@ -390,40 +390,45 @@ no host `node_modules` tree to import a runtime value from even by accident.
   without a running server. `octomux start --safe-mode` (`OCTOMUX_SAFE_MODE=1`) skips every
   plugin row; core harnesses/integrations still register.
 - **Capability grants.** A manifest row declares the `ctx` surface its plugin uses:
-  `grants: [policy.intercept, facts.put]`. Names match the `ctx` path they gate —
-  `workflows.register`, `integrations.register`, `harnesses.register`, `compute.register`,
-  `http.route`, `facts.define`, `facts.put`, `collections.define`, `collections.write`,
-  `services.provide`, `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`,
-  `fanout.run`, `surfaces.register`.
-  `ctx.logger`, `ctx.effect`) are ungated. A row with no
-  `kv.write`, `ui.panel`, `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`,
-  `surfaces.register`, `secrets.read`. Reads and self-owned members (`ctx.facts.read`,
-  `ctx.collections.query`, `ctx.kv.get`/`list`/`interrupted`, `ctx.catalog.list`,
-  `ctx.secrets.list`, `ctx.artifacts.list`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are
-  ungated. A row with no
+  `grants: [policy.intercept, records.write]`. Names match the `ctx` path they gate — all 17,
+  from `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`): `workflows.register`,
+  `integrations.register`, `harnesses.register`, `compute.register`, `http.route`,
+  `records.define`, `records.write`, `services.provide`, `ui.panel`, `ui.action`,
+  `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`, `surfaces.register`,
+  `attention.ask`, `secrets.read`. Reads and self-owned members (`ctx.records.read`/`query`/
+  `watch`/`interrupted`, `ctx.catalog.list`, `ctx.secrets.list`, `ctx.artifacts.list`,
+  `ctx.services.require`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are ungated. A row with no
   `grants` key gets nothing — the registrar throws, and the row lands in the load report
   as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
   row's grants is withheld until acknowledged: the granted set is tracked per row in
   `plugin-grants.json` next to the manifest (first sight of a row grants everything it
   declares; narrowing is free; adding a grant sits pending until `octomux plugins approve
 <id>`). `LoadReport.grants`/`pendingGrants` (per plugin id) is what `octomux doctor` prints.
-- **`ctx.collections`** — the durable half of plugin storage (SHR-275).
-  `ctx.facts` is task-scoped and deleted with the task; a collection is a set of
-  schema-validated records keyed by a field the plugin nominates (`define({ name,
-schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
-  `plugin_collections` table, **not** `plugin_facts` with a nullable `task_id` —
-  same reasoning as ruling R1: two lifetimes do not share one table and one seq.
-  Names qualify to `<pluginId>:<name>` like fact types. `put` takes a BARE name
-  (cross-plugin writes are out of scope and rejected); `query` takes bare OR
-  qualified and is unscoped, like `facts.read`. `QuerySpec` is deliberately tiny:
-  exact-match `where`, `orderBy`/`order`, `limit`/`offset`, no operator language.
-  Unmount drops the _definitions_, never the rows — durability is the point, and
-  a hot reload re-runs `apply()` expecting its records still there.
-  This is what unstranded `ctx.ui`: `UiPanelBinding` is now a union of a
-  `{ fact }` and a `{ collection }` binding, so a panel can finally render
-  something that outlives a task. Records reach the SPA via
-  `GET /api/plugin-collections/:qualifiedName`.
-  Not `ctx.kv` (SHR-263) — kv is opaque blobs, this is queryable records.
+- **`ctx.records`** — the one store for plugin data (SHR-282), replacing the prior
+  three-table split (a task-scoped fact log, a durable keyed collection, and a
+  plugin-private kv blob store) with one `plugin_records` table
+  and one `RecordStoreDefinition` shape: `define({ name, scope, mode, key?, schema? })`.
+  `scope: 'task'` dies with the task (the old facts lifetime); `scope: 'durable'` outlives
+  unmount (the old collections/kv lifetime). `mode: 'append'` adds a row (facts); `mode:
+'upsert'` replaces the row sharing `key` (collections/kv) — `mode:'append'` with a `key`,
+  or `mode:'upsert'` without one, are both rejected at `define()` time. Omit `schema` for an
+  opaque store (recovers the old kv blob use case). Names qualify to `<pluginId>:<name>`.
+  `put(name, record, opts?)` takes a BARE name (cross-plugin writes are out of scope and
+  rejected) and validates scope against `opts.taskId` before the payload against schema;
+  `read(name, opts)` is task-scoped and requires `opts.taskId`; `query(name, q?)` takes bare
+  OR qualified and is unscoped. `QuerySpec` is deliberately tiny: exact-match `where`,
+  `orderBy`/`order`, `limit`/`offset`, no operator language. Unmount drops a store's
+  _definition_ only when its rows die too (`task` scope) — a `durable` store's definition
+  survives, since its rows do. The checkpoint trio (`begin(name, key, value)`/`end(name,
+key)`/`interrupted(name?)`, recovered from the old kv blob store) stamps/clears/reads an in-flight marker
+  per `(store, key)`, scoped by `name` since one plugin can own several stores; checkpoint
+  state is not a registration, so unmount never touches it — deleting it is only ever
+  explicit, via an ordinary `put()` on the same key. Gate: `records.define` on `define()`,
+  `records.write` on `put()`/`begin()`/`end()`; `read`/`query`/`watch`/`interrupted` are
+  ungated. This is what unstranded `ctx.ui`: `UiPanelBinding` binds to a `record` (bare local
+  store name), so a panel can render something that outlives a task. Records reach the SPA via
+  `GET /api/tasks/:id/records` (task-scoped) and `GET /api/plugin-records/:qualifiedName`
+  (unscoped, replacing the old `/api/plugin-collections/:qualifiedName`).
 - **`ctx.services`** — dependency by CAPABILITY, not by package name (SHR-260). A plugin
   provides a name (`ctx.services.provide('chat.send', impl)`); another requires it
   (`ctx.services.require('chat.send')`) and gets back `{ name, get() }` that resolves live on
@@ -437,25 +442,9 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   `require()` fails only that plugin (and anything transitively depending on it) as a
   `phase: 'apply'` load-report entry, never the boot. Providers show up in `ctx.catalog.list()`
   as `service:<name>`. Requires `services.provide`; `require` is ungated.
-- **`ctx.kv`** — the plugin-private half of durable plugin storage (SHR-263), backed by its
-  own `plugin_kv` table (PK `(plugin_id, key)`), not `ctx.collections`: opaque blobs, no
-  schema, no query language, and reads are scoped to the writing plugin — nothing else can
-  see them through `ctx`. Also carries the crash-recovery pair: `begin(key, value)` stamps
-  an in-flight operation with this mount's id, `end(key)` clears it, `interrupted()` returns
-  every checkpoint stamped by a DIFFERENT mount — a crash, or a hot reload mid-operation.
-  Calling `interrupted()` first in `apply()` is the plugin-side analogue of core's own
-  `recoverTasks()` (`server/task-engine/reconcile.ts`) / `rehydrateConversations()`
-  (`server/index.ts`): the recovery point is the plugin's own `apply()`, core runs no
-  separate boot pass for it. Unlike every registration a plugin makes through `ctx`, kv
-  state is NOT undone on unmount — a hot reload re-runs `apply()` expecting its checkpoints
-  still there, and crash recovery that lost its checkpoints in the crash it exists to
-  recover from would be pointless. Deleting kv state is only ever explicit. Gate: `kv.write`
-  on `set`/`del`/`begin`/`end`; `get`/`list`/`interrupted` are ungated reads. Governs `ctx`
-  only — a plugin can read/write the `plugin_kv` table directly like any other table. No
-  size cap, no TTL, no eviction.
 - **`ctx.fanout`** — run a step **per item**, not per schedule fire. `run({ name, source, each })`
   maps a handler over an item source: `{ items }` (a plain array), `{ collection, query }` (a
-  `ctx.collections` query — SHR-275; the resolver is injected via `setCollectionResolver()`, and
+  `ctx.records` query source — the resolver is injected via `setCollectionResolver()`, and
   until it lands a collection source throws a message saying so), or `{ resume: runId }` (redrive).
   Per-item status persists in `fanout_runs` / `fanout_items`, so a partial run is legible
   (`GET /api/fanout/runs[/:id]`) and resumable. Retries are bounded exponential backoff
@@ -466,7 +455,7 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   cross-ticket: `ctx.agents.run()` (SHR-272) stays a thin accessor, and fan-out is where scheduling
   policy belongs, because fan-out is the runaway case. Unmount aborts in-flight runs without
   awaiting their handlers (a handler may be a multi-minute agent session); interrupted items go
-  back to `pending` for a later resume. Deliberately not a DAG — chain by writing to a collection
+  back to `pending` for a later resume. Deliberately not a DAG — chain by writing to a record store
   and querying it from the next step. No HTTP redrive route: a redrive needs the plugin's live
   `each` closure, which cannot be persisted.
 - **`ctx.policy.intercept(point, hook)`** — the one registrar that can refuse, not just add.
@@ -475,7 +464,7 @@ schema, key })`), upserted on `put`, with no task anywhere in the API. Its own
   hooks), or nothing. Hooks for a point run in registration order; first deny short-circuits.
   A hook that throws or exceeds `POLICY_HOOK_TIMEOUT_MS` (5s) is logged and treated as no
   opinion — **fails open**, so a crashing plugin can't wedge every launch. A deny or patch on
-  a task-scoped intent is recorded twice: a `core:policy.decision` fact and a `task_updates`
+  a task-scoped intent is recorded twice: a `core:policy.decision` record and a `task_updates`
   row of kind `policy` (shows in the task's Activity panel). There is deliberately no
   `task.merge` point — core never merges a PR (`server/poller/merged-pr.ts` only observes
   merges that already happened on GitHub), so there's no call site to gate.

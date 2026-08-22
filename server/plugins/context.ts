@@ -328,14 +328,14 @@ export function createPluginContext(
     },
   };
 
-  // Declared before the registrars that push onto it (facts.watch) — see the
+  // Declared before the registrars that push onto it (records.watch) — see the
   // auto-dispose note there.
   const effects: Array<() => void | Promise<void>> = [];
 
-  // `ctx.records` — the single store behind what used to be `ctx.facts`,
-  // `ctx.collections` and `ctx.kv` (SHR-282). See `./records.js`'s module doc
+  // `ctx.records` — the single store for plugin data (SHR-282, collapsing the
+  // old facts/collections/kv split into one). See `./records.js`'s module doc
   // for the full shape; this registrar is just the grant/revoke wiring
-  // around it, same layering as `facts`/`collections`/`kv` had before.
+  // around it.
   const records: RecordsRegistrar = {
     define(def: RecordStoreDefinition) {
       assertLive('records.define');
@@ -343,8 +343,7 @@ export function createPluginContext(
       requireLocalId(def as unknown as Record<string, unknown>, 'name', 'records.define');
       defineStore(id, def);
     },
-    // Deliberately NOT `assertLive` — same split as the old `facts.put`/
-    // `collections.put`/`kv.set`: the revoke guard stops a timed-out apply()
+    // Deliberately NOT `assertLive`: the revoke guard stops a timed-out apply()
     // from mutating the REGISTRIES, not a healthy plugin from writing data
     // long after apply() returned. Grant-checked regardless.
     //
@@ -355,7 +354,7 @@ export function createPluginContext(
       assertGranted(id, 'records.write');
       return putStoreRecord(id, name, record, opts?.taskId);
     },
-    // Ungated and unscoped, like the old facts.read/collections.query: any
+    // Ungated and unscoped — any
     // plugin may read any store, its own or a sibling's. `async` for the
     // same reason `put` above is — a missing `opts.taskId` should reject the
     // returned promise, not throw synchronously.
@@ -371,13 +370,13 @@ export function createPluginContext(
     watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void) {
       assertLive('records.watch');
       const unsubscribe = watchStore(id, qualifiedName, onRecord);
-      // Auto-disposed on unmount, same as the old facts.watch/collections.watch
+      // Auto-disposed on unmount
       // — a watcher on a sibling's store would otherwise keep firing forever
       // after this plugin unmounts.
       effects.push(unsubscribe);
       return unsubscribe;
     },
-    // Checkpoints (from the old ctx.kv). Grant-checked like every other
+    // Checkpoints. Grant-checked like every other
     // write above; reads (`interrupted`) stay ungated below.
     begin(name: string, key: string, value: unknown) {
       assertGranted(id, 'records.write');
@@ -397,7 +396,7 @@ export function createPluginContext(
   // implementation into a namespace every other plugin can read, so it's
   // gated like any other registration; `require` only records that THIS
   // plugin needs a name — a statement about itself, not a reach into
-  // anyone else's — so it's ungated, same call as facts.read/catalog.list.
+  // anyone else's — so it's ungated, same call as records.read/catalog.list.
   // Unregistration on unmount happens in `lifecycle.ts` (calling
   // `unregisterPluginServices`), same as every other registry here — not
   // via `ctx.effect`, because that's plugin-owned teardown, not core's.
@@ -445,15 +444,15 @@ export function createPluginContext(
     },
   };
 
-  // Not a registrar — a method on ctx, same as facts.put/facts.read. Nobody
+  // Not a registrar — a method on ctx, same as records.put/records.read. Nobody
   // needs a different artifact implementation; they need to write one. There
   // is no `artifacts.register()` and there will not be.
   const artifacts: ArtifactsApi = {
     // `pluginId` is always this closure's `id`, never anything the caller
     // could pass in `input` — a plugin can write only into its own artifact
-    // namespace, same discipline as `facts.put`'s `id` argument to `putFact`.
+    // namespace, same discipline as `records.put`'s `id` argument to `putRecord`.
     // Deliberately NOT gated on `assertLive`, for the same reason
-    // `facts.put`/`facts.read` aren't (see the comment there): the revoke
+    // `records.put`/`records.read` aren't (see the comment there): the revoke
     // guard exists to stop a timed-out `apply()` from mutating the live
     // REGISTRIES, not to stop a healthy plugin from writing output long after
     // `apply()` returned. No teardown either — an artifact is a file in the
@@ -466,7 +465,7 @@ export function createPluginContext(
       assertGranted(id, 'artifacts.write');
       return toArtifactEntry(taskId, writeTaskArtifact(taskId, id, input));
     },
-    // Unscoped, like facts.read: every plugin's artifacts on the task, not
+    // Unscoped, like records.read: every plugin's artifacts on the task, not
     // just this plugin's own.
     async list(taskId) {
       return listTaskArtifacts(taskId).map((r) => toArtifactEntry(taskId, r));
@@ -480,7 +479,7 @@ export function createPluginContext(
   // not get a `runs` row.
   const agents: AgentRunner = {
     async run<T = unknown>(opts: AgentRunOptions): Promise<T> {
-      // Gated on `assertLive`, unlike `facts.put`/`artifacts.write` above:
+      // Gated on `assertLive`, unlike `records.put`/`artifacts.write` above:
       // those flush output the plugin already earned, but this SPAWNS A NEW
       // SUBPROCESS. A context is revoked both when `apply()` overruns its
       // timeout and — via `disposePluginContext`, which revokes last — on
@@ -524,7 +523,7 @@ export function createPluginContext(
   // `ctx.attention` — ask a human a question and wait for an answer. Not a
   // registrar, same as `agents`/`artifacts`: nobody needs a different
   // attention implementation, they need to ask one question. Gated on
-  // `assertLive`, like `agents.run` and UNLIKE `facts.put`/`artifacts.write`:
+  // `assertLive`, like `agents.run` and UNLIKE `records.put`/`artifacts.write`:
   // `ask` interrupts a HUMAN, so a plugin that has already been unmounted
   // must not be able to start a new one. Nothing is pushed onto `effects`
   // here: `ask` doesn't REGISTER anything, so there's nothing to deregister
@@ -567,7 +566,7 @@ export function createPluginContext(
     },
   };
 
-  // Deliberately NOT gated on `assertLive` — same reasoning as `facts.put`
+  // Deliberately NOT gated on `assertLive` — same reasoning as `records.put`
   // above: this is a read, not a registration. A revoked context still has a
   // perfectly good view of what's installed; the revoke guard exists to stop
   // a timed-out apply() from mutating the live registries, not to blind a
@@ -594,12 +593,12 @@ export function createPluginContext(
   // implementation, they need to run one. `run` is grant-gated here rather
   // than inside the engine so every capability check in the plugin runtime
   // lives in one file; `status`/`list` are ungated reads, matching
-  // `facts.read` and `artifacts.list`.
+  // `records.read` and `artifacts.list`.
   //
   // Deliberately NOT `assertLive`: a fan-out is work a healthy plugin starts
   // long after `apply()` returned. The revoke guard exists to stop a
   // timed-out `apply()` from mutating the REGISTRIES — same reasoning as
-  // `facts.put` above.
+  // `records.put` above.
   const fanoutApi = createFanOutApi(id);
   const fanout: FanOutApi = {
     run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>) {

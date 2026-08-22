@@ -1,16 +1,9 @@
 /**
- * `ctx.records` — the single store behind what used to be `ctx.facts`,
- * `ctx.collections` and `ctx.kv` (SHR-282). One `RecordStoreDefinition` shape
- * covers all three prior lifetimes: `scope` picks task-scoped vs durable
- * (facts vs collections/kv), `mode` picks append-only vs upsert-on-key (facts
- * vs collections), and an opaque store with no `schema` recovers `ctx.kv`.
- *
- * Ported rather than rewritten from the three modules it replaces — see
- * `server/plugins/facts.ts` (definition map, qualification, the ajv
- * validator cache and its bust-on-redefine), `server/plugins/collections.ts`
- * (key validation, `QuerySpec` handling) and `server/plugins/kv.ts`
- * (checkpoint semantics). Those three still exist and are still consumed
- * elsewhere until Task 9 deletes them.
+ * `ctx.records` — the single store for plugin data (SHR-282), replacing three
+ * prior storage APIs and their three tables. One `RecordStoreDefinition`
+ * shape covers all three prior lifetimes: `scope` picks task-scoped vs
+ * durable, `mode` picks append-only vs upsert-on-key, and an opaque store
+ * with no `schema` recovers the old plugin-private blob store.
  */
 import type { RecordEnvelope, RecordStoreDefinition, QuerySpec } from '@octomux/plugin-api';
 import { childLogger } from '../logger.js';
@@ -30,10 +23,9 @@ import {
 const logger = childLogger('plugins/records');
 
 /**
- * Record stores core owns — the record-store equivalent of the pre-collapse
- * `CORE_FACT_TYPES`. Both are still published as facts today
- * (`server/plugins/policy.ts`, `server/workflows/reviewer/publish-review.ts`);
- * their producers move to `publishCoreRecord` in Tasks 5-8, not here.
+ * Record stores core owns. Published via `publishCoreRecord` from
+ * `server/plugins/policy.ts` and `server/workflows/reviewer/publish-review.ts` —
+ * core writes, plugins only read or watch.
  */
 export const CORE_RECORD_STORES = ['core:review.published', 'core:policy.decision'] as const;
 
@@ -83,10 +75,10 @@ function requireKey(pluginId: string, key: unknown, what: string): string {
 /**
  * Declares a store. `def.name` is BARE; this qualifies it.
  *
- * Rejects a `core:` name (reserved wholesale, same as fact types and
- * collections), a duplicate definition, and the two combinations that used
- * to be conventions rather than rules: `mode:'append'` with a `key`, and
- * `mode:'upsert'` without one.
+ * Rejects a `core:` name (reserved wholesale — core stores are published by
+ * core, never defined via `ctx.records`), a duplicate definition, and the
+ * two invalid combinations: `mode:'append'` with a `key`, and `mode:'upsert'`
+ * without one.
  */
 export function defineStore(pluginId: string, def: RecordStoreDefinition): void {
   const qualified = qualify(pluginId, def.name);
@@ -110,9 +102,8 @@ export function defineStore(pluginId: string, def: RecordStoreDefinition): void 
 }
 
 /**
- * Writes a record. `name` is BARE — a plugin writes only its own stores, same
- * restriction `ctx.collections.put` had; a name containing `:` is rejected
- * rather than treated as a cross-plugin write.
+ * Writes a record. `name` is BARE — a plugin writes only its own stores; a
+ * name containing `:` is rejected rather than treated as a cross-plugin write.
  *
  * Validates scope against `taskId`, then the payload against the store's
  * schema (if any), then — for `mode:'upsert'` — extracts and validates the
@@ -203,8 +194,7 @@ export async function readStore(
 
 /**
  * Queries a store. `name` may be BARE (resolved against `pluginId`) or
- * already QUALIFIED — reads are unscoped, same as the pre-collapse
- * `ctx.collections.query`.
+ * already QUALIFIED — reads are unscoped.
  */
 export async function queryStore(
   pluginId: string,
@@ -276,9 +266,7 @@ export function interruptedFor(pluginId: string, mountId: string, name?: string)
  * Definition lifetime follows ROW lifetime. Task-scoped rows die with their
  * task, so their definitions drop on unmount. Durable rows outlive unmount, so
  * their definitions must too — a durable store whose rows survive but whose
- * definition vanished would be unreadable, and the pre-collapse ctx.kv relied
- * on exactly that (it had no unmount hook at all, so a hot-reloaded plugin
- * found its in-flight checkpoints on the next apply()).
+ * definition vanished would be unreadable.
  */
 export function unregisterTaskScopedStores(pluginId: string): string[] {
   const dropped: string[] = [];

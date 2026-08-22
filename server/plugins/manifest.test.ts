@@ -284,7 +284,7 @@ plugins:
   it.each([
     ['an unknown capability', '["policy.deny"]'],
     ['a typo of a real capability', '["http.routes"]'],
-    ['a typo of collections.write ("collections.put")', '["collections.put"]'],
+    ['a typo of records.write ("records.put")', '["records.put"]'],
     ['a non-array (string)', '"http.route"'],
     ['a non-array (object)', '{}'],
     ['an array with a non-string entry', '[42]'],

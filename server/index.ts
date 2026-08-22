@@ -59,7 +59,7 @@ const logger = childLogger('index');
 acquireInstanceLock();
 
 // Force the DB singleton open here, before the plugin loader runs. Otherwise a
-// plugin's apply() touching ctx.kv would trigger the first initDb() call
+// plugin's apply() touching ctx.records would trigger the first initDb() call
 // *inside* the loader's try/catch, which never throws — a plugin could
 // silently swallow a migration failure (plans/2026-08-16-plugin-ecosystem.md,
 // "THE BOOT-ORDER CONTRACT"). Deliberate one-off exception to the

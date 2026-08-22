@@ -1277,13 +1277,13 @@ export function runMigrations(instance: Database): void {
     taskColsForReReview,
   );
   // ── ctx.records — one store for plugin data (2026-08-22) ────────────────────
-  // Additive only: creates the table the collapse will replace plugin_facts /
-  // plugin_collections / plugin_kv with. The copy-from-old-tables and the
-  // matching DROPs are NOT here — they land in the collapse's final commit,
-  // atomic with deleting the old tables' last consumers. Migrations re-run on
-  // every boot with no version table, so a copy against tables that still
-  // exist would duplicate every row on every boot; the copy has to happen in
-  // the same commit as the drop, not before it. Don't add them here.
+  // Creates the table that replaces plugin_facts / plugin_collections /
+  // plugin_kv. The copy-and-drop for each old table follows below, guarded by
+  // tableExists: a fresh database never ran the old CREATE blocks (they're
+  // gone as of this same migration), so the guard makes the copy a no-op
+  // there while still draining and dropping the table on a database that has
+  // it. Migrations re-run on every boot with no version table, so the DROP is
+  // what makes each copy self-limiting — it only ever runs once per database.
   //
   // Still NOT the `events` table: ruling R1 keeps plugin data out of the
   // orchestrator's control bus, and that is unchanged here.
@@ -1310,75 +1310,44 @@ export function runMigrations(instance: Database): void {
       ON plugin_records(store, seq);
   `);
 
-  // ── ctx.facts — plugin fact log (2026-08-20, SHR-255) ───────────────────────
-  // Deliberately its OWN table, not the `events` table — that one is the
-  // orchestrator's control bus (repositories/orchestrator.ts, drained via
-  // managed_tasks.last_event_seq). Sharing it would put plugin observation
-  // facts into the conductor's drain and share one AUTOINCREMENT seq between
-  // control events and facts (ruling R1, plans/2026-08-20-plugin-runtime-p0.md).
-  // No FK to tasks(id): facts are deleted explicitly by task deletion
-  // (server/repositories/tasks.ts hardDeleteTask), not via ON DELETE CASCADE.
-  instance.exec(`
-    CREATE TABLE IF NOT EXISTS plugin_facts (
-      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id    TEXT NOT NULL,
-      type       TEXT NOT NULL,
-      payload    TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_plugin_facts_task ON plugin_facts(task_id, seq);
-    CREATE INDEX IF NOT EXISTS idx_plugin_facts_type ON plugin_facts(type, seq);
-  `);
+  // ── collapse plugin_facts into plugin_records (2026-08-22) ───────────────
+  // Guarded: a fresh database never had plugin_facts, so this is a no-op
+  // there. An existing database drains its rows (type -> store, no key —
+  // facts were append-only) and drops the table, which makes the guard fail
+  // on every subsequent boot.
+  if (tableExists(instance, 'plugin_facts')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, created_at)
+      SELECT type, task_id, NULL, payload, created_at FROM plugin_facts;
+      DROP TABLE plugin_facts;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_facts');
+  }
 
-  // ── ctx.collections — durable keyed records (2026-08-21, SHR-275) ─────────
-  // The durable sibling of plugin_facts above: a small upsert store keyed on
-  // (collection, key) instead of an append-only log keyed on task_id. Its own
-  // table for the same reason plugin_facts got its own table rather than
-  // reusing `events` — different lifetime, different shape. Rows here are
-  // DURABLE: unlike plugin_facts there is deliberately no delete-on-task-delete
-  // sweep, because a collection record has no task in the picture at all.
-  // No extra index: every query filters on `collection`, which is the leading
-  // column of the PRIMARY KEY, so the PK's own b-tree already covers it.
-  instance.exec(`
-    CREATE TABLE IF NOT EXISTS plugin_collections (
-      collection TEXT NOT NULL,
-      key        TEXT NOT NULL,
-      record     TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (collection, key)
-    );
-  `);
+  // ── collapse plugin_collections into plugin_records (2026-08-22) ────────
+  // collection -> store, key preserved (collections were keyed/upsert), no
+  // task_id (collections were never task-scoped).
+  if (tableExists(instance, 'plugin_collections')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, created_at, updated_at)
+      SELECT collection, NULL, key, record, created_at, updated_at FROM plugin_collections;
+      DROP TABLE plugin_collections;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_collections');
+  }
 
-  // ── ctx.kv — plugin-private durable scratch (2026-08-22, SHR-263) ─────────
-  // Not plugin_collections with a nullable schema, and not plugin_facts: this
-  // is opaque per-plugin blob storage, never queryable and never validated
-  // against a schema, where a collection is schema-validated and unscoped for
-  // reads, and a fact is a task-scoped append-only log. Different API
-  // (get/put/delete/list by exact key or prefix, no where/orderBy language),
-  // different consumer (a plugin's own private scratch, never read by
-  // another plugin), same reasoning as ruling R1 that split facts from
-  // collections in the first place — don't collapse three shapes into one
-  // table just because they're all "plugin storage".
-  //
-  // `owner` is the crash-recovery hook: a plugin stamps its mount id into
-  // `owner` before starting a multi-step operation against a key and clears
-  // it (back to NULL) when the operation settles. A row still carrying a
-  // DIFFERENT mount's id on the next boot is, by definition, an operation
-  // that never finished — `listKvEntriesOwnedByOthers` is how a plugin finds
-  // that debris after a crash. No extra index: every lookup and prefix scan
-  // filters on `plugin_id`, the leading column of the PRIMARY KEY.
-  instance.exec(`
-    CREATE TABLE IF NOT EXISTS plugin_kv (
-      plugin_id  TEXT NOT NULL,
-      key        TEXT NOT NULL,
-      value      TEXT NOT NULL DEFAULT 'null',
-      owner      TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      PRIMARY KEY (plugin_id, key)
-    );
-  `);
+  // ── collapse plugin_kv into plugin_records (2026-08-22) ──────────────────
+  // plugin_kv had no separate store namespace, so `plugin_id || ':kv'`
+  // synthesizes one to keep a plugin's kv rows out of any other store's
+  // namespace. `owner` carries over for the crash-recovery hook.
+  if (tableExists(instance, 'plugin_kv')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, owner, created_at, updated_at)
+      SELECT plugin_id || ':kv', NULL, key, value, owner, created_at, updated_at FROM plugin_kv;
+      DROP TABLE plugin_kv;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_kv');
+  }
 
   // ── fan-out: run a step per item (2026-08-21, SHR-276) ──────────────────────
   // Own tables rather than reusing `runs` — `runs` is one row per workflow

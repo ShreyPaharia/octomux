@@ -67,7 +67,6 @@ const PENDING_MIGRATION: string[] = [
   'GET /api/orchestrator/conversations/:id',
   'GET /api/orchestrator/conversations/:id/messages',
   'GET /api/orchestrator/conversations/:id/usage',
-  'GET /api/plugin-collections/:name',
   'GET /api/plugin-collections/:name/panels',
   'GET /api/plugin-records/:name',
   'GET /api/plugin-ui/actions',

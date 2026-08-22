@@ -4,7 +4,7 @@
  * A plugin gets exactly two rendered things today: a schedules form from
  * `config` and a run detail view from `output`, on three fixed surfaces. There
  * is no sidebar, no panel, no badge — not because rendering is hard, but
- * because there was no shared data for a panel to render. `ctx.facts` supplies
+ * because there was no shared data for a panel to render. `ctx.records` supplies
  * that; this supplies the binding.
  *
  * No plugin JavaScript ever reaches the browser. The client owns every
@@ -150,12 +150,12 @@ const actionsById = new Map<string, UiActionRegistration>();
 /**
  * Registers an action. `def.id` is BARE; this qualifies it to
  * `<pluginId>:<id>` the same way `registerPluginUiPanel` qualifies
- * `binding.fact`/`binding.collection`.
+ * `binding.record`.
  *
  * Validates `id`/`label`/`run`/`slot` at registration time (unlike the panel
- * side's fact-type typo check, which waits until read time) — there is no
+ * side's record-store typo check, which waits until read time) — there is no
  * legitimate ordering dependency here the way there is between
- * `facts.define()` and `ui.panel()`, so a bad declaration is a load-time
+ * `records.define()` and `ui.panel()`, so a bad declaration is a load-time
  * failure, not a permanently-broken button nobody is told about.
  */
 export function registerPluginUiAction(pluginId: string, def: UiActionDefinition): void {

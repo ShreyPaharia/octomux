@@ -72,8 +72,7 @@ export interface CatalogEntry {
   kind: 'plugin' | 'core';
   /** Everything this unit contributes, as `<registry>:<qualified id>` strings —
    *  `workflow:demo:changelog`, `harness:demo:foo`, `integration:jira`,
-   *  `route:GET /coverage/:task`, `ui:task.panel`, `fact:demo:coverage`,
-   *  `collection:demo:baselines`. */
+   *  `route:GET /coverage/:task`, `ui:task.panel`, `record:demo:coverage`. */
   provides: string[];
   /** `name@version` for a plugin (resolved path when a local-path row has no
    *  version), `'built-in'` for core. */
@@ -98,54 +97,6 @@ export interface PluginLogger {
 export interface PluginSettingsScope {
   get<T = Record<string, unknown>>(): Promise<T>;
   update(patch: Record<string, unknown>): Promise<void>;
-}
-
-/**
- * `ctx.kv` — plugin-PRIVATE durable scratch: opaque blobs keyed by a string,
- * scoped to the plugin that wrote them. Nobody but the owning plugin can
- * read a kv entry.
- *
- * NOT `ctx.collections`: a collection is schema-validated, keyed on a field
- * the plugin nominates, and readable by any plugin (`query` takes a bare OR
- * qualified name — reads are unscoped by design). kv has no schema, no query
- * language beyond a key or a key prefix, and only its own plugin can ever
- * see it.
- *
- * NOT `ctx.facts`: facts are an append-only log scoped to one task and die
- * with it. kv has no task in the picture at all — it is the plugin's own
- * durable memory, independent of any run.
- *
- * kv state deliberately OUTLIVES an unmount. Every registrar on `ctx` (a
- * workflow, a route, a fact type, a UI panel) is undone when the plugin
- * unmounts — that's the whole point of the registrar model. kv is the one
- * exception: nothing here is deregistered on teardown, because a
- * hot-reloaded or restarted plugin must find its checkpoints, and its
- * ordinary state, still sitting there when `apply()` runs again. That
- * asymmetry is deliberate, not an oversight.
- *
- * `begin`/`end`/`interrupted` are the crash-recovery half of this API. They
- * share `get`/`set`'s key space (prefix your keys to avoid collisions) but
- * stamp a mark identifying which plugin *mount* wrote them. A checkpoint
- * left in place by a mount other than the current one is, by construction,
- * an operation that never finished — the process crashed mid-`begin`, or a
- * hot reload tore that mount down before it called `end`. `apply()` is the
- * natural place to call `interrupted()` and decide what to do about it —
- * this is the plugin-side analogue of `recoverTasks()` at host boot, and it
- * adds no new boot pass of its own.
- */
-export interface PluginKv {
-  get<T>(key: string): T | undefined;
-  set(key: string, value: unknown): void;
-  del(key: string): void;
-  list(prefix?: string): Array<{ key: string; value: unknown }>;
-  /** Marks an operation in flight, checkpointing whatever this plugin needs to
-   *  resume it. Same key space as `set`/`get` — prefix your keys. */
-  begin(key: string, value: unknown): void;
-  /** The operation finished. Deletes the checkpoint. */
-  end(key: string): void;
-  /** Checkpoints left behind by a previous mount — a crash, or a hot reload
-   *  that tore the plugin down mid-operation. Empty on a clean start. */
-  interrupted(): Array<{ key: string; value: unknown; startedAt: string }>;
 }
 
 // All three qualify internally. The plugin declares a LOCAL id and never sees
@@ -208,97 +159,6 @@ export interface PluginResponse {
 }
 
 /**
- * `ctx.facts` — a typed, task-scoped, append-only log every plugin can write
- * to and read from. The only wire between plugin types before this was
- * `HookEnvelope`: seven fixed event names, outbound only, fire-and-forget,
- * with no read path at all.
- *
- * Fact types are namespaced under the manifest row id, so a plugin can add
- * `coverage-bot:coverage` and can never overwrite `core:diff`. Facts are
- * task-scoped and die with the task. This is an observation log, not event
- * sourcing — tasks remain the source of truth.
- */
-export interface FactsRegistrar {
-  /** Declares a fact type and the JSON Schema that validates writes to it.
-   *  The same schema tells the UI how to draw it (`ctx.ui`). */
-  define(def: FactTypeDefinition): void;
-  put(taskId: string, localType: string, payload: unknown): Promise<void>;
-  read(taskId: string, opts?: FactQuery): Promise<Fact[]>;
-  /** Subscribes to a QUALIFIED type (`core:diff`, `other-plugin:coverage`).
-   *  Returns an unsubscribe; also auto-disposed on unmount. */
-  watch(qualifiedType: string, onFact: (fact: Fact) => void): () => void;
-}
-export interface FactTypeDefinition {
-  /** BARE local type. The host qualifies it to `<pluginId>:<type>`. */
-  type: string;
-  /** JSON Schema for the payload. */
-  schema: Record<string, unknown>;
-}
-export interface FactQuery {
-  /** Qualified fact type to filter on. */
-  type?: string;
-  /** Only facts with `seq` strictly greater than this. */
-  sinceSeq?: number;
-}
-export interface Fact {
-  seq: number;
-  taskId: string;
-  /** Qualified — `core:diff`, `coverage-bot:coverage`. */
-  type: string;
-  payload: unknown;
-  createdAt: string;
-}
-
-/**
- * `ctx.collections` — durable, keyed records that OUTLIVE a task (SHR-275).
- *
- * `ctx.facts` is an append-only log scoped to one task; when the task is
- * deleted its facts go with it. That makes it the wrong home for anything a
- * plugin wants to keep — a per-repo score, a rolling index, a registry of
- * things it has seen. A collection is the other half: a small set of records
- * keyed by a field the plugin nominates, upserted on write, with no task in
- * the picture at all.
- *
- * It is deliberately NOT `plugin_facts` with a nullable `task_id`. Same
- * reasoning as ruling R1 in `plans/2026-08-20-plugin-runtime-p0.md`: two
- * concerns with different lifetimes (one dies with a task, one does not) do
- * not share one table, one AUTOINCREMENT sequence, and one drain.
- *
- * Names are namespaced under the manifest row id exactly like fact types, so
- * a plugin can add `coverage-bot:baselines` and can never overwrite a
- * `core:` name.
- *
- * NOT `ctx.kv` (SHR-263). kv is opaque per-plugin blobs keyed by a string;
- * this is schema-validated, queryable records. They may end up sharing a
- * storage layer; they are not the same API.
- */
-export interface CollectionsRegistrar {
-  /** Declares a collection, its record schema, and which record field is the
-   *  upsert key. `def.name` is BARE — the host qualifies it. */
-  define(def: CollectionDefinition): void;
-  /** Upserts one record on its `key` field. `collection` is the plugin's own
-   *  BARE local name — a plugin writes only its own collections, so a
-   *  qualified name here is an error, not a cross-plugin write. */
-  put(collection: string, record: unknown): Promise<void>;
-  /** Reads records. `collection` may be BARE (this plugin's own) or QUALIFIED
-   *  (`other-plugin:baselines`) — reads are unscoped, same as `facts.read`. */
-  query(collection: string, q?: QuerySpec): Promise<unknown[]>;
-  /** Subscribes to a QUALIFIED name. In-process, fired on write. Returns an
-   *  unsubscribe; also auto-disposed on unmount. */
-  watch(qualifiedName: string, cb: (record: unknown) => void): () => void;
-}
-
-export interface CollectionDefinition {
-  /** BARE local name. The host qualifies it to `<pluginId>:<name>`. */
-  name: string;
-  /** JSON Schema every record is validated against on write. */
-  schema: Record<string, unknown>;
-  /** Top-level record property holding the record's identity. Writes upsert
-   *  on it, so `put` twice with the same key value replaces, never appends. */
-  key: string;
-}
-
-/**
  * Deliberately small. Exact-match filters, an order and a window — enough for
  * a panel binding and a plugin's own bookkeeping. There is no operator
  * language, no join, and no aggregate: a plugin that needs those has outgrown
@@ -315,30 +175,17 @@ export interface QuerySpec {
   offset?: number;
 }
 
-/** One stored record, as the REST surface and the repository return it. The
- *  registrar's `query()` hands back the bare `record` values instead. */
-export interface CollectionRecord {
-  /** Qualified — `coverage-bot:baselines`. */
-  collection: string;
-  /** The stringified value of the record's `key` field. */
-  key: string;
-  record: unknown;
-  /** `YYYY-MM-DD HH:MM:SS` UTC — sqlite `datetime('now')` shape. */
-  createdAt: string;
-  updatedAt: string;
-}
-
 /**
- * `ctx.records` — the single store behind what used to be `ctx.facts`,
- * `ctx.collections` and `ctx.kv` (SHR-282). One definition shape covers all
- * three prior lifetimes: `scope` picks task-scoped vs durable (facts vs
- * collections/kv), `mode` picks append-only vs upsert-on-key (facts vs
- * collections), and an opaque store with no `schema` recovers `ctx.kv`.
+ * `ctx.records` — the single store for plugin data (SHR-282), replacing
+ * three prior storage APIs and their three tables. One definition shape
+ * covers all three prior lifetimes: `scope` picks task-scoped vs durable,
+ * `mode` picks append-only vs upsert-on-key, and an opaque store with no
+ * `schema` recovers the old plugin-private blob store.
  */
 export interface RecordStoreDefinition {
   /** BARE local name — the host qualifies it to `<pluginId>:<name>`. */
   name: string;
-  /** JSON Schema validated on write. Omit for an opaque store (the old ctx.kv). */
+  /** JSON Schema validated on write. Omit for an opaque store. */
   schema?: Record<string, unknown>;
   /** Record field used as identity. Required when `mode` is 'upsert'. */
   key?: string;
@@ -349,8 +196,8 @@ export interface RecordStoreDefinition {
 }
 
 /** What `read`, `query` and `watch` hand back. Uniform across every scope and
- *  mode: the pre-collapse ctx.facts fired a full envelope while ctx.collections
- *  fired a bare record, and one shape is strictly more information. */
+ *  mode — one envelope shape is strictly more information than branching on
+ *  which prior API produced it. */
 export interface RecordEnvelope {
   seq: number;
   store: string;
@@ -367,9 +214,8 @@ export interface RecordsRegistrar {
   read(name: string, opts?: { taskId: string }): Promise<RecordEnvelope[]>;
   query(name: string, q?: QuerySpec): Promise<RecordEnvelope[]>;
   watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void): () => void;
-  /** Checkpoints (from the pre-collapse ctx.kv). `name` is required: one plugin
-   *  can own several stores, and a per-plugin checkpoint key would let two of
-   *  them collide — a failure the flat plugin_kv namespace could not have. */
+  /** Checkpoints. `name` is required: one plugin can own several stores, and
+   *  a flat per-plugin checkpoint key would let two of them collide. */
   begin(name: string, key: string, value: unknown): void;
   end(name: string, key: string): void;
   /** Checkpoints left by some OTHER mount — by construction, work that never
@@ -392,7 +238,7 @@ export interface ArtifactsApi {
    *  no worktree yet. */
   write(taskId: string, artifact: ArtifactInput): Promise<ArtifactEntry>;
   /** Every artifact on the task, from EVERY plugin — same unscoped read as
-   *  `facts.read`. Empty when the task has no worktree. */
+   *  `records.read`. Empty when the task has no worktree. */
   list(taskId: string): Promise<ArtifactEntry[]>;
 }
 export interface ArtifactInput {
@@ -419,7 +265,7 @@ export interface ArtifactEntry {
 /**
  * `ctx.secrets` — reference-by-name credentials (SHR-277).
  *
- * `list()` returns NAMES ONLY and is ungated, matching `facts.read` /
+ * `list()` returns NAMES ONLY and is ungated, matching `records.read` /
  * `catalog.list`: knowing a credential exists is not the thing worth a second
  * look. `resolve()` returns VALUES and is gated on `secrets.read` — a plugin
  * that can enumerate every credential on the box by default would make the
@@ -846,7 +692,8 @@ export type PolicyPoint = 'task.launch' | 'harness.resume' | 'review.publish' | 
 export interface PolicyIntent {
   readonly point: PolicyPoint;
   /** Present for task-scoped points. A decision on an intent without a
-   *  `taskId` is logged but not recorded as a fact — facts are task-scoped. */
+   *  `taskId` is logged but not recorded as a record — task-scoped records
+   *  require one. */
   readonly taskId?: string;
   readonly repoPath?: string;
   /** Point-specific fields (see the table above), with every earlier hook's
@@ -871,8 +718,8 @@ export type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<Poli
  * loses per-item status, per-item retry, progress, and eventually the context
  * window.
  *
- * `run()` maps `each` over an item source — a plain array, a collection query
- * (`ctx.collections`), or a previous run being redriven — and gives you:
+ * `run()` maps `each` over an item source — a plain array, a record-store
+ * query, or a previous run being redriven — and gives you:
  *
  * - **per-item status**, persisted, so a partial run is legible and resumable
  * - **a concurrency cap the host enforces**, shared across every plugin
@@ -904,7 +751,7 @@ export interface FanOutApi {
    *  Rejects only when the run could not start (bad spec, unresolvable
    *  source). */
   run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>): Promise<FanOutRunSummary>;
-  /** One run with its per-item rows. Ungated read, matching `facts.read`. */
+  /** One run with its per-item rows. Ungated read, matching `records.read`. */
   status(runId: string): Promise<FanOutRunStatus | undefined>;
   /** This plugin's fan-out runs, newest first. Ungated read. */
   list(name?: string): Promise<FanOutRunSummary[]>;
@@ -915,7 +762,7 @@ export interface FanOutApi {
  * parameter so a collection query and a literal array are the same call:
  *
  * - `{ items }`      — a plain array, e.g. the previous step's output
- * - `{ collection }` — a `ctx.collections` query, resolved by the host
+ * - `{ collection }` — a `ctx.records` query, resolved by the host
  * - `{ resume }`     — the redrive path: items come from the stored run,
  *                      already-`done` ones are skipped, dead-lettered ones get
  *                      a fresh attempt budget
@@ -927,7 +774,7 @@ export type FanOutSource<T = unknown> =
 
 export interface FanOutSpec<T = unknown, R = unknown> {
   /** BARE local name. The host qualifies it to `<pluginId>:<name>`, same as
-   *  `facts.define`. Groups runs of the same step together for `list()`. */
+   *  `records.define`. Groups runs of the same step together for `list()`. */
   name: string;
   source: FanOutSource<T>;
   /** Runs once per item, at most `concurrency` at a time. Throwing schedules a
@@ -1004,15 +851,15 @@ export interface FanOutItemStatus {
  * That is deliberate: a warning that nobody reads is not a decision.
  *
  * Names are the `ctx` path of the method they gate, so the error message and
- * the manifest line read the same. Read-only members (`facts.read`,
- * `facts.watch`, `settings.get`, `logger`) are ungated.
+ * the manifest line read the same. Read-only members (`records.read`,
+ * `records.watch`, `settings.get`, `logger`) are ungated.
  *
  * Again: this governs what a plugin can do *through `ctx`*. It is a statement
  * of intent that core can enforce at its own seams and show to a human — not
  * a privilege boundary around the plugin's code.
  *
- * `collections.query` / `collections.watch` are ungated for the same reason
- * `facts.read` / `artifacts.list` are: reading what is installed or recorded
+ * `records.query` / `records.watch` are ungated for the same reason
+ * `records.read` / `artifacts.list` are: reading what is installed or recorded
  * is not the thing worth a second look.
  *
  * `secrets.list()` (names only) is ungated for the same reason — knowing a
