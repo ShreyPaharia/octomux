@@ -38,6 +38,19 @@ export function columnsOf(instance: Database, table: string): Set<string> {
   return new Set(rows.map((c) => c.name));
 }
 
+/** True when `table` exists. The collapse migration (2026-08-22) needs this: a
+ *  fresh database never ran the pre-collapse CREATE blocks, so an unguarded
+ *  `INSERT ... SELECT FROM plugin_facts` would throw `no such table`. */
+export function tableExists(instance: Database, table: string): boolean {
+  return (
+    (
+      instance
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .all(table) as unknown[]
+    ).length > 0
+  );
+}
+
 export function addColumn(
   instance: Database,
   table: string,
@@ -1263,6 +1276,40 @@ export function runMigrations(instance: Database): void {
     'pr_review_requested_at TEXT',
     taskColsForReReview,
   );
+  // ── ctx.records — one store for plugin data (2026-08-22) ────────────────────
+  // Additive only: creates the table the collapse will replace plugin_facts /
+  // plugin_collections / plugin_kv with. The copy-from-old-tables and the
+  // matching DROPs are NOT here — they land in the collapse's final commit,
+  // atomic with deleting the old tables' last consumers. Migrations re-run on
+  // every boot with no version table, so a copy against tables that still
+  // exist would duplicate every row on every boot; the copy has to happen in
+  // the same commit as the drop, not before it. Don't add them here.
+  //
+  // Still NOT the `events` table: ruling R1 keeps plugin data out of the
+  // orchestrator's control bus, and that is unchanged here.
+  //
+  // The partial unique index scopes uniqueness to KEYED (upsert) rows. Append
+  // rows have key IS NULL and are excluded, so two appends in one store never
+  // collide.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_records (
+      seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+      store      TEXT NOT NULL,
+      task_id    TEXT,
+      key        TEXT,
+      payload    TEXT NOT NULL DEFAULT '{}',
+      owner      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_records_key
+      ON plugin_records(store, key) WHERE key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_plugin_records_task
+      ON plugin_records(task_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_plugin_records_store
+      ON plugin_records(store, seq);
+  `);
+
   // ── ctx.facts — plugin fact log (2026-08-20, SHR-255) ───────────────────────
   // Deliberately its OWN table, not the `events` table — that one is the
   // orchestrator's control bus (repositories/orchestrator.ts, drained via
