@@ -12,14 +12,12 @@ export interface PluginContext {
   readonly id: string; // manifest row id (bare, unqualified)
   readonly logger: PluginLogger;
   readonly settings: PluginSettingsScope;
-  readonly kv: PluginKv;
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
   readonly compute: ComputeRegistrar;
   readonly http: HttpRegistrar;
-  readonly facts: FactsRegistrar;
-  readonly collections: CollectionsRegistrar;
+  readonly records: RecordsRegistrar;
   /**
    * `ctx.services` — cross-plugin dependency by CAPABILITY rather than by
    * package name (SHR-260). A plugin provides `chat.send`; another requires
@@ -331,6 +329,55 @@ export interface CollectionRecord {
 }
 
 /**
+ * `ctx.records` — the single store behind what used to be `ctx.facts`,
+ * `ctx.collections` and `ctx.kv` (SHR-282). One definition shape covers all
+ * three prior lifetimes: `scope` picks task-scoped vs durable (facts vs
+ * collections/kv), `mode` picks append-only vs upsert-on-key (facts vs
+ * collections), and an opaque store with no `schema` recovers `ctx.kv`.
+ */
+export interface RecordStoreDefinition {
+  /** BARE local name — the host qualifies it to `<pluginId>:<name>`. */
+  name: string;
+  /** JSON Schema validated on write. Omit for an opaque store (the old ctx.kv). */
+  schema?: Record<string, unknown>;
+  /** Record field used as identity. Required when `mode` is 'upsert'. */
+  key?: string;
+  /** 'task' rows die with their task; 'durable' rows outlive unmount. */
+  scope: 'task' | 'durable';
+  /** 'append' adds a row; 'upsert' replaces the row with the same key. */
+  mode: 'append' | 'upsert';
+}
+
+/** What `read`, `query` and `watch` hand back. Uniform across every scope and
+ *  mode: the pre-collapse ctx.facts fired a full envelope while ctx.collections
+ *  fired a bare record, and one shape is strictly more information. */
+export interface RecordEnvelope {
+  seq: number;
+  store: string;
+  taskId: string | null;
+  key: string | null;
+  payload: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecordsRegistrar {
+  define(def: RecordStoreDefinition): void;
+  put(name: string, record: unknown, opts?: { taskId?: string }): Promise<void>;
+  read(name: string, opts?: { taskId: string }): Promise<RecordEnvelope[]>;
+  query(name: string, q?: QuerySpec): Promise<RecordEnvelope[]>;
+  watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void): () => void;
+  /** Checkpoints (from the pre-collapse ctx.kv). `name` is required: one plugin
+   *  can own several stores, and a per-plugin checkpoint key would let two of
+   *  them collide — a failure the flat plugin_kv namespace could not have. */
+  begin(name: string, key: string, value: unknown): void;
+  end(name: string, key: string): void;
+  /** Checkpoints left by some OTHER mount — by construction, work that never
+   *  finished. Omit `name` for every store this plugin owns. */
+  interrupted(name?: string): RecordEnvelope[];
+}
+
+/**
  * `ctx.artifacts` — files a run produced: a review report, a coverage summary,
  * a generated diagram. Written into the task's worktree under
  * `.octomux/artifacts/<pluginId>/<name>`, alongside the narrative
@@ -533,37 +580,19 @@ export type UiRenderer =
   | 'json'
   | 'diff'
   | 'log';
-interface UiPanelBindingBase {
+/** A panel bound to a `ctx.records` store (SHR-282) — task-scoped or durable,
+ *  the slot renders whatever the store's rows are. Replaces the pre-collapse
+ *  `UiFactPanelBinding | UiCollectionPanelBinding` union: one store shape
+ *  covers both prior lifetimes, so one binding shape does too. */
+export interface UiPanelBinding {
   slot: UiSlot;
-  /** Renderer name. An UNKNOWN renderer degrades to `json`, never a blank. */
+  /** BARE local store name — the host qualifies it. */
+  record: string;
   as: UiRenderer | string;
-  /** Payload key holding the primary value (renderer-specific). */
   value?: string;
-  /** Payload key holding a delta/secondary value (renderer-specific). */
   delta?: string;
   title?: string;
 }
-
-/** A panel bound to a task-scoped fact type. The original shape — every
- *  binding written before SHR-275 is one of these, unchanged. */
-export interface UiFactPanelBinding extends UiPanelBindingBase {
-  /** BARE local fact type — the host qualifies it, same as `facts.define`. */
-  fact: string;
-  collection?: never;
-}
-
-/** A panel bound to a durable collection (SHR-275). Task-independent: it
- *  renders the collection's records wherever the slot puts it. */
-export interface UiCollectionPanelBinding extends UiPanelBindingBase {
-  /** BARE local collection name — the host qualifies it, same as
-   *  `collections.define`. */
-  collection: string;
-  fact?: never;
-}
-
-/** Exactly one of `fact` / `collection`. The union is what keeps every
- *  already-shipped fact-bound binding valid with no edit. */
-export type UiPanelBinding = UiFactPanelBinding | UiCollectionPanelBinding;
 
 /**
  * `ctx.surfaces` — where octomux presents itself to a human.
@@ -1047,12 +1076,9 @@ export type PluginCapability =
   | 'harnesses.register'
   | 'compute.register'
   | 'http.route'
-  | 'facts.define'
-  | 'facts.put'
-  | 'collections.define'
-  | 'collections.write'
+  | 'records.define'
+  | 'records.write'
   | 'services.provide'
-  | 'kv.write'
   | 'ui.panel'
   | 'ui.action'
   | 'artifacts.write'
