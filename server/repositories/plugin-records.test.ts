@@ -53,4 +53,30 @@ describe('plugin-records repository', () => {
     expect(readRecordsForTask('t1')).toHaveLength(0);
     expect(getRecord('p:leads', 'a')).toBeDefined();
   });
+
+  it('queryRecords filters, orders and windows — the ported QuerySpec contract', () => {
+    upsertRecord('p:leads', null, 'a', { stage: 'new', score: 3 });
+    upsertRecord('p:leads', null, 'b', { stage: 'won', score: 1 });
+    upsertRecord('p:leads', null, 'c', { stage: 'new', score: 2 });
+
+    // where: exact match on a top-level field
+    const isNew = queryRecords('p:leads', { where: { stage: 'new' } });
+    expect(isNew.map((r) => r.key).sort()).toEqual(['a', 'c']);
+
+    // orderBy + order
+    const desc = queryRecords('p:leads', { orderBy: 'score', order: 'desc' });
+    expect(desc.map((r) => r.key)).toEqual(['a', 'c', 'b']);
+
+    // limit + offset — the windowing panelsForStore depends on
+    const page = queryRecords('p:leads', {
+      orderBy: 'score',
+      order: 'desc',
+      limit: 1,
+      offset: 1,
+    });
+    expect(page.map((r) => r.key)).toEqual(['c']);
+
+    // a store with no rows returns empty, not undefined
+    expect(queryRecords('p:empty')).toEqual([]);
+  });
 });
