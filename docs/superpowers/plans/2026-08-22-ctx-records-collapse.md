@@ -25,16 +25,19 @@
 ## File Structure
 
 **Created:**
+
 - `server/repositories/plugin-records.ts` — all SQL for `plugin_records`. One responsibility: rows in, rows out.
 - `server/repositories/plugin-records.test.ts` — repository-level tests (SQL correctness: seq stability, partial index, owner clearing).
 - `server/plugins/records.ts` — the `ctx.records` registrar: definitions, qualification, schema validation, watchers, checkpoints.
 - `server/plugins/records.test.ts` — registrar-level tests.
 
 **Deleted (at the end, in Task 9):**
+
 - `server/plugins/facts.ts`, `collections.ts`, `kv.ts` and their `.test.ts`
 - `server/repositories/plugin-facts.ts`, `plugin-collections.ts`, `plugin-kv.ts` and their `.test.ts`
 
 **Modified:**
+
 - `server/db/migrations.ts` — new table; guarded copy; delete three old `CREATE TABLE` blocks
 - `packages/plugin-api/src/index.ts` — `RecordsRegistrar`, `UiPanelBinding`, `PluginCapability`, `PluginContext`
 - `server/plugins/context.ts` — wire `ctx.records`, drop `ctx.facts`/`ctx.collections`/`ctx.kv`
@@ -55,10 +58,12 @@
 ## Task 1: The `plugin_records` table and migration
 
 **Files:**
+
 - Modify: `server/db/migrations.ts` (add new block; delete blocks at ~1275-1332)
 - Test: `server/db/migrations.test.ts`
 
 **Interfaces:**
+
 - Consumes: `columnsOf(instance, table)` at `server/db/migrations.ts:36`
 - Produces: table `plugin_records`; helper `tableExists(instance, name): boolean` exported from `server/db/migrations.ts`
 
@@ -74,8 +79,11 @@ it('creates plugin_records and copies plugin_facts rows into it', () => {
   db.exec(`CREATE TABLE plugin_facts (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, type TEXT NOT NULL,
     payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
-  db.prepare(`INSERT INTO plugin_facts (task_id, type, payload) VALUES (?, ?, ?)`)
-    .run('t1', 'core:review.published', '{"ok":true}');
+  db.prepare(`INSERT INTO plugin_facts (task_id, type, payload) VALUES (?, ?, ?)`).run(
+    't1',
+    'core:review.published',
+    '{"ok":true}',
+  );
 
   runMigrations(db);
 
@@ -110,26 +118,28 @@ In `server/db/migrations.ts`, add near `columnsOf`:
  *  `INSERT ... SELECT FROM plugin_facts` would throw `no such table`. */
 export function tableExists(instance: Database, table: string): boolean {
   return (
-    instance
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
-      .all(table) as unknown[]
-  ).length > 0;
+    (
+      instance
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .all(table) as unknown[]
+    ).length > 0
+  );
 }
 ```
 
 Then, where the three old blocks were, one new block:
 
 ```ts
-  // ── ctx.records — one store for plugin data (2026-08-22) ────────────────────
-  // Replaces plugin_facts / plugin_collections / plugin_kv, which were one
-  // concept under three names differing on scope (task|durable) and mode
-  // (append|upsert). Still NOT the `events` table: ruling R1 keeps plugin data
-  // out of the orchestrator's control bus, and that is unchanged here.
-  //
-  // The partial unique index scopes uniqueness to KEYED (upsert) rows. Append
-  // rows have key IS NULL and are excluded, so two appends in one store never
-  // collide.
-  instance.exec(`
+// ── ctx.records — one store for plugin data (2026-08-22) ────────────────────
+// Replaces plugin_facts / plugin_collections / plugin_kv, which were one
+// concept under three names differing on scope (task|durable) and mode
+// (append|upsert). Still NOT the `events` table: ruling R1 keeps plugin data
+// out of the orchestrator's control bus, and that is unchanged here.
+//
+// The partial unique index scopes uniqueness to KEYED (upsert) rows. Append
+// rows have key IS NULL and are excluded, so two appends in one store never
+// collide.
+instance.exec(`
     CREATE TABLE IF NOT EXISTS plugin_records (
       seq        INTEGER PRIMARY KEY AUTOINCREMENT,
       store      TEXT NOT NULL,
@@ -148,32 +158,32 @@ Then, where the three old blocks were, one new block:
       ON plugin_records(store, seq);
   `);
 
-  // Forward-only, self-limiting: guarded so a fresh DB skips it entirely, and
-  // the DROP means it never runs twice on the same database.
-  if (tableExists(instance, 'plugin_facts')) {
-    instance.exec(`
+// Forward-only, self-limiting: guarded so a fresh DB skips it entirely, and
+// the DROP means it never runs twice on the same database.
+if (tableExists(instance, 'plugin_facts')) {
+  instance.exec(`
       INSERT INTO plugin_records (store, task_id, key, payload, created_at)
       SELECT type, task_id, NULL, payload, created_at FROM plugin_facts;
       DROP TABLE plugin_facts;
     `);
-    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_facts');
-  }
-  if (tableExists(instance, 'plugin_collections')) {
-    instance.exec(`
+  logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_facts');
+}
+if (tableExists(instance, 'plugin_collections')) {
+  instance.exec(`
       INSERT INTO plugin_records (store, task_id, key, payload, created_at, updated_at)
       SELECT collection, NULL, key, record, created_at, updated_at FROM plugin_collections;
       DROP TABLE plugin_collections;
     `);
-    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_collections');
-  }
-  if (tableExists(instance, 'plugin_kv')) {
-    instance.exec(`
+  logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_collections');
+}
+if (tableExists(instance, 'plugin_kv')) {
+  instance.exec(`
       INSERT INTO plugin_records (store, task_id, key, payload, owner, created_at, updated_at)
       SELECT plugin_id || ':kv', NULL, key, value, owner, created_at, updated_at FROM plugin_kv;
       DROP TABLE plugin_kv;
     `);
-    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_kv');
-  }
+  logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_kv');
+}
 ```
 
 Delete the three old `CREATE TABLE IF NOT EXISTS plugin_facts / plugin_collections / plugin_kv` blocks and their comments entirely, following this repo's decommission convention (`team_runs`, `review_learnings`: `DROP` with no surviving `CREATE`).
@@ -195,20 +205,33 @@ git commit -m "feat(db): plugin_records table with guarded migration from three 
 ## Task 2: The repository layer
 
 **Files:**
+
 - Create: `server/repositories/plugin-records.ts`
 - Test: `server/repositories/plugin-records.test.ts`
 
 **Interfaces:**
+
 - Consumes: `plugin_records` table from Task 1; `getDb()` from `server/db.js` (follow the import style in `server/repositories/plugin-collections.ts`)
 - Produces:
 
 ```ts
 export interface RecordRow {
-  seq: number; store: string; taskId: string | null; key: string | null;
-  payload: unknown; owner: string | null; createdAt: string; updatedAt: string;
+  seq: number;
+  store: string;
+  taskId: string | null;
+  key: string | null;
+  payload: unknown;
+  owner: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 export function appendRecord(store: string, taskId: string | null, payload: unknown): RecordRow;
-export function upsertRecord(store: string, taskId: string | null, key: string, payload: unknown): RecordRow;
+export function upsertRecord(
+  store: string,
+  taskId: string | null,
+  key: string,
+  payload: unknown,
+): RecordRow;
 export function getRecord(store: string, key: string): RecordRow | undefined;
 export function readRecordsForTask(taskId: string, store?: string): RecordRow[];
 export function queryRecords(store: string, q?: QuerySpec): RecordRow[];
@@ -227,12 +250,20 @@ Create `server/repositories/plugin-records.test.ts`:
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import {
-  appendRecord, upsertRecord, getRecord, queryRecords,
-  readRecordsForTask, deleteRecordsForTask,
-  markInFlight, clearInFlight, listInFlightOwnedByOthers,
+  appendRecord,
+  upsertRecord,
+  getRecord,
+  queryRecords,
+  readRecordsForTask,
+  deleteRecordsForTask,
+  markInFlight,
+  clearInFlight,
+  listInFlightOwnedByOthers,
 } from './plugin-records.js';
 
-beforeEach(() => { createTestDb(); });
+beforeEach(() => {
+  createTestDb();
+});
 
 describe('plugin-records repository', () => {
   it('appends two rows to one store without colliding (key IS NULL excluded from the unique index)', () => {
@@ -296,7 +327,10 @@ Create `server/repositories/plugin-records.ts`. Model the file header, `getDb()`
  *  `owner = NULL` settles any in-flight checkpoint on this key: an ordinary
  *  write means the work finished. Without it a key stays interrupted forever. */
 export function upsertRecord(
-  store: string, taskId: string | null, key: string, payload: unknown,
+  store: string,
+  taskId: string | null,
+  key: string,
+  payload: unknown,
 ): RecordRow {
   getDb()
     .prepare(
@@ -345,9 +379,11 @@ git commit -m "feat(db): plugin-records repository with seq-stable upsert and ch
 ## Task 3: Types in `@octomux/plugin-api`
 
 **Files:**
+
 - Modify: `packages/plugin-api/src/index.ts`
 
 **Interfaces:**
+
 - Produces: `RecordsRegistrar`, `RecordStoreDefinition`, `RecordEnvelope`, updated `UiPanelBinding`, updated `PluginCapability`, updated `PluginContext`
 
 - [ ] **Step 1: Add the types**
@@ -433,20 +469,45 @@ Typecheck is red at this commit by design; Task 9 is the gate that requires it g
 ## Task 4: The `records` registrar
 
 **Files:**
+
 - Create: `server/plugins/records.ts`
 - Test: `server/plugins/records.test.ts`
 
 **Interfaces:**
+
 - Consumes: `server/repositories/plugin-records.js` (Task 2); `qualify()` from `server/plugins/qualify.js`
 - Produces:
 
 ```ts
 export function defineStore(pluginId: string, def: RecordStoreDefinition): void;
-export function putRecord(pluginId: string, name: string, record: unknown, taskId?: string): Promise<void>;
-export function readStore(pluginId: string, name: string, taskId: string): Promise<RecordEnvelope[]>;
-export function queryStore(pluginId: string, name: string, q?: QuerySpec): Promise<RecordEnvelope[]>;
-export function watchStore(watcherId: string, qualified: string, cb: (r: RecordEnvelope) => void): () => void;
-export function beginCheckpoint(pluginId: string, name: string, key: string, value: unknown, mountId: string): void;
+export function putRecord(
+  pluginId: string,
+  name: string,
+  record: unknown,
+  taskId?: string,
+): Promise<void>;
+export function readStore(
+  pluginId: string,
+  name: string,
+  taskId: string,
+): Promise<RecordEnvelope[]>;
+export function queryStore(
+  pluginId: string,
+  name: string,
+  q?: QuerySpec,
+): Promise<RecordEnvelope[]>;
+export function watchStore(
+  watcherId: string,
+  qualified: string,
+  cb: (r: RecordEnvelope) => void,
+): () => void;
+export function beginCheckpoint(
+  pluginId: string,
+  name: string,
+  key: string,
+  value: unknown,
+  mountId: string,
+): void;
 export function endCheckpoint(pluginId: string, name: string, key: string): void;
 export function interruptedFor(pluginId: string, mountId: string, name?: string): RecordEnvelope[];
 export function unregisterTaskScopedStores(pluginId: string): string[];
@@ -465,14 +526,24 @@ Create `server/plugins/records.test.ts`. These six carry over behaviour that exi
 it('redefining a store after unregister validates against the NEW schema', () => {
   // ports facts.test.ts:177 + collections.test.ts:270 — the ajv validator cache
   // is keyed by qualified name and MUST be busted on redefine
-  defineStore('p', { name: 's', scope: 'task', mode: 'append', schema: { type: 'object', properties: { a: { type: 'number' } }, required: ['a'] } });
+  defineStore('p', {
+    name: 's',
+    scope: 'task',
+    mode: 'append',
+    schema: { type: 'object', properties: { a: { type: 'number' } }, required: ['a'] },
+  });
   unregisterTaskScopedStores('p');
-  defineStore('p', { name: 's', scope: 'task', mode: 'append', schema: { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] } });
+  defineStore('p', {
+    name: 's',
+    scope: 'task',
+    mode: 'append',
+    schema: { type: 'object', properties: { b: { type: 'string' } }, required: ['b'] },
+  });
   expect(putRecord('p', 's', { b: 'ok' }, 't1')).resolves.toBeUndefined();
   expect(putRecord('p', 's', { a: 1 }, 't1')).rejects.toThrow(/schema/i);
 });
 
-it('reloading the defining plugin does not kill another plugin\'s watcher', () => {
+it("reloading the defining plugin does not kill another plugin's watcher", () => {
   // ports facts.test.ts:206 + collections.test.ts:248 — watcher lifetime belongs
   // to the WATCHING plugin, not the defining one
   defineStore('owner', { name: 's', scope: 'task', mode: 'append' });
@@ -498,7 +569,9 @@ it('rejects a qualified name passed to put — cross-plugin writes are out of sc
 });
 
 it('rejects append+key and upsert-without-key at define time', () => {
-  expect(() => defineStore('p', { name: 'a', scope: 'task', mode: 'append', key: 'id' })).toThrow(/append/);
+  expect(() => defineStore('p', { name: 'a', scope: 'task', mode: 'append', key: 'id' })).toThrow(
+    /append/,
+  );
   expect(() => defineStore('p', { name: 'b', scope: 'durable', mode: 'upsert' })).toThrow(/key/);
 });
 
@@ -529,6 +602,7 @@ Expected: FAIL — cannot resolve `./records.js`
 - [ ] **Step 3: Implement `records.ts`**
 
 Port from the three modules being replaced rather than writing fresh:
+
 - definition map, qualification and the ajv validator cache (with its bust-on-redefine) from `server/plugins/facts.ts`
 - key validation and `QuerySpec` handling from `server/plugins/collections.ts`
 - checkpoint semantics from `server/plugins/kv.ts`
@@ -563,10 +637,12 @@ git commit -m "feat(plugins): ctx.records registrar with scope/mode and store-sc
 ## Task 5: Wire `ctx.records` into the context and grants
 
 **Files:**
+
 - Modify: `server/plugins/context.ts`, `server/plugins/grants.ts`
 - Test: `server/plugins/context.test.ts`
 
 **Interfaces:**
+
 - Consumes: everything Task 4 produces
 - Produces: `ctx.records` on the live `PluginContext`
 
@@ -575,7 +651,9 @@ git commit -m "feat(plugins): ctx.records registrar with scope/mode and store-sc
 In `server/plugins/context.test.ts`, extend the "denied every gated registrar" case and the one-grant table:
 
 ```ts
-expect(() => ctx.records.define({ name: 's', scope: 'task', mode: 'append' })).toThrow(/not granted/);
+expect(() => ctx.records.define({ name: 's', scope: 'task', mode: 'append' })).toThrow(
+  /not granted/,
+);
 await expect(ctx.records.put('s', { n: 1 }, { taskId: 't1' })).rejects.toThrow(/not granted/);
 ```
 
@@ -621,10 +699,12 @@ git commit -m "feat(plugins): wire ctx.records, replace five capabilities with t
 ## Task 6: Lifecycle, catalog, policy, and the task-deletion sweep
 
 **Files:**
+
 - Modify: `server/plugins/lifecycle.ts`, `server/plugins/catalog.ts`, `server/plugins/policy.ts`, `server/repositories/tasks.ts:568`
 - Test: `server/plugins/lifecycle.test.ts`, `server/plugins/catalog.test.ts`
 
 **Interfaces:**
+
 - Consumes: `unregisterTaskScopedStores`, `listPluginStores`, `publishCoreRecord`, `deleteRecordsForTask`
 
 - [ ] **Step 1: Write the failing tests**
@@ -684,11 +764,13 @@ git commit -m "feat(plugins): definition lifetime follows row lifetime; sweep pl
 ## Task 7: UI registry, render paths, and routes
 
 **Files:**
+
 - Modify: `server/plugins/ui-registry.ts`, `server/surfaces/render.ts`, `server/surfaces/text.ts`, `server/routes/plugin-ui.ts`
 - Rename: `server/routes/plugin-facts.ts` → `server/routes/plugin-records.ts`
 - Test: `server/surfaces/portability.test.ts`, `server/plugins/ui-registry.test.ts`
 
 **Interfaces:**
+
 - Consumes: `UiPanelBinding` (Task 3), `readStore` / `queryStore` (Task 4)
 - Produces: `panelsForTask(kind, taskId)`, `panelsForStore(kind, store, q?)`
 
@@ -750,10 +832,12 @@ git commit -m "feat(surfaces): single record binding; panelsForTask and panelsFo
 ## Task 8: The client twin
 
 **Files:**
+
 - Modify: `src/components/PluginPanels.tsx`, `src/workflows/renderers/index.tsx`
 - Test: `src/components/PluginPanels.test.tsx`
 
 **Interfaces:**
+
 - Consumes: the `/api/plugin-records` and `/api/plugin-ui` shapes from Task 7
 
 - [ ] **Step 1: Write the failing test**
@@ -791,6 +875,7 @@ git commit -m "refactor(client): drop the fact/collection branch from PluginPane
 ## Task 9: Delete the old modules and update the docs
 
 **Files:**
+
 - Delete: `server/plugins/{facts,collections,kv}.ts` + tests; `server/repositories/{plugin-facts,plugin-collections,plugin-kv}.ts` + tests
 - Modify: `docs/plugins/README.md`, `docs/plugins/api-reference.md`, `CLAUDE.md`, `server/plugins/integration.test.ts`
 
@@ -812,6 +897,7 @@ git rm server/plugins/facts.ts server/plugins/facts.test.ts \
 ```bash
 grep -rn "facts\.\(put\|define\)\|collections\.\(write\|define\)\|kv\.write" server/ src/ docs/ CLAUDE.md
 ```
+
 Expected: no output.
 
 - [ ] **Step 3: Update the docs (the drift guard enforces this)**
@@ -827,6 +913,7 @@ Expected: no output.
 ```bash
 bun run typecheck && bun run format:check && bun run lint && bun run test
 ```
+
 Expected: all clean. Typecheck has been red since Task 3 and must be green here.
 
 - [ ] **Step 5: Commit**

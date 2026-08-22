@@ -8,13 +8,13 @@
 The plugin runtime grew three storage APIs backed by three tables within a few days,
 each shipped by a task that could not see the others:
 
-| API | table | columns | lines |
-| --- | --- | --- | --- |
-| `ctx.facts` (SHR-255) | `plugin_facts` | seq, task_id, type, payload, created_at | 195 |
-| `ctx.collections` (SHR-275) | `plugin_collections` | collection, key, record, created_at, updated_at | 203 |
-| `ctx.kv` (SHR-263) | `plugin_kv` | plugin_id, key, value, owner, created_at, updated_at | 103 |
+| API                         | table                | columns                                              | lines |
+| --------------------------- | -------------------- | ---------------------------------------------------- | ----- |
+| `ctx.facts` (SHR-255)       | `plugin_facts`       | seq, task_id, type, payload, created_at              | 195   |
+| `ctx.collections` (SHR-275) | `plugin_collections` | collection, key, record, created_at, updated_at      | 203   |
+| `ctx.kv` (SHR-263)          | `plugin_kv`          | plugin_id, key, value, owner, created_at, updated_at | 103   |
 
-They are one concept — *a namespaced, timestamped record store* — under three names,
+They are one concept — _a namespaced, timestamped record store_ — under three names,
 differing on two axes: **scope** (dies with its task, or outlives it) and **mode**
 (append a row, or replace one keyed by id).
 
@@ -24,7 +24,7 @@ schema optional and the query dropped.
 
 ### The split leaked outward
 
-Because a panel can bind to a fact *or* a collection, `UiPanelBinding` became a
+Because a panel can bind to a fact _or_ a collection, `UiPanelBinding` became a
 discriminated union, which made `UiContribution.factType` optional, which broke
 `server/surfaces/render.ts` when SHR-267 merged, which was patched with
 `if (!c.factType) continue`, which left collection panels rendering nowhere, which
@@ -80,7 +80,7 @@ collide on the same key — a failure mode the old design could not have.
 
 This is the rule that resolves the `kv` asymmetry without a mode flag.
 
-Today `lifecycle.ts:160` drops fact and collection *definitions* on unmount, while
+Today `lifecycle.ts:160` drops fact and collection _definitions_ on unmount, while
 `kv.ts:18` says outright that kv has **no unmount hook at all**, deliberately, so a
 hot-reloaded plugin finds its in-flight checkpoints on the next `apply()`. A uniform
 `unregisterPluginRecords()` would make durable reads throw `"not defined"` in the gap
@@ -88,10 +88,10 @@ between unmount and the next `define()` — a regression kv never had.
 
 So: **a definition is dropped on unmount only if its rows are.**
 
-| scope | rows on unmount | definition on unmount |
-| --- | --- | --- |
-| `task` | die with the task | dropped |
-| `durable` | outlive unmount | **retained** |
+| scope     | rows on unmount   | definition on unmount |
+| --------- | ----------------- | --------------------- |
+| `task`    | die with the task | dropped               |
+| `durable` | outlive unmount   | **retained**          |
 
 A durable store whose rows survive but whose definition vanished would be
 unreadable, which is incoherent. This is one rule about lifetime, not a special case
@@ -139,16 +139,16 @@ Three details, each from review, each silent-until-runtime if wrong:
    to the end of the seq stream that append stores share. Follows the existing
    precedent at `server/repositories/plugin-collections.ts:73`.
 2. **The conflict target must repeat the partial index predicate** (`WHERE key IS NOT
-   NULL`). Omit it and SQLite cannot match the partial index: *"ON CONFLICT clause
-   does not match any PRIMARY KEY or UNIQUE constraint"*, at runtime.
+NULL`). Omit it and SQLite cannot match the partial index: _"ON CONFLICT clause
+   does not match any PRIMARY KEY or UNIQUE constraint"_, at runtime.
 3. **`owner = NULL` on update.** `kv.test.ts:65` pins that an ordinary write settles
    an in-flight checkpoint. A `DO UPDATE` that touches only `payload` leaves `owner`
    set, and the key shows as permanently interrupted.
 
 **This table is still not `events`.** Ruling R1 kept plugin facts out of the
 orchestrator's control bus so plugin writes would not enter the conductor's drain.
-Review confirmed that reading is honest: R1 separates plugin storage from *core's
-bus*, and says nothing about the three plugin stores relative to each other. R2 in
+Review confirmed that reading is honest: R1 separates plugin storage from _core's
+bus_, and says nothing about the three plugin stores relative to each other. R2 in
 the same table explicitly defers kv's fate to a later ticket.
 
 ### Task deletion
@@ -167,7 +167,7 @@ The union goes away:
 ```ts
 export interface UiPanelBinding {
   slot: UiSlot;
-  record: string;      // bare local store name; host qualifies
+  record: string; // bare local store name; host qualifies
   as: UiRenderer | string;
   value?: string;
   delta?: string;
@@ -183,7 +183,7 @@ exists. `UiContribution.recordStore` therefore becomes non-optional and the
 ### Rendering — two entry points, and that is correct
 
 The first draft claimed this collapses to one walk. **Review showed that is wrong and
-the claim is withdrawn.** The two functions differ by *what is being rendered*, not
+the claim is withdrawn.** The two functions differ by _what is being rendered_, not
 by binding kind:
 
 - `panelsForTask(kind, taskId)` — every contribution bound to a task-scoped store,
@@ -191,7 +191,7 @@ by binding kind:
 - `panelsForStore(kind, store, q?)` — one store, with a `QuerySpec` window.
 
 `renderCollectionPanels`'s `QuerySpec` exists for a stated reason (`plugin-ui.ts:107`):
-*"a 2,000-record board does not need every row in a Slack message."* A merged
+_"a 2,000-record board does not need every row in a Slack message."_ A merged
 walk-everything call has nowhere to put per-store `limit`/`offset`/`orderBy`, and one
 shared window across stores with different schemas is meaningless. Dropping it would
 be a real capability loss.
@@ -210,10 +210,10 @@ shape; there are zero external consumers.
 
 ### Capabilities
 
-| removed | replaced by |
-| --- | --- |
-| `facts.define`, `collections.define` | `records.define` |
-| `facts.put`, `collections.write`, `kv.write` | `records.write` |
+| removed                                      | replaced by      |
+| -------------------------------------------- | ---------------- |
+| `facts.define`, `collections.define`         | `records.define` |
+| `facts.put`, `collections.write`, `kv.write` | `records.write`  |
 
 Reads stay ungated, matching `facts.read` / `artifacts.list` / `catalog.list`.
 Removing names is a breaking manifest change — acceptable because no manifest exists,
@@ -269,14 +269,14 @@ The existing suites are **rewritten against `records`, not replaced** — severa
 regression tests for specific shipped bugs that do not read as "core behaviour" to
 anyone without the history. Each must survive by name:
 
-| test | what it pins |
-| --- | --- |
+| test                                           | what it pins                                                                                                                                                                                         |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `facts.test.ts:177`, `collections.test.ts:270` | redefining after unregister validates against the NEW schema — the ajv cache is keyed by qualified name and must be busted on redefine. Exists twice today; needed for every scope/mode combination. |
-| `facts.test.ts:206`, `collections.test.ts:248` | reloading the defining plugin does not kill another plugin's watcher — watcher lifetime belongs to the watcher |
-| `collections.test.ts:65-129` | key validation: invalid `key` config at define time; record missing its key; non-scalar key values rejected; numeric keys stringified |
-| `collections.test.ts:139` | a qualified name passed to `put` is an out-of-scope cross-plugin write |
-| `kv.test.ts:65` | a plain write settles an in-flight checkpoint — the `owner = NULL` case above |
-| `kv.test.ts:64-97` | a checkpoint written under one mount id is returned by `interrupted()` under another |
+| `facts.test.ts:206`, `collections.test.ts:248` | reloading the defining plugin does not kill another plugin's watcher — watcher lifetime belongs to the watcher                                                                                       |
+| `collections.test.ts:65-129`                   | key validation: invalid `key` config at define time; record missing its key; non-scalar key values rejected; numeric keys stringified                                                                |
+| `collections.test.ts:139`                      | a qualified name passed to `put` is an out-of-scope cross-plugin write                                                                                                                               |
+| `kv.test.ts:65`                                | a plain write settles an in-flight checkpoint — the `owner = NULL` case above                                                                                                                        |
+| `kv.test.ts:64-97`                             | a checkpoint written under one mount id is returned by `interrupted()` under another                                                                                                                 |
 
 New tests:
 
@@ -290,7 +290,7 @@ New tests:
 **`portability.test.ts` keeps both `describe` blocks.** The first draft implied one
 binding kind means one test path. That is wrong: `panelsForTask` and `panelsForStore`
 remain two paths, and the second block is currently the only coverage of the
-durable/no-task path *and* of the SHR-279 regression itself. Collapsing it to one
+durable/no-task path _and_ of the SHR-279 regression itself. Collapsing it to one
 block would leave a broken durable path passing the whole suite silently — SHR-279's
 exact failure mode, one level deeper.
 
