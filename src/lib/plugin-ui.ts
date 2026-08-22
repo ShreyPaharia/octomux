@@ -1,18 +1,16 @@
 /**
  * src/lib/plugin-ui.ts
  *
- * Client data layer for `ctx.ui` contributions (SHR-256, extended for
- * collections in SHR-275). Fetches the binding table from
+ * Client data layer for `ctx.ui` contributions (SHR-256, collapsed onto
+ * `ctx.records` in SHR-282). Fetches the binding table from
  * `GET /api/plugin-ui/contributions` (server/routes/plugin-ui.ts) and, per
- * binding, the data it renders — either fact-bound
- * (`GET /api/tasks/:id/facts`, server/routes/plugin-facts.ts) or
- * collection-bound (`GET /api/plugin-collections/:name`,
- * server/routes/plugin-collections.ts).
- *
- * A contribution is bound to exactly ONE of `fact`/`factType` (task-scoped,
- * dies with the task) or `collection`/`collectionName` (durable, no task in
- * the binding at all) — never both. Both pairs are optional on the wire type
- * for that reason; callers branch on which pair is present.
+ * binding, the records it renders — from
+ * `GET /api/tasks/:id/records` when this component is mounted WITH a
+ * `taskId` (task-scoped), or `GET /api/plugin-records/:name` when it isn't
+ * (durable/unscoped) — see `server/routes/plugin-records.ts`. Which one runs
+ * is decided by the CALLER's context (is there a task in scope?), never by a
+ * property of the binding: SHR-282 removed the fact/collection distinction
+ * from `UiContribution`, so there is nothing left on a binding to branch on.
  *
  * Extended for SHR-257 (`ctx.ui.action()`): `GET /api/plugin-ui/actions` and
  * `POST /api/plugin-ui/actions/:actionId` are read-only/write-only mirrors of
@@ -44,16 +42,10 @@ export type UiSlot =
 export interface UiContribution {
   pluginId: string;
   slot: UiSlot;
-  /** Bare local fact type as the plugin declared it. Present iff `factType` is
-   *  — a fact-bound contribution. */
-  fact?: string;
-  /** Qualified — `<pluginId>:<fact>`. What `/api/tasks/:id/facts?type=` filters on. */
-  factType?: string;
-  /** Bare local collection name as the plugin declared it. Present iff
-   *  `collectionName` is — a collection-bound contribution. */
-  collection?: string;
-  /** Qualified — `<pluginId>:<collection>`. What `/api/plugin-collections/:name` reads. */
-  collectionName?: string;
+  /** Bare local store name as the plugin declared it. */
+  record: string;
+  /** Qualified — `<pluginId>:<record>`. What both record endpoints key on. */
+  recordStore: string;
   /** Renderer name. Unknown names degrade to `json` client-side — see `src/workflows/renderers`. */
   as: string;
   value?: string;
@@ -61,24 +53,15 @@ export interface UiContribution {
   title?: string;
 }
 
-export interface PluginFact {
+/** One row from `GET /api/tasks/:id/records` or `GET /api/plugin-records/:name`
+ *  — mirrors the server's `RecordEnvelope` (`@octomux/plugin-api`) by value,
+ *  same reasoning as `UiSlot` above. */
+export interface RecordEnvelope {
   seq: number;
-  taskId: string;
-  type: string;
+  store: string;
+  taskId: string | null;
+  key: string | null;
   payload: unknown;
-  createdAt: string;
-}
-
-/** One row from `GET /api/plugin-collections/:name` — mirrors the server
- *  contract in server/routes/plugin-collections.ts by value (same reasoning
- *  as `UiSlot` above: not worth a runtime dependency on `@octomux/plugin-api`
- *  for one shape). */
-export interface CollectionRecord {
-  /** Qualified collection name. */
-  collection: string;
-  key: string;
-  /** The plugin's record — shape is whatever it defined, opaque here. */
-  record: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,15 +94,15 @@ function listActions(): Promise<UiAction[]> {
   return request<{ actions: UiAction[] }>('/plugin-ui/actions').then((r) => r.actions);
 }
 
-function readTaskFacts(taskId: string, type: string): Promise<PluginFact[]> {
-  return request<{ facts: PluginFact[] }>(
-    `/tasks/${taskId}/facts?type=${encodeURIComponent(type)}`,
-  ).then((r) => r.facts);
+function readTaskRecords(taskId: string, store: string): Promise<RecordEnvelope[]> {
+  return request<{ records: RecordEnvelope[] }>(
+    `/tasks/${taskId}/records?store=${encodeURIComponent(store)}`,
+  ).then((r) => r.records);
 }
 
-function readCollection(qualifiedName: string): Promise<CollectionRecord[]> {
-  return request<{ records: CollectionRecord[] }>(
-    `/plugin-collections/${encodeURIComponent(qualifiedName)}`,
+function queryRecordStore(store: string): Promise<RecordEnvelope[]> {
+  return request<{ records: RecordEnvelope[] }>(
+    `/plugin-records/${encodeURIComponent(store)}`,
   ).then((r) => r.records);
 }
 
@@ -145,51 +128,29 @@ export function usePluginUiContributions(slot: UiSlot) {
 }
 
 /**
- * The facts a single contribution renders, scoped to one task. Refetches on
- * any WS event carrying that taskId — task activity is exactly what writes
- * facts, so the existing task-scoped events (`task:updated`,
- * `task:phase_complete`, …) are sufficient; no new event type needed here.
+ * The records a single contribution renders.
  *
- * `contribution.factType` is optional on the wire type now (a
- * collection-bound contribution has none) — a missing `factType` disables
- * the fetch via `key: null` rather than erroring, so `PluginPanel` can call
- * this hook unconditionally for every contribution (rules of hooks) and let
- * the binding decide which of `usePluginFacts`/`usePluginCollection` actually
- * fetches.
+ * With a `taskId` (mounted on a task page), reads are task-scoped
+ * (`GET /api/tasks/:id/records`) and refetch on any WS event carrying that
+ * taskId — task activity is what writes task-scoped records, so the existing
+ * task-scoped events (`task:updated`, `task:phase_complete`, …) are
+ * sufficient; no new event type needed here.
+ *
+ * Without one (e.g. mounted at `settings.card`), reads are the unscoped
+ * store query (`GET /api/plugin-records/:name`) — durable data, no task in
+ * the picture. No `ServerEvent` exists yet for a record write either
+ * (`server/plugins/records.ts`'s `watchStore` is an in-process emitter for
+ * server-side subscribers, not a `/ws/events` broadcast), so this branch is
+ * deliberately fetch-once-per-mount — the no-`events` case `use-resource.ts`
+ * documents as intentional for "resources with no live updates".
  */
-export function usePluginFacts(taskId: string, contribution: UiContribution) {
-  const factType = contribution.factType;
-  const key = factType ? `plugin-facts:${taskId}:${factType}` : null;
-  const { data, loading, error } = useResource<PluginFact[]>(
+export function usePluginRecords(contribution: UiContribution, taskId?: string) {
+  const store = contribution.recordStore;
+  const key = taskId ? `plugin-task-records:${taskId}:${store}` : `plugin-record-store:${store}`;
+  const { data, loading, error } = useResource<RecordEnvelope[]>(
     key,
-    () => readTaskFacts(taskId, factType as string),
-    { events: (e) => e.payload.taskId === taskId },
-  );
-  return { facts: data ?? [], loading, error };
-}
-
-/**
- * The records a single collection-bound contribution renders. Collections
- * are NOT task-scoped (server contract, SHR-275) so there is no task-id
- * predicate to refetch on the way `usePluginFacts` has one — `e.payload.taskId
- * === taskId` has no equivalent here.
- *
- * No `ServerEvent` exists yet for a collection write either:
- * `server/plugins/collections.ts`'s `watchCollection` is an in-process
- * emitter for server-side subscribers, not a `/ws/events` broadcast. So this
- * resource is deliberately fetch-once-per-mount — exactly the no-`events`
- * case `use-resource.ts` documents as intentional for "resources with no
- * live updates". Add an `events` predicate here once a
- * `plugin:collection-updated` (or similar) `ServerEvent` ships.
- *
- * Same optional-binding guard as `usePluginFacts`: a fact-bound contribution
- * has no `collectionName`, so `key` is `null` and this hook is a no-op for it.
- */
-export function usePluginCollection(contribution: UiContribution) {
-  const collectionName = contribution.collectionName;
-  const key = collectionName ? `plugin-collection:${collectionName}` : null;
-  const { data, loading, error } = useResource<CollectionRecord[]>(key, () =>
-    readCollection(collectionName as string),
+    () => (taskId ? readTaskRecords(taskId, store) : queryRecordStore(store)),
+    taskId ? { events: (e) => e.payload.taskId === taskId } : undefined,
   );
   return { records: data ?? [], loading, error };
 }
