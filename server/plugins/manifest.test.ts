@@ -255,9 +255,9 @@ describe('grants', () => {
       ['http.route', 'ui.panel', 'policy.intercept'],
     ],
     [
-      'collections.define and collections.write (SHR-275)',
-      ['collections.define', 'collections.write'],
-      ['collections.define', 'collections.write'],
+      'records.define and records.write (SHR-282)',
+      ['records.define', 'records.write'],
+      ['records.define', 'records.write'],
     ],
     ['an empty list', [], []],
     ['duplicates, de-duped silently', ['http.route', 'http.route'], ['http.route']],

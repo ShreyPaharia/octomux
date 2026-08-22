@@ -43,8 +43,8 @@ describe('in-memory grant map', () => {
   });
 
   it('setPluginGrants records the effective set, readable back', () => {
-    setPluginGrants('demo', ['http.route', 'facts.define']);
-    expect(getPluginGrants('demo').sort()).toEqual(['facts.define', 'http.route']);
+    setPluginGrants('demo', ['http.route', 'records.define']);
+    expect(getPluginGrants('demo').sort()).toEqual(['http.route', 'records.define'].sort());
   });
 
   it('setPluginGrants replaces any previous set for that id', () => {
@@ -55,10 +55,10 @@ describe('in-memory grant map', () => {
 
   it('allPluginGrants reports every recorded plugin', () => {
     setPluginGrants('a', ['http.route']);
-    setPluginGrants('b', ['ui.panel', 'facts.define']);
+    setPluginGrants('b', ['ui.panel', 'records.define']);
     expect(allPluginGrants()).toEqual({
       a: ['http.route'],
-      b: ['ui.panel', 'facts.define'],
+      b: ['ui.panel', 'records.define'],
     });
   });
 
@@ -193,7 +193,7 @@ describe('resolveGrantsForRow', () => {
   });
 
   it('narrowing (declared subset of acknowledged): grants the narrower set and re-records it', () => {
-    acknowledgeGrants(manifestPath, 'demo', ['http.route', 'ui.panel', 'facts.define']);
+    acknowledgeGrants(manifestPath, 'demo', ['http.route', 'ui.panel', 'records.define']);
     const result = resolveGrantsForRow(manifestPath, 'demo', ['http.route']);
     expect(result).toEqual({ effective: ['http.route'], pending: [] });
     expect(readGrantLedger(manifestPath)).toEqual({ demo: ['http.route'] });
@@ -229,8 +229,8 @@ describe('resolveGrantsForRow', () => {
   });
 });
 
-describe('collections capabilities (SHR-275)', () => {
-  it.each(['collections.define', 'collections.write'] as const)(
+describe('records capabilities (SHR-282)', () => {
+  it.each(['records.define', 'records.write'] as const)(
     '"%s" is a valid capability via isPluginCapability',
     (cap) => {
       expect(isPluginCapability(cap)).toBe(true);
@@ -240,17 +240,17 @@ describe('collections capabilities (SHR-275)', () => {
 
   it('round-trips through the in-memory grant map, same as any other capability', () => {
     resetPluginGrants();
-    setPluginGrants('demo', ['collections.define', 'collections.write']);
-    expect(getPluginGrants('demo').sort()).toEqual(['collections.define', 'collections.write']);
+    setPluginGrants('demo', ['records.define', 'records.write']);
+    expect(getPluginGrants('demo').sort()).toEqual(['records.define', 'records.write']);
   });
 
   it('round-trips through the file-backed ledger, same as any other capability', () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-grants-collections-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-grants-records-'));
     const manifestPath = path.join(tmpDir, 'octomux.yml');
     try {
-      acknowledgeGrants(manifestPath, 'demo', ['collections.define', 'collections.write']);
+      acknowledgeGrants(manifestPath, 'demo', ['records.define', 'records.write']);
       expect(readGrantLedger(manifestPath)).toEqual({
-        demo: ['collections.define', 'collections.write'],
+        demo: ['records.define', 'records.write'],
       });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
