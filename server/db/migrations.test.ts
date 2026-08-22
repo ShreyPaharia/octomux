@@ -95,6 +95,46 @@ describe('runMigrations (isolated)', () => {
     expect(() => runMigrations(db)).not.toThrow();
   });
 
+  it('creates plugin_records with a partial unique index scoped to keyed rows', () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    runMigrations(db);
+    // two append rows (key IS NULL) coexist in one store
+    db.prepare(`INSERT INTO plugin_records (store, task_id, key, payload) VALUES (?,?,NULL,?)`).run(
+      'p:log',
+      't1',
+      '{}',
+    );
+    db.prepare(`INSERT INTO plugin_records (store, task_id, key, payload) VALUES (?,?,NULL,?)`).run(
+      'p:log',
+      't1',
+      '{}',
+    );
+    expect(db.prepare(`SELECT COUNT(*) c FROM plugin_records`).get()).toEqual({ c: 2 });
+    // two keyed rows with the same key in one store do not
+    db.prepare(`INSERT INTO plugin_records (store, task_id, key, payload) VALUES (?,NULL,?,?)`).run(
+      'p:leads',
+      'a',
+      '{}',
+    );
+    expect(() =>
+      db
+        .prepare(`INSERT INTO plugin_records (store, task_id, key, payload) VALUES (?,NULL,?,?)`)
+        .run('p:leads', 'a', '{}'),
+    ).toThrow();
+  });
+
+  it('is idempotent — running migrations twice leaves one plugin_records table', () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    runMigrations(db);
+    runMigrations(db);
+    const t = db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='plugin_records'`)
+      .all();
+    expect(t).toHaveLength(1);
+  });
+
   describe('retired current_summary columns', () => {
     /**
      * Simulate a pre-retirement DB: SCHEMA no longer creates these columns, so
