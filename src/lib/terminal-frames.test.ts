@@ -7,7 +7,8 @@ function deflated(text: string): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
-const decode = (d: string | Uint8Array) => (typeof d === 'string' ? d : new TextDecoder().decode(d));
+const decode = (d: string | Uint8Array) =>
+  typeof d === 'string' ? d : new TextDecoder().decode(d);
 
 // Inflation latency varies wildly under a loaded parallel test run — poll for
 // the expected write count instead of sleeping a fixed interval.
