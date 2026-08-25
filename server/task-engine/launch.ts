@@ -65,12 +65,7 @@ export async function buildAgentStartupCommand(
   let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
-    // Board cards otherwise show the first 80 chars of the raw prompt, which is
-    // unreadable. Nudge the agent to rename the task once it has enough context.
-    const promptWithRenameHint =
-      args.prompt +
-      '\n\nOnce you understand what this task actually is, give it a readable name: run `octomux task rename --title "<short title, under 60 chars>"`. Do this once, early.';
-    await c.files.write(promptFile, promptWithRenameHint, { mode: 0o600 });
+    await c.files.write(promptFile, args.prompt, { mode: 0o600 });
     // `--` ends option parsing so the positional prompt can't be swallowed by a
     // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
     // tasks) is variadic in Claude Code: without the separator it consumes the

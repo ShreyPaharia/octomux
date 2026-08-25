@@ -148,7 +148,7 @@ describe('buildAgentStartupCommand', () => {
     expect(fs.statSync(promptFile).mode & 0o777).toBe(0o600);
   });
 
-  it('appends the rename hint to the written prompt', async () => {
+  it('writes the prompt verbatim — no appended hints', async () => {
     await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
@@ -156,7 +156,7 @@ describe('buildAgentStartupCommand', () => {
       agentId: 'agent123',
     });
     const promptFile = path.join(worktreeDir, '.claude-prompt-agent123');
-    expect(fs.readFileSync(promptFile, 'utf8')).toContain('octomux task rename');
+    expect(fs.readFileSync(promptFile, 'utf8')).toBe('Do the thing');
   });
 
   it('does NOT write a prompt file when prompt is absent', async () => {
