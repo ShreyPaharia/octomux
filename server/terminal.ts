@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { deflateRawSync } from 'zlib';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
@@ -19,31 +20,49 @@ const connections = new Map<string, TerminalConnection[]>();
 let wss: WebSocketServer;
 
 export function setupTerminalWebSocket(): void {
-  // permessage-deflate: TUI redraws (alt-screen full-frame repaints) are highly
-  // repetitive ANSI — compression cuts remote-viewing bandwidth ~10x. ws only
-  // compresses frames above its 1KB threshold, so keystroke echo stays fast.
-  wss = new WebSocketServer({ noServer: true, perMessageDeflate: true });
+  // No perMessageDeflate here: Bun's ws shim accepts the option but never
+  // negotiates the extension (explicit TODO in the shim), so it was a silent
+  // no-op. Compression is app-level instead — see sendFrame().
+  wss = new WebSocketServer({ noServer: true });
   installHeartbeat(wss);
 }
 
+// App-layer replacement for permessage-deflate: TUI redraws are highly
+// repetitive ANSI, so deflating them cuts remote-viewing bandwidth ~10x.
+// Frames at or above the threshold go out deflated as binary; below it plain
+// text, so keystroke echo never pays the zlib round-trip. Only for clients
+// that advertised DecompressionStream support via `?deflate=1`.
+const DEFLATE_THRESHOLD = 1024;
+
+function sendFrame(ws: WebSocket, text: string, deflateOk: boolean): void {
+  if (deflateOk && text.length >= DEFLATE_THRESHOLD) {
+    ws.send(deflateRawSync(Buffer.from(text)));
+  } else {
+    ws.send(text);
+  }
+}
+
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
+  const [path = '', query = ''] = (req.url ?? '').split('?');
+  const deflateOk = new URLSearchParams(query).get('deflate') === '1';
+
   // Match /ws/terminal/chat/:id (standalone agent tmux session)
-  const chatMatch = req.url?.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
+  const chatMatch = path.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
   if (chatMatch) {
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleChatConnection(ws, chatMatch[1]);
+      handleChatConnection(ws, chatMatch[1], deflateOk);
     });
     return true;
   }
 
   // Match /ws/terminal/:taskId/:windowIndex
-  const match = req.url?.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
+  const match = path.match(/^\/ws\/terminal\/([^/]+)\/(\d+)$/);
   if (!match) return false;
 
   wss.handleUpgrade(req, socket, head, (ws) => {
     const taskId = match[1];
     const windowIndex = parseInt(match[2], 10);
-    handleConnection(ws, taskId, windowIndex);
+    handleConnection(ws, taskId, windowIndex, deflateOk);
   });
   return true;
 }
@@ -54,6 +73,7 @@ async function attachToTmuxSession(
   tmuxTarget: string,
   connKey: string,
   closeReason: string,
+  deflateOk: boolean,
   linkedSession?: string,
   pendingMessages?: (Buffer | string)[],
 ): Promise<void> {
@@ -128,7 +148,7 @@ async function attachToTmuxSession(
       retryTimer = setTimeout(flushOutput, BACKPRESSURE_RETRY_MS);
       return;
     }
-    ws.send(pendingOutput);
+    sendFrame(ws, pendingOutput, deflateOk);
     pendingOutput = '';
     outputScheduled = false;
   };
@@ -166,6 +186,13 @@ async function attachToTmuxSession(
             paused = false;
             forceRepaint();
           }
+          return;
+        }
+        if (parsed.type === 'ping') {
+          // Client liveness watchdog probing for a half-open socket. Reply
+          // with an empty frame — any traffic proves the link, and xterm
+          // treats an empty write as a no-op so the client needn't filter it.
+          ws.send('');
           return;
         }
       } catch {
@@ -222,7 +249,12 @@ async function attachToTmuxSession(
   });
 }
 
-async function handleConnection(ws: WebSocket, taskId: string, windowIndex: number): Promise<void> {
+async function handleConnection(
+  ws: WebSocket,
+  taskId: string,
+  windowIndex: number,
+  deflateOk: boolean,
+): Promise<void> {
   // Buffer messages that arrive while we set up the tmux session.
   // Without this, the client's initial resize message (sent on WS open) would be
   // lost because the message handler isn't registered until after the async tmux
@@ -290,7 +322,7 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
   compute.tmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
 
   if (pane && ws.readyState === WebSocket.OPEN) {
-    ws.send(`\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`);
+    sendFrame(ws, `\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`, deflateOk);
   }
 
   const connKey = `${taskId}:${windowIndex}`;
@@ -300,12 +332,13 @@ async function handleConnection(ws: WebSocket, taskId: string, windowIndex: numb
     linkedSession,
     connKey,
     'Failed to attach to tmux session',
+    deflateOk,
     linkedSession,
     pendingMessages,
   );
 }
 
-function handleChatConnection(ws: WebSocket, chatId: string): void {
+function handleChatConnection(ws: WebSocket, chatId: string, deflateOk: boolean): void {
   const row = getChatAgentTmuxSession(chatId);
   if (!row || !row.tmux_session) {
     ws.close(4004, 'Chat not found');
@@ -319,6 +352,7 @@ function handleChatConnection(ws: WebSocket, chatId: string): void {
     row.tmux_session,
     `chat:${chatId}`,
     `Failed to attach to chat session`,
+    deflateOk,
   );
 }
 
