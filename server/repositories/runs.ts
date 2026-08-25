@@ -6,6 +6,7 @@
 import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
+import { redactSecretValues } from '../secrets/redact.js';
 
 const logger = childLogger('repositories/runs');
 
@@ -65,16 +66,15 @@ export interface FinishRunInput {
 
 /** Terminal update: status, result_json (if given), error, ended_at. */
 export function finishRun(id: string, input: FinishRunInput): void {
+  // Scrub any remembered secret value out of the result before it lands in the
+  // DB — a run result is a stored egress point, same as a log line.
+  const resultJson =
+    input.result !== undefined ? redactSecretValues(JSON.stringify(input.result)) : null;
   getDb()
     .prepare(
       `UPDATE runs SET status = ?, result_json = ?, error = ?, ended_at = datetime('now') WHERE id = ?`,
     )
-    .run(
-      input.status,
-      input.result !== undefined ? JSON.stringify(input.result) : null,
-      input.error ?? null,
-      id,
-    );
+    .run(input.status, resultJson, input.error ?? null, id);
   logger.info({ run_id: id, status: input.status }, 'run finished');
 }
 

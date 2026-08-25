@@ -7,6 +7,7 @@ const { execFile } = await import('child_process');
 const mockedExecFile = vi.mocked(execFile);
 
 const { sendMessageToAgent, normalizePromptForPaste } = await import('./tmux-input.js');
+const { localSession } = await import('./compute/index.js');
 
 describe('normalizePromptForPaste', () => {
   it('leaves a plain prose prompt untouched (newlines preserved)', () => {
@@ -56,7 +57,7 @@ describe('sendMessageToAgent', () => {
   });
 
   it('sends the message and Enter as two separate send-keys calls with a delay', async () => {
-    const promise = sendMessageToAgent('octomux-agent-abc', 0, 'hello world');
+    const promise = sendMessageToAgent(localSession, 'octomux-agent-abc', 0, 'hello world');
     await vi.advanceTimersByTimeAsync(60);
     await promise;
 
@@ -89,7 +90,7 @@ describe('sendMessageToAgent', () => {
 
   it('forwards multi-line messages literally (newlines stay inside the message arg)', async () => {
     const message = 'line one\nline two\nline three';
-    const promise = sendMessageToAgent('s', 3, message);
+    const promise = sendMessageToAgent(localSession, 's', 3, message);
     await vi.advanceTimersByTimeAsync(60);
     await promise;
 

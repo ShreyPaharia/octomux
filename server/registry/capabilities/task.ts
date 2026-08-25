@@ -2,12 +2,12 @@
  * server/registry/capabilities/task.ts
  *
  * Defines the `task` noun's capabilities: list, get, create, start, move,
- * rename, close, delete. Registered by `registerTaskCapabilities()`, which
+ * rename, summary, close, delete. Registered by `registerTaskCapabilities()`, which
  * `server/registry/mount.ts` dynamically imports — this module does NOT
  * self-register at module load (see the `TODO(registry)` in mount.ts).
  *
  * METADATA (id, summary, http, cli, cliAliases, mcp, tier, callers, input) for
- * all eight capabilities lives in `@octomux/capabilities`'s
+ * all nine capabilities lives in `@octomux/capabilities`'s
  * `TASK_CAPABILITY_META` — pure zod + plain types, importable by the CLI
  * without dragging in the server. This module pairs each metadata entry with
  * its handler (below), which needs `db`, `task-engine`, and friends and so
@@ -111,6 +111,7 @@ import {
   taskStartInputSchema,
   taskMoveInputSchema,
   taskRenameInputSchema,
+  taskSummaryInputSchema,
   taskDeleteInputSchema,
   closeTaskInputSchema,
 } from '@octomux/capabilities';
@@ -144,7 +145,8 @@ import {
   updateTaskFields,
 } from '../../repositories/index.js';
 import { getManagedTask } from '../../repositories/orchestrator.js';
-import { getArtifactSummary } from '../../artifact.js';
+import { getArtifactSummary, getArtifactActivity } from '../../artifact.js';
+import { setTaskSummaryStrict } from '../../artifact-task.js';
 import type { PermissionPromptRow } from '../../repositories/permission-prompts.js';
 import { createTask, unblockDependents } from '../../services/task-service.js';
 import { badRequest, conflict, notFound } from '../../services/errors.js';
@@ -262,7 +264,11 @@ function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
     // §5.5) — read from the task's .octomux/artifact.md Summary section.
     // Unconditional (not gated by `included`): BoardCard renders it on every
     // board card, same as before the migration.
-    Object.assign(full, getArtifactSummary(task.worktree ?? null));
+    Object.assign(
+      full,
+      getArtifactSummary(task.worktree ?? null),
+      getArtifactActivity(task.worktree ?? null),
+    );
     if (!included.has('workers')) {
       // derived_status is only meaningful alongside the workers it's computed from.
       delete full.workers;
@@ -299,6 +305,10 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
       // current_summary(+_updated_at) sourced from .octomux/artifact.md, not
       // the (retired) tasks columns — see server/artifact.ts.
       ...getArtifactSummary(task.worktree ?? null),
+      // current_activity is the last tool call (machine-derived). It keeps a
+      // running card looking alive now that tool-use no longer overwrites the
+      // authored Summary — SHR-278.
+      ...getArtifactActivity(task.worktree ?? null),
     };
   }
 
@@ -331,7 +341,11 @@ async function getTaskHandler(input: z.infer<typeof taskGetInputSchema>) {
   ) as Record<string, unknown>;
   // current_summary(+_updated_at) sourced from .octomux/artifact.md, not the
   // (retired) tasks columns — see server/artifact.ts.
-  Object.assign(full, getArtifactSummary(task.worktree ?? null));
+  Object.assign(
+    full,
+    getArtifactSummary(task.worktree ?? null),
+    getArtifactActivity(task.worktree ?? null),
+  );
 
   if (!included.has('workers')) {
     delete full.workers;
@@ -581,6 +595,28 @@ async function renameTaskHandler(input: z.infer<typeof taskRenameInputSchema>) {
   return fetchTaskBundle(task.id);
 }
 
+// ─── task.summary ─────────────────────────────────────────────────────────────
+//
+// The write surface `octomux task-summary` lost when POST /api/tasks/:id/summary
+// was retired along with the tasks.current_summary column (module doc's parent
+// ticket, item 3) — put back as a capability so it can't drift from task.get's
+// read path (getArtifactSummary) again. setTaskSummaryStrict throws when the
+// task has no worktree yet; that's surfaced as 409, not swallowed into a
+// false "success" the way the fire-and-forget setTaskSummary would.
+
+async function summaryTaskHandler(input: z.infer<typeof taskSummaryInputSchema>) {
+  const task = getTaskRepo(input.id);
+  if (!task) throw notFound('Task not found');
+
+  try {
+    setTaskSummaryStrict(task.id, input.summary);
+  } catch {
+    throw conflict('task has no worktree yet — nowhere to write the summary');
+  }
+
+  return { id: task.id, ...getArtifactSummary(task.worktree ?? null) };
+}
+
 // ─── task.close ───────────────────────────────────────────────────────────────
 //
 // No http/cli projection — see module doc point 1. Reuses closeTaskInputSchema
@@ -670,6 +706,11 @@ export function registerTaskCapabilities(): void {
   defineCapability({
     ...findMeta('task.rename', taskRenameInputSchema),
     handler: renameTaskHandler,
+  });
+
+  defineCapability({
+    ...findMeta('task.summary', taskSummaryInputSchema),
+    handler: summaryTaskHandler,
   });
 
   defineCapability({

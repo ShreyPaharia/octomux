@@ -1,5 +1,6 @@
 import { hookBaseUrl } from './hook-base-url.js';
 import { getHarness } from './harnesses/index.js';
+import type { ComputeFiles } from './compute/types.js';
 
 /**
  * Tools that agents are allowed to use without permission prompts.
@@ -132,6 +133,7 @@ export async function installHookSettings(
   worktreePath: string,
   harnessId: string = 'claude-code',
   hookToken: string = '',
+  files?: ComputeFiles,
 ): Promise<void> {
-  await getHarness(harnessId).installHooks(worktreePath, hookBaseUrl(), hookToken);
+  await getHarness(harnessId).installHooks(worktreePath, hookBaseUrl(), hookToken, files);
 }

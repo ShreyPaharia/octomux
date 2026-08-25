@@ -2,7 +2,7 @@
  * packages/capabilities/src/capabilities/task.ts
  *
  * METADATA for the `task` noun's capabilities: list, get, create, start, move,
- * rename, close, delete. Pure zod + plain types — no server internals, no handlers.
+ * rename, summary, close, delete. Pure zod + plain types — no server internals, no handlers.
  * `server/registry/capabilities/task.ts` pairs each entry here with its
  * (server-only) handler via `defineCapability`, so the CLI can build its
  * command tree from `TASK_CAPABILITY_META` without importing the server.
@@ -95,6 +95,7 @@ export const taskCreateInputSchema = createTaskInputSchema.extend({
   draft: z.boolean().optional().describe('Create as a draft (idle) task'),
   agent: z.string().optional().nullable().describe('Agent persona name'),
   harness_id: z.string().optional().describe('Harness id (default: claude-code)'),
+  compute: z.string().optional().describe('Compute provider kind (default: local)'),
   workflow_status: workflowStatusEnum.optional().describe('Initial workflow_status override'),
   depends_on: z
     .string()
@@ -140,6 +141,13 @@ export const taskRenameInputSchema = z.object({
     .string()
     .optional()
     .describe('New task description (trimmed). Omit to leave the existing description unchanged.'),
+});
+
+// ─── task.summary ─────────────────────────────────────────────────────────────
+
+export const taskSummaryInputSchema = z.object({
+  id: z.string().describe('The octomux task id'),
+  summary: z.string().min(1).describe("The task's current summary (replaces the previous one)"),
 });
 
 // ─── task.delete ──────────────────────────────────────────────────────────────
@@ -234,6 +242,28 @@ export const TASK_CAPABILITY_META: CapabilityMeta[] = [
     tier: 'auto',
     callers: ['ui', 'human', 'agent'],
     input: taskRenameInputSchema,
+  },
+  {
+    id: 'task.summary',
+    summary:
+      "Overwrite the Summary section of the task's .octomux/artifact.md — what task.get reads " +
+      'back as current_summary.',
+    http: { method: 'post', path: '/api/tasks/:id/summary' },
+    cli: 'task summary',
+    cliAliases: ['task-summary'],
+    mcp: 'set_task_summary',
+    // A cosmetic, trivially-overwritable self-report — same reasoning as
+    // task.rename above: nothing to undo, and gating it on a human prompt
+    // buys no safety for the single most common progress-report write an
+    // agent makes on itself. Deliberately 'auto'.
+    tier: 'auto',
+    // 'worker' included — a worker writing its own summary as it works is the
+    // primary caller (this is the write surface `octomux task-summary` lost
+    // when the old POST /api/tasks/:id/summary route was retired; see
+    // server/registry/capabilities/task.ts's module doc). Same reasoning as
+    // task.close's 'worker' inclusion above.
+    callers: ['ui', 'human', 'agent', 'worker'],
+    input: taskSummaryInputSchema,
   },
   {
     id: 'task.close',

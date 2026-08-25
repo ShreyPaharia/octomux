@@ -32,6 +32,7 @@ import type { OctomuxSettings } from '../settings.js';
 import { generateTitleAndDescription } from '../title-gen.js';
 import { validateAgentName } from '../harnesses/types.js';
 import { getHarness } from '../harnesses/index.js';
+import { getCompute } from '../compute/index.js';
 import {
   updateTaskFields,
   insertWorktree as insertWorktreeRepo,
@@ -239,6 +240,14 @@ export function validateCreateTaskBody(
   if (body.harness_id != null) {
     try {
       getHarness(body.harness_id);
+    } catch (err) {
+      return { status: 400, message: (err as Error).message };
+    }
+  }
+
+  if (body.compute != null) {
+    try {
+      getCompute(body.compute);
     } catch (err) {
       return { status: 400, message: (err as Error).message };
     }

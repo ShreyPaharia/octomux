@@ -1,5 +1,4 @@
 import path from 'path';
-import fs from 'fs';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { childLogger } from '../logger.js';
 import { mcpServerInvocation } from '../orchestrator/runner.js';
@@ -7,6 +6,7 @@ import { isOrchestratorManaged } from '../repositories/orchestrator.js';
 import { shellQuoteSingle } from '../shell-quote.js';
 import { tmuxWindowSubstrate } from '../agent-session/substrate-tmux-windowed.js';
 import { setAgentHarnessSessionId } from '../repositories/index.js';
+import type { ComputeSession } from '../compute/types.js';
 import type { Harness } from '../harnesses/index.js';
 import type { Worker } from '../types.js';
 
@@ -21,14 +21,17 @@ const PROMPT_FILE_CLEANUP_MS = 60000;
 
 export const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
 
-export function writeAgentLocalSettings(worktreePath: string): void {
+export async function writeAgentLocalSettings(
+  c: ComputeSession,
+  worktreePath: string,
+): Promise<void> {
   const claudeDir = path.join(worktreePath, '.claude');
-  fs.mkdirSync(claudeDir, { recursive: true });
+  await c.files.mkdirp(claudeDir);
   const settingsPath = path.join(claudeDir, 'settings.local.json');
-  if (fs.existsSync(settingsPath)) return;
+  if (await c.files.exists(settingsPath)) return;
   const plugins: Record<string, boolean> = {};
   for (const p of DISABLED_PLUGINS_IN_WORKTREES) plugins[p] = false;
-  fs.writeFileSync(settingsPath, JSON.stringify({ plugins }, null, 2));
+  await c.files.write(settingsPath, JSON.stringify({ plugins }, null, 2));
 }
 
 /**
@@ -49,22 +52,20 @@ export function writeAgentLocalSettings(worktreePath: string): void {
  * arbitrary prompt text out of the command line; the file is removed after a
  * delay (see PROMPT_FILE_CLEANUP_MS).
  */
-export function buildAgentStartupCommand(args: {
-  baseCmd: string;
-  prompt?: string | null;
-  worktreePath?: string;
-  agentId?: string;
-  env?: Record<string, string>;
-}): string {
+export async function buildAgentStartupCommand(
+  c: ComputeSession,
+  args: {
+    baseCmd: string;
+    prompt?: string | null;
+    worktreePath?: string;
+    agentId?: string;
+    env?: Record<string, string>;
+  },
+): Promise<string> {
   let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
-    // Board cards otherwise show the first 80 chars of the raw prompt, which is
-    // unreadable. Nudge the agent to rename the task once it has enough context.
-    const promptWithRenameHint =
-      args.prompt +
-      '\n\nOnce you understand what this task actually is, give it a readable name: run `octomux task rename --title "<short title, under 60 chars>"`. Do this once, early.';
-    fs.writeFileSync(promptFile, promptWithRenameHint, { mode: 0o600 });
+    await c.files.write(promptFile, args.prompt, { mode: 0o600 });
     // `--` ends option parsing so the positional prompt can't be swallowed by a
     // preceding variadic flag. `--mcp-config` (appended for orchestrator-managed
     // tasks) is variadic in Claude Code: without the separator it consumes the
@@ -72,11 +73,9 @@ export function buildAgentStartupCommand(args: {
     // "Invalid MCP configuration". POSIX `--` is honoured by both harnesses.
     inner += ` -- "$(cat ${shellQuoteSingle(promptFile)})"`;
     setTimeout(() => {
-      try {
-        fs.unlinkSync(promptFile);
-      } catch {
+      c.files.rm(promptFile).catch(() => {
         // already removed or never existed
-      }
+      });
     }, PROMPT_FILE_CLEANUP_MS);
   }
   if (args.env && Object.keys(args.env).length > 0) {
@@ -105,11 +104,12 @@ export function buildAgentStartupCommand(args: {
  * Returns the absolute path to the written mcp-config.json, or null if the MCP
  * server entry can't be resolved (worker still launches, but without the tool).
  */
-export function writeWorkerMcpConfig(
+export async function writeWorkerMcpConfig(
+  c: ComputeSession,
   worktreePath: string,
   taskId: string,
   hookToken: string,
-): string | null {
+): Promise<string | null> {
   const inv = mcpServerInvocation();
   if (!inv) {
     logger.warn(
@@ -120,7 +120,7 @@ export function writeWorkerMcpConfig(
   }
 
   const claudeDir = path.join(worktreePath, '.claude');
-  fs.mkdirSync(claudeDir, { recursive: true });
+  await c.files.mkdirp(claudeDir);
   const cfgPath = path.join(claudeDir, 'worker-mcp-config.json');
 
   const env: Record<string, string> = {
@@ -140,7 +140,7 @@ export function writeWorkerMcpConfig(
       },
     },
   };
-  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+  await c.files.write(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
 
   logger.info(
     { task_id: taskId, operation: 'writeWorkerMcpConfig', config_path: cfgPath },
@@ -160,13 +160,16 @@ export function writeWorkerMcpConfig(
  *
  * Argv is byte-identical to the original inline calls in each launch site.
  */
-export async function launchAgentWindow(opts: {
-  session: string;
-  cwd: string;
-  startupCmd: string;
-  fresh: boolean;
-}): Promise<number> {
-  return tmuxWindowSubstrate.launchWindow(opts);
+export async function launchAgentWindow(
+  c: ComputeSession,
+  opts: {
+    session: string;
+    cwd: string;
+    startupCmd: string;
+    fresh: boolean;
+  },
+): Promise<number> {
+  return tmuxWindowSubstrate.launchWindow(c, opts);
 }
 
 /**
@@ -195,14 +198,15 @@ export function computeFreshSessionIds(harness: Harness): {
  * the (possibly augmented) flags string. The `isOrchestratorManaged` check is
  * encapsulated here so Modular 05 can later invert the dependency.
  */
-export function applyOrchestratorMcpConfig(
+export async function applyOrchestratorMcpConfig(
+  c: ComputeSession,
   flags: string,
   worktreePath: string,
   taskId: string,
   hookToken: string,
-): string {
+): Promise<string> {
   if (isOrchestratorManaged(taskId)) {
-    const workerMcpConfigPath = writeWorkerMcpConfig(worktreePath, taskId, hookToken);
+    const workerMcpConfigPath = await writeWorkerMcpConfig(c, worktreePath, taskId, hookToken);
     if (workerMcpConfigPath) {
       flags += ` --mcp-config ${shellQuoteSingle(workerMcpConfigPath)}`;
     }

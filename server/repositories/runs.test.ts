@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb, insertTask } from '../test-helpers.js';
 import { getDb } from '../db.js';
+import { rememberSecretValue, resetRedaction } from '../secrets/redact.js';
 import {
   insertRun,
   finishRun,
@@ -14,6 +15,7 @@ import {
 describe('runs repo', () => {
   beforeEach(() => {
     createTestDb();
+    resetRedaction();
   });
 
   it('insertRun / getRun round-trip', () => {
@@ -39,6 +41,25 @@ describe('runs repo', () => {
     expect(fetched?.result_json).toBe(JSON.stringify({ ok: true }));
     expect(fetched?.error).toBeNull();
     expect(fetched?.ended_at).not.toBeNull();
+  });
+
+  it('finishRun redacts a remembered secret value out of the stored result_json', () => {
+    rememberSecretValue('super-secret-result-value');
+    const row = insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+
+    finishRun(row.id, { status: 'done', result: { token: 'super-secret-result-value' } });
+
+    const fetched = getRun(row.id);
+    expect(fetched?.result_json).toBe(JSON.stringify({ token: '••••' }));
+  });
+
+  it('finishRun stores result_json unchanged when it contains no secret', () => {
+    const row = insertRun({ workflowKind: 'pr-extract', trigger: 'github' });
+
+    finishRun(row.id, { status: 'done', result: { ok: true } });
+
+    const fetched = getRun(row.id);
+    expect(fetched?.result_json).toBe(JSON.stringify({ ok: true }));
   });
 
   it('finishRun sets error on failure', () => {

@@ -1,21 +1,16 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import Database from '../sqlite.js';
-import { describe, it, expect, beforeEach, vi } from '../bun-test.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from '../bun-test.js';
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
-
-vi.mock('fs', (importOriginal) => {
-  const actual = importOriginal<typeof import('fs')>();
-  const mocked = {
-    ...actual,
-    existsSync: vi.fn(() => true),
-    mkdirSync: vi.fn(),
-    copyFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    readFileSync: vi.fn(),
-    unlinkSync: vi.fn(),
-  };
-  return { ...mocked, default: mocked };
-});
+//
+// `fs` is intentionally NOT mocked here (unlike the old version of this file):
+// buildAgentStartupCommand/writeWorkerMcpConfig now go through
+// `localSession.files`, which is real `fs.promises` — see
+// `server/task-engine/launch-prompt-respawn.test.ts` for the same real-fs
+// pattern this file follows. Only `child_process` (tmux) is mocked.
 
 let nextWindowIndex = 0;
 
@@ -65,21 +60,26 @@ const {
   writeWorkerMcpConfig,
 } = await import('./launch.js');
 const { execFile } = await import('child_process');
-const fs = await import('fs');
 const { isOrchestratorManaged } = await import('../repositories/orchestrator.js');
 const { mcpServerInvocation } = await import('../orchestrator/runner.js');
+const { localSession } = await import('../compute/index.js');
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
 let db: Database;
+let worktreeDir: string;
 
 beforeEach(() => {
   db = createTestDb();
   vi.clearAllMocks();
-  vi.mocked(fs.existsSync).mockReturnValue(true);
   vi.mocked(isOrchestratorManaged).mockReturnValue(false);
   vi.mocked(mcpServerInvocation).mockReturnValue(null);
   nextWindowIndex = 0;
+  worktreeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-launch-test-'));
+});
+
+afterEach(() => {
+  fs.rmSync(worktreeDir, { recursive: true, force: true });
 });
 
 // ─── buildAgentStartupCommand ─────────────────────────────────────────────────
@@ -87,85 +87,85 @@ beforeEach(() => {
 describe('buildAgentStartupCommand', () => {
   const shell = process.env.SHELL || '/bin/sh';
 
-  it('wraps the harness command in an interactive shell', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+  it('wraps the harness command in an interactive shell', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
+      baseCmd: 'claude --session-id abc',
+    });
     expect(cmd.startsWith(`${shell} -ic `)).toBe(true);
   });
 
-  it('includes exec shell -i at the end so the pane stays alive', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+  it('includes exec shell -i at the end so the pane stays alive', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
+      baseCmd: 'claude --session-id abc',
+    });
     expect(cmd).toContain(`exec ${shell} -i`);
   });
 
-  it('includes the harness command verbatim', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc --model opus' });
+  it('includes the harness command verbatim', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
+      baseCmd: 'claude --session-id abc --model opus',
+    });
     expect(cmd).toContain('claude --session-id abc --model opus');
   });
 
-  it('does NOT embed prompt via cat when no prompt provided', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+  it('does NOT embed prompt via cat when no prompt provided', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
+      baseCmd: 'claude --session-id abc',
+    });
     expect(cmd).not.toContain('$(cat ');
   });
 
-  it('embeds prompt via cat substitution when prompt + worktreePath + agentId provided', () => {
-    const cmd = buildAgentStartupCommand({
+  it('embeds prompt via cat substitution when prompt + worktreePath + agentId provided', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
-      worktreePath: '/tmp/wt',
+      worktreePath: worktreeDir,
       agentId: 'agent123',
     });
     expect(cmd).toContain('"$(cat ');
     expect(cmd).toContain('.claude-prompt-agent123');
   });
 
-  it('puts -- before the prompt cat substitution', () => {
-    const cmd = buildAgentStartupCommand({
+  it('puts -- before the prompt cat substitution', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
-      worktreePath: '/tmp/wt',
+      worktreePath: worktreeDir,
       agentId: 'agent123',
     });
     expect(cmd).toContain('-- "$(cat ');
   });
 
-  it('writes prompt to a file with mode 0o600', () => {
-    buildAgentStartupCommand({
+  it('writes prompt to a file with mode 0o600', async () => {
+    await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
-      worktreePath: '/tmp/wt',
+      worktreePath: worktreeDir,
       agentId: 'agent123',
     });
-    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
-      expect.stringContaining('.claude-prompt-agent123'),
-      expect.stringContaining('Do the thing'),
-      { mode: 0o600 },
-    );
+    const promptFile = path.join(worktreeDir, '.claude-prompt-agent123');
+    expect(fs.readFileSync(promptFile, 'utf8')).toContain('Do the thing');
+    expect(fs.statSync(promptFile).mode & 0o777).toBe(0o600);
   });
 
-  it('appends the rename hint to the written prompt', () => {
-    buildAgentStartupCommand({
+  it('writes the prompt verbatim — no appended hints', async () => {
+    await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
-      worktreePath: '/tmp/wt',
+      worktreePath: worktreeDir,
       agentId: 'agent123',
     });
-    const call = vi
-      .mocked(fs.writeFileSync)
-      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-agent123'));
-    expect(call).toBeDefined();
-    expect(String(call![1])).toContain('octomux task rename');
+    const promptFile = path.join(worktreeDir, '.claude-prompt-agent123');
+    expect(fs.readFileSync(promptFile, 'utf8')).toBe('Do the thing');
   });
 
-  it('does NOT write a prompt file when prompt is absent', () => {
-    buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
-    const promptFileCall = vi
-      .mocked(fs.writeFileSync)
-      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-'));
-    expect(promptFileCall).toBeUndefined();
+  it('does NOT write a prompt file when prompt is absent', async () => {
+    await buildAgentStartupCommand(localSession, { baseCmd: 'claude --session-id abc' });
+    expect(fs.readdirSync(worktreeDir)).toHaveLength(0);
   });
 
-  it('does not embed cat when worktreePath is missing', () => {
-    const cmd = buildAgentStartupCommand({
+  it('does not embed cat when worktreePath is missing', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
       agentId: 'agent123',
@@ -174,8 +174,8 @@ describe('buildAgentStartupCommand', () => {
     expect(cmd).not.toContain('$(cat ');
   });
 
-  it('prepends shell-quoted env exports when env is provided', () => {
-    const cmd = buildAgentStartupCommand({
+  it('prepends shell-quoted env exports when env is provided', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
       baseCmd: 'claude --session-id abc',
       env: { OCTOMUX_ACTION_TOKEN: 'tok-123', OCTOMUX_ACTION_BASE_URL: 'http://127.0.0.1:7777' },
     });
@@ -191,8 +191,10 @@ describe('buildAgentStartupCommand', () => {
     expect(cmd.indexOf('export ')).toBeLessThan(cmd.indexOf('claude --session-id abc'));
   });
 
-  it('omits the export prefix when env is not provided', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
+  it('omits the export prefix when env is not provided', async () => {
+    const cmd = await buildAgentStartupCommand(localSession, {
+      baseCmd: 'claude --session-id abc',
+    });
     expect(cmd).not.toContain('export ');
   });
 });
@@ -427,7 +429,7 @@ describe('prepareResumeLaunch', () => {
 
 describe('launchAgentWindow', () => {
   it('fresh=true emits new-session with the startup command', async () => {
-    await launchAgentWindow({
+    await launchAgentWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -442,7 +444,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=true emits set-option aggressive-resize', async () => {
-    await launchAgentWindow({
+    await launchAgentWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -457,7 +459,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=true queries active window index via display-message', async () => {
-    const idx = await launchAgentWindow({
+    const idx = await launchAgentWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -473,7 +475,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=false emits new-window (not new-session)', async () => {
-    await launchAgentWindow({
+    await launchAgentWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -494,7 +496,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=false queries last window index via list-windows', async () => {
-    const idx = await launchAgentWindow({
+    const idx = await launchAgentWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -510,7 +512,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=true passes session and cwd to new-session', async () => {
-    await launchAgentWindow({
+    await launchAgentWindow(localSession, {
       session: 'my-session',
       cwd: '/my/worktree',
       startupCmd: 'bash -ic claude',
@@ -525,7 +527,7 @@ describe('launchAgentWindow', () => {
   });
 
   it('fresh=false passes session and cwd to new-window', async () => {
-    await launchAgentWindow({
+    await launchAgentWindow(localSession, {
       session: 'my-session',
       cwd: '/my/worktree',
       startupCmd: 'bash -ic claude',
@@ -543,44 +545,65 @@ describe('launchAgentWindow', () => {
 // ─── applyOrchestratorMcpConfig ───────────────────────────────────────────────
 
 describe('applyOrchestratorMcpConfig', () => {
-  it('returns flags unchanged when task is not orchestrator-managed', () => {
+  it('returns flags unchanged when task is not orchestrator-managed', async () => {
     vi.mocked(isOrchestratorManaged).mockReturnValue(false);
 
-    const result = applyOrchestratorMcpConfig('--some-flag', '/wt', 'task-001', 'hook-token-x');
+    const result = await applyOrchestratorMcpConfig(
+      localSession,
+      '--some-flag',
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
+    );
     expect(result).toBe('--some-flag');
   });
 
-  it('returns flags unchanged when managed but mcpServerInvocation returns null', () => {
+  it('returns flags unchanged when managed but mcpServerInvocation returns null', async () => {
     vi.mocked(isOrchestratorManaged).mockReturnValue(true);
     vi.mocked(mcpServerInvocation).mockReturnValue(null);
-    // existsSync returns false so worker file not found
-    vi.mocked(fs.existsSync).mockReturnValue(false);
 
-    const result = applyOrchestratorMcpConfig('--some-flag', '/wt', 'task-001', 'hook-token-x');
+    const result = await applyOrchestratorMcpConfig(
+      localSession,
+      '--some-flag',
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
+    );
     expect(result).toBe('--some-flag');
   });
 
-  it('appends --mcp-config to flags when managed and config written successfully', () => {
+  it('appends --mcp-config to flags when managed and config written successfully', async () => {
     vi.mocked(isOrchestratorManaged).mockReturnValue(true);
     vi.mocked(mcpServerInvocation).mockReturnValue({
       command: '/usr/bin/node',
       args: ['/path/to/server.js'],
     });
-    vi.mocked(fs.existsSync).mockReturnValue(true);
 
-    const result = applyOrchestratorMcpConfig('--some-flag', '/wt', 'task-001', 'hook-token-x');
+    const result = await applyOrchestratorMcpConfig(
+      localSession,
+      '--some-flag',
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
+    );
     expect(result).toContain('--mcp-config');
     expect(result.startsWith('--some-flag')).toBe(true);
   });
 
-  it('includes the mcp config path in quotes in the flags', () => {
+  it('includes the mcp config path in quotes in the flags', async () => {
     vi.mocked(isOrchestratorManaged).mockReturnValue(true);
     vi.mocked(mcpServerInvocation).mockReturnValue({
       command: '/usr/bin/node',
       args: ['/path/to/server.js'],
     });
 
-    const result = applyOrchestratorMcpConfig('', '/wt', 'task-001', 'hook-token-x');
+    const result = await applyOrchestratorMcpConfig(
+      localSession,
+      '',
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
+    );
     expect(result).toMatch(/--mcp-config '.*worker-mcp-config\.json'/);
   });
 });
@@ -588,40 +611,43 @@ describe('applyOrchestratorMcpConfig', () => {
 // ─── writeWorkerMcpConfig ─────────────────────────────────────────────────────
 
 describe('writeWorkerMcpConfig', () => {
-  it('returns null when mcpServerInvocation returns null', () => {
+  it('returns null when mcpServerInvocation returns null', async () => {
     vi.mocked(mcpServerInvocation).mockReturnValue(null);
 
-    const result = writeWorkerMcpConfig('/wt', 'task-001', 'hook-token-x');
+    const result = await writeWorkerMcpConfig(
+      localSession,
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
+    );
     expect(result).toBeNull();
   });
 
-  it('writes the config file when invocation is found', () => {
+  it('writes the config file when invocation is found', async () => {
     vi.mocked(mcpServerInvocation).mockReturnValue({
       command: '/usr/bin/node',
       args: ['/path/to/server.js'],
     });
 
-    const result = writeWorkerMcpConfig('/wt', 'task-001', 'hook-token-x');
-    expect(result).toContain('worker-mcp-config.json');
-    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
-      expect.stringContaining('worker-mcp-config.json'),
-      expect.any(String),
+    const result = await writeWorkerMcpConfig(
+      localSession,
+      worktreeDir,
+      'task-001',
+      'hook-token-x',
     );
+    expect(result).toContain('worker-mcp-config.json');
+    expect(fs.existsSync(result!)).toBe(true);
   });
 
-  it('includes OCTOMUX_TASK_ID in the written config env', () => {
+  it('includes OCTOMUX_TASK_ID in the written config env', async () => {
     vi.mocked(mcpServerInvocation).mockReturnValue({
       command: '/usr/bin/node',
       args: ['/path/to/server.js'],
     });
 
-    writeWorkerMcpConfig('/wt', 'my-task-id', 'hook-tok');
+    const cfgPath = await writeWorkerMcpConfig(localSession, worktreeDir, 'my-task-id', 'hook-tok');
 
-    const call = vi
-      .mocked(fs.writeFileSync)
-      .mock.calls.find((c) => String(c[0]).includes('worker-mcp-config.json'));
-    expect(call).toBeDefined();
-    const cfg = JSON.parse(String(call![1]));
+    const cfg = JSON.parse(fs.readFileSync(cfgPath!, 'utf-8'));
     expect(cfg.mcpServers?.octomux?.env?.OCTOMUX_TASK_ID).toBe('my-task-id');
   });
 });

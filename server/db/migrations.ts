@@ -38,6 +38,19 @@ export function columnsOf(instance: Database, table: string): Set<string> {
   return new Set(rows.map((c) => c.name));
 }
 
+/** True when `table` exists. The collapse migration (2026-08-22) needs this: a
+ *  fresh database never ran the pre-collapse CREATE blocks, so an unguarded
+ *  `INSERT ... SELECT FROM plugin_facts` would throw `no such table`. */
+export function tableExists(instance: Database, table: string): boolean {
+  return (
+    (
+      instance
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`)
+        .all(table) as unknown[]
+    ).length > 0
+  );
+}
+
 export function addColumn(
   instance: Database,
   table: string,
@@ -369,6 +382,7 @@ export function runMigrations(instance: Database): void {
     taskColsForAgent,
   );
   addColumn(instance, 'tasks', 'model', 'model TEXT', taskColsForAgent);
+  addColumn(instance, 'tasks', 'compute', 'compute TEXT', taskColsForAgent);
 
   // ─── Drop legacy columns from tasks ──────────────────────────────────────
   // Worktrees is now the source of truth. SQLite has DROP COLUMN (>= 3.35),
@@ -1250,24 +1264,124 @@ export function runMigrations(instance: Database): void {
        ON tasks(depends_on) WHERE depends_on IS NOT NULL`,
   );
 
-  // ── ctx.facts — plugin fact log (2026-08-20, SHR-255) ───────────────────────
-  // Deliberately its OWN table, not the `events` table — that one is the
-  // orchestrator's control bus (repositories/orchestrator.ts, drained via
-  // managed_tasks.last_event_seq). Sharing it would put plugin observation
-  // facts into the conductor's drain and share one AUTOINCREMENT seq between
-  // control events and facts (ruling R1, plans/2026-08-20-plugin-runtime-p0.md).
-  // No FK to tasks(id): facts are deleted explicitly by task deletion
-  // (server/repositories/tasks.ts hardDeleteTask), not via ON DELETE CASCADE.
+  // ── Re-review trigger tracking (2026-08-19) ────────────────────────────────
+  // Latest GitHub REVIEW_REQUESTED_EVENT timestamp seen for the owner on this
+  // PR, so the reviewer poller can fire a re-review when review is re-requested
+  // without a push (head SHA unchanged).
+  const taskColsForReReview = columnsOf(instance, 'tasks');
+  addColumn(
+    instance,
+    'tasks',
+    'pr_review_requested_at',
+    'pr_review_requested_at TEXT',
+    taskColsForReReview,
+  );
+  // ── ctx.records — one store for plugin data (2026-08-22) ────────────────────
+  // Creates the table that replaces plugin_facts / plugin_collections /
+  // plugin_kv. The copy-and-drop for each old table follows below, guarded by
+  // tableExists: a fresh database never ran the old CREATE blocks (they're
+  // gone as of this same migration), so the guard makes the copy a no-op
+  // there while still draining and dropping the table on a database that has
+  // it. Migrations re-run on every boot with no version table, so the DROP is
+  // what makes each copy self-limiting — it only ever runs once per database.
+  //
+  // Still NOT the `events` table: ruling R1 keeps plugin data out of the
+  // orchestrator's control bus, and that is unchanged here.
+  //
+  // The partial unique index scopes uniqueness to KEYED (upsert) rows. Append
+  // rows have key IS NULL and are excluded, so two appends in one store never
+  // collide.
   instance.exec(`
-    CREATE TABLE IF NOT EXISTS plugin_facts (
+    CREATE TABLE IF NOT EXISTS plugin_records (
       seq        INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id    TEXT NOT NULL,
-      type       TEXT NOT NULL,
+      store      TEXT NOT NULL,
+      task_id    TEXT,
+      key        TEXT,
       payload    TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      owner      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
-    CREATE INDEX IF NOT EXISTS idx_plugin_facts_task ON plugin_facts(task_id, seq);
-    CREATE INDEX IF NOT EXISTS idx_plugin_facts_type ON plugin_facts(type, seq);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_records_key
+      ON plugin_records(store, key) WHERE key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_plugin_records_task
+      ON plugin_records(task_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_plugin_records_store
+      ON plugin_records(store, seq);
+  `);
+
+  // ── collapse plugin_facts into plugin_records (2026-08-22) ───────────────
+  // Guarded: a fresh database never had plugin_facts, so this is a no-op
+  // there. An existing database drains its rows (type -> store, no key —
+  // facts were append-only) and drops the table, which makes the guard fail
+  // on every subsequent boot.
+  if (tableExists(instance, 'plugin_facts')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, created_at)
+      SELECT type, task_id, NULL, payload, created_at FROM plugin_facts;
+      DROP TABLE plugin_facts;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_facts');
+  }
+
+  // ── collapse plugin_collections into plugin_records (2026-08-22) ────────
+  // collection -> store, key preserved (collections were keyed/upsert), no
+  // task_id (collections were never task-scoped).
+  if (tableExists(instance, 'plugin_collections')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, created_at, updated_at)
+      SELECT collection, NULL, key, record, created_at, updated_at FROM plugin_collections;
+      DROP TABLE plugin_collections;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_collections');
+  }
+
+  // ── collapse plugin_kv into plugin_records (2026-08-22) ──────────────────
+  // plugin_kv had no separate store namespace, so `plugin_id || ':kv'`
+  // synthesizes one to keep a plugin's kv rows out of any other store's
+  // namespace. `owner` carries over for the crash-recovery hook.
+  if (tableExists(instance, 'plugin_kv')) {
+    instance.exec(`
+      INSERT INTO plugin_records (store, task_id, key, payload, owner, created_at, updated_at)
+      SELECT plugin_id || ':kv', NULL, key, value, owner, created_at, updated_at FROM plugin_kv;
+      DROP TABLE plugin_kv;
+    `);
+    logger.info({ operation: 'collapseToPluginRecords' }, 'migrated plugin_kv');
+  }
+
+  // ── fan-out: run a step per item (2026-08-21, SHR-276) ──────────────────────
+  // Own tables rather than reusing `runs` — `runs` is one row per workflow
+  // execution with a single `result_json` blob, but the whole point of fan-out
+  // is that one run explodes into N item rows, each with its own status and
+  // result. Per-item rows are what make a partially-completed run legible (you
+  // can see exactly which items are done/pending/dead) and a redrive possible
+  // (reset only the dead ones back to pending, leave completed work alone).
+  // `fanout_items` has no surrogate id — `(run_id, item_key)` is the natural
+  // key, and it's what makes `upsertFanOutItems` idempotent via INSERT OR
+  // IGNORE on a re-run over the same source.
+  instance.exec(`
+    CREATE TABLE IF NOT EXISTS fanout_runs (
+      id         TEXT PRIMARY KEY,
+      plugin_id  TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      status     TEXT NOT NULL DEFAULT 'running',
+      total      INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_fanout_runs_plugin ON fanout_runs(plugin_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS fanout_items (
+      run_id      TEXT NOT NULL REFERENCES fanout_runs(id) ON DELETE CASCADE,
+      item_key    TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      attempts    INTEGER NOT NULL DEFAULT 0,
+      item_json   TEXT NOT NULL DEFAULT 'null',
+      result_json TEXT,
+      error       TEXT,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (run_id, item_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_fanout_items_status ON fanout_items(run_id, status);
   `);
 }
 

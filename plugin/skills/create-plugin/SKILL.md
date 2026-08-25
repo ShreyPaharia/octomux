@@ -56,15 +56,79 @@ only place your plugin's own code executes at boot.
 
 ## `ctx` — what you get
 
-| Member             | Shape                                     | Notes                                                                                                                                 |
-| ------------------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `ctx.id`           | `string`                                  | your manifest row's bare `id`, e.g. `"demo"`                                                                                          |
-| `ctx.logger`       | `{debug,info,warn,error}(obj, msg?)`      | structured logger, prefixed `plugin:<id>`                                                                                             |
-| `ctx.settings`     | `{get(), update(patch)}` — both **async** | your own opaque blob under `settings.json`'s `plugins.<id>`; never schema-checked                                                     |
-| `ctx.kv`           | `{get,set,del,list}`                      | **every method throws today** — `ctx.kv.<method>() is not available … plugin storage task has not landed yet`. Don't build on it yet. |
-| `ctx.workflows`    | `{register(wf)}`                          | see below                                                                                                                             |
-| `ctx.integrations` | `{register(p)}`                           | see below                                                                                                                             |
-| `ctx.harnesses`    | `{register(h)}`                           | see below                                                                                                                             |
+| Member             | Shape                                                                | Notes                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.id`           | `string`                                                             | your manifest row's bare `id`, e.g. `"demo"`                                                                                          |
+| `ctx.logger`       | `{debug,info,warn,error}(obj, msg?)`                                 | structured logger, prefixed `plugin:<id>`                                                                                             |
+| `ctx.settings`     | `{get(), update(patch)}` — both **async**                            | your own opaque blob under `settings.json`'s `plugins.<id>`; never schema-checked                                                     |
+| `ctx.kv`           | `{get,set,del,list}`                                                 | **every method throws today** — `ctx.kv.<method>() is not available … plugin storage task has not landed yet`. Don't build on it yet. |
+| `ctx.workflows`    | `{register(wf)}`                                                     | see below                                                                                                                             |
+| `ctx.integrations` | `{register(p)}`                                                      | see below                                                                                                                             |
+| `ctx.harnesses`    | `{register(h)}`                                                      | see below                                                                                                                             |
+| `ctx.http`         | `{route(method, path, handler)}`                                     | serves at `/api/p/<id><path>`; handler gets `{params, query, body, headers}` / `{status, json}`, not express objects                  |
+| `ctx.facts`        | `{define,put,read,watch}`                                            | task-scoped append-only observation log; your types are qualified `<id>:<type>`                                                       |
+| `ctx.ui`           | `{panel(binding)}`                                                   | declarative binding onto a fact type — never a component; the client owns every renderer                                              |
+| `ctx.artifacts`    | `{write(taskId, {name, mime, body}), list(taskId)}` — both **async** | files your run produced. NOT a registrar — see below                                                                                  |
+| `ctx.agents`       | `{run(opts)}` — **async**                                            | headless agent runs, structured JSON out. NOT a registrar — see below                                                                 |
+| `ctx.effect`       | `(dispose) => void`                                                  | teardown callback, run in reverse registration order when your plugin unmounts                                                        |
+
+## `ctx.artifacts` — writing output
+
+A plugin that produces a file (a review report, a coverage summary, a generated
+diagram) writes it here:
+
+```js
+await ctx.artifacts.write(taskId, {
+  name: 'coverage.md', // bare filename, [A-Za-z0-9][A-Za-z0-9._-]{0,127}
+  mime: 'text/markdown',
+  body: '# Coverage\n\n92%\n',
+});
+```
+
+- It lands at `<worktree>/.octomux/artifacts/<your-id>/<name>` — inside the task's
+  git worktree, so it diffs and survives a DB wipe.
+- The `<your-id>` segment is always your manifest row id. You cannot write into
+  another plugin's namespace, and two plugins can both write `report.md`.
+- It shows up in the run detail view automatically. You register nothing to make
+  that happen.
+- `list(taskId)` returns EVERY plugin's artifacts on that task, not just yours —
+  same unscoped read as `ctx.facts.read`.
+- `write()` **rejects** if the task has no worktree yet, or if `name`/`mime` fail
+  validation, or the body is over 5 MB. It is not fire-and-forget: await it.
+- Artifacts are files, so they outlive your plugin — unmounting does not delete
+  them. They die with the task.
+
+This is a method on `ctx`, not a registrar. There is no `ctx.artifacts.register()`
+and there will not be: nobody needs a different artifact implementation.
+
+## `ctx.agents` — running a headless agent
+
+A plugin that needs an LLM to read something and answer, not write code, runs
+one here instead of shelling out to its own SDK client:
+
+```js
+const result = await ctx.agents.run({
+  input: `Classify this ticket:\n\n${body}`,
+  outputSchema: {
+    type: 'object',
+    properties: { category: { type: 'string' } },
+    required: ['category'],
+  },
+  timeoutMs: 60_000,
+});
+```
+
+- It wires to the same `runAgentSession()` primitive the host uses for
+  scheduled workflow kinds — default harness, pty substrate, no reattach.
+- **Git-free.** No worktree, no branch, no tmux session — that's the task
+  lifecycle, for a different kind of agent. Defaults to a fresh empty scratch
+  dir; pass `workspaceDir` if it genuinely needs a checkout.
+- No host concurrency cap and no `runs` row — you own your own limiter, and
+  this isn't a schedule run.
+- `timeoutMs` (default 5 minutes) bounds the wait; a session that never calls
+  `submit_result` rejects rather than hanging.
+
+This is also a method on `ctx`, not a registrar.
 
 ## Choosing a registrar
 
@@ -94,6 +158,98 @@ load-report `failed` row instead of a boot crash somewhere downstream:
   registration immediately — not silently at the first task launch that needs it.
   See the `configure-harness` skill for which `Harness` members are still unwired
   even once registration succeeds.
+
+## Capability grants — declare or your plugin won't load
+
+Every registrar call in `apply()` is gated by a capability the manifest row must
+declare in `grants:`. Undeclared is **denied**, not warned: the registrar throws
+synchronously, `apply()` fails, and your row lands in the load report as a
+`phase: 'apply'` failure naming the plugin and the missing capability. There is
+no partial-load path — if `ctx.policy.intercept()` throws, none of your other
+registrar calls that ran before it are undone, but the plugin as a whole is
+marked failed.
+
+| Capability              | Gates                         | Local id field / method |
+| ----------------------- | ----------------------------- | ----------------------- |
+| `workflows.register`    | `ctx.workflows.register()`    | `kind`                  |
+| `integrations.register` | `ctx.integrations.register()` | `kind`                  |
+| `harnesses.register`    | `ctx.harnesses.register()`    | `id`                    |
+| `compute.register`      | `ctx.compute.register()`      | `kind`                  |
+| `http.route`            | `ctx.http.route()`            | —                       |
+| `facts.define`          | `ctx.facts.define()`          | `type`                  |
+| `facts.put`             | `ctx.facts.put()`             | —                       |
+| `ui.panel`              | `ctx.ui.panel()`              | —                       |
+| `artifacts.write`       | `ctx.artifacts.write()`       | —                       |
+| `policy.intercept`      | `ctx.policy.intercept()`      | —                       |
+| `agents.run`            | `ctx.agents.run()`            | —                       |
+| `fanout.run`            | `ctx.fanout.run()`            | `name`                  |
+
+Reads are ungated — `ctx.facts.read`/`.watch`, `ctx.artifacts.list`,
+`ctx.fanout.status`/`.list`, `ctx.catalog.list`, `ctx.settings`, `ctx.logger`,
+`ctx.effect` need no grant. Declare only what you call:
+
+```yaml
+plugins:
+  - id: spendcap
+    name: octomux-plugin-spendcap
+    grants: [policy.intercept, facts.put]
+```
+
+Widening an installed plugin's grants later (e.g. a new version starts calling
+`facts.define`) does **not** take effect on the operator's next boot just
+because your published manifest snippet says so — the operator's own
+`plugin-grants.json` ledger has to catch up via `octomux plugins approve <id>`.
+Document any new grant your release adds in your changelog; an operator who
+skips the approve step gets your call denied, not a silent no-op.
+
+## `ctx.policy` — refusing or patching an intent
+
+`ctx.policy.intercept(point, hook)` is the one registrar that can say no. It
+needs the `policy.intercept` grant. Four points: `task.launch`,
+`harness.resume`, `review.publish`, `integration.send`. Your hook gets a
+`PolicyIntent` (`point`, optional `taskId`/`repoPath`, and point-specific
+`data`) and returns one of `{ deny: string }`, `{ patch: {...} }`, or nothing
+(no opinion — pass through).
+
+Two shapes worth knowing:
+
+```js
+// A spend cap denying task.launch past a budget.
+ctx.policy.intercept('task.launch', async (intent) => {
+  if (await overBudget(intent.repoPath)) {
+    return { deny: 'monthly spend cap reached for this repo' };
+  }
+});
+
+// A router patching the model for a specific harness.
+ctx.policy.intercept('task.launch', (intent) => {
+  if (intent.data.harnessId === 'cursor') {
+    return { patch: { model: 'gpt-5.1-codex' } };
+  }
+});
+```
+
+Only `model` (`task.launch`, `harness.resume`), `verdict` (`review.publish`), and
+`payload` (`integration.send`) are patchable — a patch key a call site doesn't
+list is ignored, core decides what it honours. Hooks for a point run in
+registration order; the first `deny` short-circuits and later hooks never run;
+a `patch` merges into `intent.data` so the next hook sees your patched values.
+
+**Fail open, on purpose.** A hook that throws, or runs past the host's timeout
+(5s), is logged and treated as "no opinion" — it does not block the intent.
+Write your hook assuming a crash costs you an audit log line, not an outage:
+if being unable to reach an external spend-tracking API should be a hard stop,
+you have to encode that yourself (e.g. deny when the budget check can't be
+reached), because a thrown error from that same check fails open instead.
+
+**What gets recorded.** A deny or patch on a task-scoped intent (one with a
+`taskId`) is written twice: a `core:policy.decision` fact (readable via
+`ctx.facts.read`/`.watch` by any plugin) and a `task_updates` row of kind
+`policy` that shows in the task's Activity panel. An intent without a `taskId`
+is logged but not recorded as a fact.
+
+This is not containment — see `add-plugin` for why a `policy` deny doesn't stop
+a plugin's own code from doing whatever it wants outside `ctx`.
 
 ## Local vs. qualified ids
 

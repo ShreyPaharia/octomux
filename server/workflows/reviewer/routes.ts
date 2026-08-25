@@ -4,6 +4,7 @@ import { execFile as execFileCb } from 'child_process';
 import { promisify } from 'util';
 import { childLogger } from '../../logger.js';
 import { getRemoteOriginUrl, revParseHead } from '../../task-engine/git.js';
+import { localSession, sessionFor } from '../../compute/index.js';
 import { listReviewsInbox, getReviewDetail } from './reviews-inbox.js';
 import { taskWorkingDir } from '../../task-paths.js';
 import {
@@ -60,7 +61,9 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
     if (!prHeadSha) {
       const cwd = taskWorkingDir(task);
       try {
-        prHeadSha = await revParseHead(cwd!);
+        // This task's own worktree — run on the task's compute, not the server's.
+        const compute = await sessionFor(task);
+        prHeadSha = await revParseHead(compute, cwd!);
       } catch (err) {
         throw new ServiceError(`failed to resolve HEAD: ${(err as Error).message}`, 500);
       }
@@ -101,7 +104,11 @@ router.post('/api/reviews', async (req: Request, res: Response) => {
     for (const row of rows) {
       const candidatePath = row.repo_path;
       try {
-        const remoteUrl = await getRemoteOriginUrl(candidatePath);
+        // No task exists yet — this scans every tracked base repo checkout
+        // (the local clone worktrees are created from) to find the one whose
+        // origin matches the incoming PR. That base checkout always lives on
+        // the server's own disk, never a task's remote compute.
+        const remoteUrl = await getRemoteOriginUrl(localSession, candidatePath);
         if (!remoteUrl) continue;
         const sshMatch = remoteUrl.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
         const httpsMatch = remoteUrl.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
@@ -211,6 +218,11 @@ router.post('/api/tasks/:id/publish-review', async (req: Request, res: Response)
     const msg = (err as Error).message;
     if (msg.includes('No accepted comments')) {
       throw badRequest(msg);
+    }
+    if (msg.startsWith('policy denied')) {
+      // A policy refusal is not a server error — surface it as a client-facing
+      // 403 with the reason as the message.
+      throw new ServiceError(msg, 403);
     }
     throw err;
   }

@@ -1,8 +1,5 @@
-import { execFile as execFileCb } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
 import { childLogger } from '../logger.js';
-import { execTmux } from '../tmux-bin.js';
+import { sessionFor, releaseSession } from '../compute/index.js';
 import type { Task, Worker } from '../types.js';
 import {
   setRuntimeState,
@@ -26,9 +23,16 @@ import { cleanupLinkedSessions } from './sessions.js';
 
 const logger = childLogger('task-engine/cleanup');
 
-const execFile = promisify(execFileCb);
+export interface CloseReport {
+  /** task.runtime_state was already 'idle' when closeTask was entered. */
+  alreadyIdle: boolean;
+  /** A tmux session existed and kill-session actually succeeded. */
+  tmuxKilled: boolean;
+}
 
-export async function closeTask(task: Task): Promise<void> {
+export async function closeTask(task: Task): Promise<CloseReport> {
+  const alreadyIdle = task.runtime_state === 'idle';
+
   logger.info(
     { task_id: task.id, operation: 'closeTask', run_mode: task.run_mode },
     'closeTask: start',
@@ -47,10 +51,14 @@ export async function closeTask(task: Task): Promise<void> {
     'closeTask: DB marked task closed + agents stopped',
   );
 
+  const compute = await sessionFor(task);
+
+  let tmuxKilled = false;
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
+      tmuxKilled = true;
       logger.info(
         { task_id: task.id, operation: 'closeTask', tmux_session: task.tmux_session },
         'closeTask: tmux session killed',
@@ -70,7 +78,23 @@ export async function closeTask(task: Task): Promise<void> {
     }
   }
 
-  logger.info({ task_id: task.id, operation: 'closeTask' }, 'closeTask: complete');
+  // No `destroy` — closeTask preserves the worktree (and, for a remote
+  // provider, the compute itself) so a later resume can re-attach. Only
+  // `deleteTask` tears the box down; here we just drop octomux's in-process
+  // handle on it.
+  await releaseSession(task.id);
+
+  logger.info(
+    {
+      task_id: task.id,
+      operation: 'closeTask',
+      already_idle: alreadyIdle,
+      tmux_killed: tmuxKilled,
+    },
+    'closeTask: complete',
+  );
+
+  return { alreadyIdle, tmuxKilled };
 }
 
 /**
@@ -82,10 +106,12 @@ export async function closeTask(task: Task): Promise<void> {
 export async function softDeleteTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: start');
 
+  const compute = await sessionFor(task);
+
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
     } catch (err) {
       if (!isTmuxTargetMissing(err)) {
         logger.warn(
@@ -102,17 +128,35 @@ export async function softDeleteTask(task: Task): Promise<void> {
   logger.info({ task_id: task.id, operation: 'softDeleteTask' }, 'softDeleteTask: complete');
 }
 
-export async function deleteTask(task: Task): Promise<void> {
+export interface TeardownReport {
+  /** The worktree path is CONFIRMED gone (or there was nothing to remove). */
+  worktreeRemoved: boolean;
+  /** The branch is CONFIRMED gone (or there was none). */
+  branchDeleted: boolean;
+  /** Human-readable failures; empty when the teardown fully succeeded. */
+  errors: string[];
+}
+
+/**
+ * Tear down a task's worktree, branch, and tmux session, and DELETE its DB
+ * rows. Never throws — `pollSoftDeletes` calls this from a purge loop and a
+ * thrown error there would retry forever, so every failure is reported
+ * instead via `TeardownReport.errors`.
+ */
+export async function deleteTask(task: Task): Promise<TeardownReport> {
   logger.info(
     { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode },
     'deleteTask: start',
   );
 
+  const compute = await sessionFor(task);
+  const errors: string[] = [];
+
   // Kill tmux first — applies to every mode
   if (task.tmux_session) {
-    await cleanupLinkedSessions(task.tmux_session);
+    await cleanupLinkedSessions(compute, task.tmux_session);
     try {
-      await execTmux(['kill-session', '-t', task.tmux_session]);
+      await compute.tmux(['kill-session', '-t', task.tmux_session]);
       logger.info(
         { task_id: task.id, operation: 'deleteTask', tmux_session: task.tmux_session },
         'deleteTask: tmux session killed',
@@ -132,11 +176,16 @@ export async function deleteTask(task: Task): Promise<void> {
     }
   }
 
+  let worktreeRemoved = true;
+  let branchDeleted = true;
+
   switch (task.run_mode) {
     case 'new': {
       if (task.worktree) {
+        let removeFailed = false;
         try {
-          await execFile('git', [
+          await compute.exec([
+            'git',
             '-C',
             task.repo_path,
             'worktree',
@@ -149,15 +198,42 @@ export async function deleteTask(task: Task): Promise<void> {
             'deleteTask: worktree removed',
           );
         } catch (err) {
+          removeFailed = true;
           logger.warn(
             { task_id: task.id, operation: 'deleteTask', worktree: task.worktree, err },
-            'deleteTask: worktree remove failed (may already be gone)',
+            'deleteTask: worktree remove failed (may already be gone, or a dangling registration)',
+          );
+        }
+
+        const stillExists = await compute.files.exists(task.worktree);
+        if (stillExists) {
+          await compute.files.rm(task.worktree, { recursive: true }).catch(() => {});
+          await compute
+            .exec(['git', '-C', task.repo_path, 'worktree', 'prune'], { allowFailure: true })
+            .catch(() => {});
+        } else if (removeFailed) {
+          // The directory was already gone but `worktree remove` still
+          // errored — that's exactly the dangling-registration case: git
+          // keeps the administrative entry and `git worktree list` keeps
+          // showing it until pruned.
+          await compute
+            .exec(['git', '-C', task.repo_path, 'worktree', 'prune'], { allowFailure: true })
+            .catch(() => {});
+        }
+
+        worktreeRemoved = !(await compute.files.exists(task.worktree));
+        if (!worktreeRemoved) {
+          const msg = `worktree ${task.worktree} could not be removed`;
+          errors.push(msg);
+          logger.error(
+            { task_id: task.id, operation: 'deleteTask', worktree: task.worktree },
+            'deleteTask: worktree still present after teardown',
           );
         }
       }
       if (task.branch) {
         try {
-          await execFile('git', ['-C', task.repo_path, 'branch', '-D', task.branch]);
+          await compute.exec(['git', '-C', task.repo_path, 'branch', '-D', task.branch]);
           logger.info(
             { task_id: task.id, operation: 'deleteTask', branch: task.branch },
             'deleteTask: branch deleted',
@@ -166,6 +242,28 @@ export async function deleteTask(task: Task): Promise<void> {
           logger.warn(
             { task_id: task.id, operation: 'deleteTask', branch: task.branch, err },
             'deleteTask: branch delete failed (may already be gone)',
+          );
+        }
+
+        const verify = await compute.exec(
+          [
+            'git',
+            '-C',
+            task.repo_path,
+            'rev-parse',
+            '--verify',
+            '--quiet',
+            `refs/heads/${task.branch}`,
+          ],
+          { allowFailure: true },
+        );
+        branchDeleted = verify.exitCode !== 0;
+        if (!branchDeleted) {
+          const msg = `branch ${task.branch} still exists after delete`;
+          errors.push(msg);
+          logger.error(
+            { task_id: task.id, operation: 'deleteTask', branch: task.branch },
+            'deleteTask: branch still present after teardown',
           );
         }
       }
@@ -180,7 +278,7 @@ export async function deleteTask(task: Task): Promise<void> {
       // is nothing extra to guard here.)
       const dir = task.worktree || task.repo_path;
       try {
-        await getHarness(task.harness_id).uninstallHooks(dir);
+        await getHarness(task.harness_id).uninstallHooks(dir, compute.files);
         logger.info(
           { task_id: task.id, operation: 'deleteTask', run_mode: task.run_mode, dir },
           'deleteTask: hook config removed from user-owned path',
@@ -196,7 +294,7 @@ export async function deleteTask(task: Task): Promise<void> {
     case 'scratch': {
       const dir = task.worktree || scratchDirFor(task.id);
       try {
-        fs.rmSync(dir, { recursive: true, force: true });
+        await compute.files.rm(dir, { recursive: true });
         logger.info(
           { task_id: task.id, operation: 'deleteTask', scratch_dir: dir },
           'deleteTask: scratch dir removed',
@@ -205,6 +303,16 @@ export async function deleteTask(task: Task): Promise<void> {
         logger.warn(
           { task_id: task.id, operation: 'deleteTask', scratch_dir: dir, err },
           'deleteTask: scratch dir remove failed (may already be gone)',
+        );
+      }
+
+      worktreeRemoved = !(await compute.files.exists(dir));
+      if (!worktreeRemoved) {
+        const msg = `scratch dir ${dir} could not be removed`;
+        errors.push(msg);
+        logger.error(
+          { task_id: task.id, operation: 'deleteTask', scratch_dir: dir },
+          'deleteTask: scratch dir still present after teardown',
         );
       }
       break;
@@ -227,7 +335,23 @@ export async function deleteTask(task: Task): Promise<void> {
     }
   }
 
-  logger.info({ task_id: task.id, operation: 'deleteTask' }, 'deleteTask: complete');
+  // `destroy: true` — deleteTask is the full-teardown path, so a remote
+  // provider must actually tear the box down here, not just drop the cache
+  // entry (which would leak the remote compute forever).
+  await releaseSession(task.id, { destroy: true });
+
+  logger.info(
+    {
+      task_id: task.id,
+      operation: 'deleteTask',
+      worktree_removed: worktreeRemoved,
+      branch_deleted: branchDeleted,
+      errors,
+    },
+    'deleteTask: complete',
+  );
+
+  return { worktreeRemoved, branchDeleted, errors };
 }
 
 export async function stopAgent(task: Task, agent: Worker): Promise<void> {
@@ -243,8 +367,11 @@ export async function stopAgent(task: Task, agent: Worker): Promise<void> {
 
   resolveAgentPermissionPrompts(agent.id);
 
-  await execTmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`]).catch(
-    (err) => {
+  const compute = await sessionFor(task);
+
+  await compute
+    .tmux(['kill-window', '-t', `${task.tmux_session}:${agent.window_index}`])
+    .catch((err) => {
       if (isTmuxTargetMissing(err)) {
         logger.debug(
           { task_id: task.id, agent_id: agent.id, operation: 'stopAgent' },
@@ -256,8 +383,7 @@ export async function stopAgent(task: Task, agent: Worker): Promise<void> {
           'stopAgent: kill-window failed',
         );
       }
-    },
-  );
+    });
 
   stopAgentRepo(agent.id);
 

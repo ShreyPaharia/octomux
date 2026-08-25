@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from '../bun-test.js';
 import { createTestDb } from '../test-helpers.js';
 import { getDb } from '../db.js';
+import { appendRecord, upsertRecord, readRecordsForTask, getRecord } from './plugin-records.js';
 import {
   getTask,
   listTasks,
@@ -142,6 +143,29 @@ describe('repositories/tasks', () => {
     it('getTask surfaces schedule_id on the returned Task', () => {
       const id = insertTask({ title: 'T', description: 'D', schedule_id: 'sched-1' });
       expect(getTask(id)!.schedule_id).toBe('sched-1');
+    });
+
+    // SHR-266: compute must stay NULL when unset, not default to a literal
+    // like harness_id does — sessionFor() resolves NULL to DEFAULT_COMPUTE_KIND
+    // itself, so a NULL row keeps following the default if it ever changes.
+    it('a task created without compute round-trips as null', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      const row = db.prepare('SELECT compute FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.compute).toBeNull();
+      expect(getTask(id)!.compute).toBeNull();
+    });
+
+    it('a task created with compute: "ssh" round-trips as "ssh"', () => {
+      const id = insertTask({ title: 'T', description: 'D', compute: 'ssh' });
+      const row = db.prepare('SELECT compute FROM tasks WHERE id = ?').get(id) as Record<
+        string,
+        unknown
+      >;
+      expect(row.compute).toBe('ssh');
+      expect(getTask(id)!.compute).toBe('ssh');
     });
   });
 
@@ -309,6 +333,17 @@ describe('repositories/tasks', () => {
       hardDeleteTask(id);
       const row = db.prepare('SELECT id FROM tasks WHERE id = ?').get(id);
       expect(row).toBeUndefined();
+    });
+
+    it('hardDeleteTask sweeps task-scoped plugin_records and leaves durable ones', () => {
+      const id = insertTask({ title: 'T', description: 'D' });
+      appendRecord('p:log', id, { n: 1 });
+      upsertRecord('p:leads', null, 'a', { v: 1 });
+
+      hardDeleteTask(id);
+
+      expect(readRecordsForTask(id)).toHaveLength(0);
+      expect(getRecord('p:leads', 'a')).toBeDefined();
     });
   });
 

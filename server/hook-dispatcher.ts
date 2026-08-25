@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import { childLogger } from './logger.js';
 import { octomuxRoot } from './octomux-root.js';
 import { getHookEnabled, getTaskExternalRefs } from './repositories/index.js';
+import { evaluatePolicy } from './plugins/policy.js';
 import type { HookEventName, HookEnvelope } from './hook-types.js';
 
 export type { HookEventName, HookEnvelope };
@@ -337,14 +338,53 @@ async function fireIntegrationProviders(
     let resolvedConfig: unknown;
     try {
       const { resolveEnvVars } = await import('./integrations/resolve-env.js');
-      resolvedConfig = resolveEnvVars(integration.config);
-    } catch {
-      resolvedConfig = integration.config;
+      // Resolves both `${env:VAR}` and `${secret:NAME}` placeholders in the
+      // stored config. Known gap (see CLAUDE.md "Known gaps"): the provider
+      // handler below still receives the resolved value in cleartext — this
+      // doesn't close that, it just moves the credential out of the DB column
+      // and into the encrypted secret store.
+      const { resolveSecrets } = await import('./secrets/store.js');
+      resolvedConfig = resolveSecrets(resolveEnvVars(integration.config));
+    } catch (err) {
+      // A `${secret:NAME}` that names nothing throws here. Falling back to the
+      // unresolved config would send the literal placeholder as the credential
+      // — a silent auth failure three layers away, or worse a request that
+      // half-works. Skip the integration and say so instead.
+      integLogger.error(
+        { integration_kind: integration.kind, event, err },
+        'integration config could not be resolved — skipping send',
+      );
+      continue;
     }
+
+    const outcome = await evaluatePolicy('integration.send', {
+      taskId: enrichedEnvelope.task?.id,
+      data: { integrationKind: integration.kind, event, payload: enrichedEnvelope.data },
+    });
+    if (!outcome.allowed) {
+      integLogger.info(
+        {
+          task_id: enrichedEnvelope.task?.id,
+          integration_kind: integration.kind,
+          plugin_id: outcome.pluginId,
+          reason: outcome.reason,
+        },
+        'integration send denied by policy',
+      );
+      continue;
+    }
+    const patchedPayload = outcome.data.payload;
+    const envelopeToSend: HookEnvelope =
+      patchedPayload &&
+      typeof patchedPayload === 'object' &&
+      !Array.isArray(patchedPayload) &&
+      patchedPayload !== enrichedEnvelope.data
+        ? { ...enrichedEnvelope, data: patchedPayload as Record<string, unknown> }
+        : enrichedEnvelope;
 
     try {
       await Promise.race([
-        provider.handler(enrichedEnvelope, resolvedConfig),
+        provider.handler(envelopeToSend, resolvedConfig),
         new Promise<void>((_, reject) =>
           setTimeout(() => reject(new Error('provider handler timed out')), timeoutMs),
         ),

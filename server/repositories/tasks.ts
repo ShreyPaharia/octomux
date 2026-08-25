@@ -7,7 +7,7 @@ import { nanoid } from 'nanoid';
 import { getDb } from '../db.js';
 import { childLogger } from '../logger.js';
 import { SELECT_TASK_SQL } from '../task-select.js';
-import { deleteFactsForTask } from './plugin-facts.js';
+import { deleteRecordsForTask } from './plugin-records.js';
 import { SQL_EXCLUDE_AUTO_REVIEW } from '../task-query.js';
 import type { Task, TaskUpdate, TaskExternalRef } from '../types.js';
 import type { SQLQueryBindings } from '../sqlite.js';
@@ -34,6 +34,7 @@ const TASK_WRITABLE_COLUMNS = new Set([
   'worktree_id',
   'agent',
   'model',
+  'compute',
   'notify_task_id',
   'harness_id',
   'source',
@@ -310,6 +311,10 @@ export interface InsertTaskInput {
   agent?: string | null;
   harness_id?: string;
   model?: string | null;
+  /** Compute provider kind. Stays NULL when unset — sessionFor() resolves NULL to
+   *  DEFAULT_COMPUTE_KIND, so a NULL row keeps following the default rather than
+   *  freezing to the current default's value at insert time. */
+  compute?: string | null;
   notify_task_id?: string | null;
   source?: string | null;
   pr_url?: string | null;
@@ -329,8 +334,8 @@ export function insertTask(input: InsertTaskInput): string {
   getDb()
     .prepare(
       `INSERT INTO tasks
-         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, title, description, runtime_state, workflow_status, initial_prompt, worktree_id, agent, harness_id, model, compute, notify_task_id, source, pr_url, pr_number, pr_head_sha, review_of_task_id, schedule_id, depends_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       id,
@@ -343,6 +348,9 @@ export function insertTask(input: InsertTaskInput): string {
       input.agent ?? null,
       input.harness_id ?? 'claude-code',
       input.model ?? null,
+      // NULL, not DEFAULT_COMPUTE_KIND — see the doc comment on
+      // InsertTaskInput.compute.
+      input.compute ?? null,
       input.notify_task_id ?? null,
       input.source ?? null,
       input.pr_url ?? null,
@@ -508,6 +516,15 @@ export function setPrHeadSha(id: string, prHeadSha: string): void {
     .run(prHeadSha, id);
 }
 
+/** Set pr_review_requested_at (latest review-request event seen for the owner). */
+export function setPrReviewRequestedAt(id: string, requestedAt: string): void {
+  getDb()
+    .prepare(
+      `UPDATE tasks SET pr_review_requested_at = ?, updated_at = datetime('now') WHERE id = ?`,
+    )
+    .run(requestedAt, id);
+}
+
 /** Touch last_viewed_at for a single task. */
 export function touchLastViewed(id: string): void {
   getDb().prepare(`UPDATE tasks SET last_viewed_at = datetime('now') WHERE id = ?`).run(id);
@@ -542,13 +559,14 @@ export function restoreTask(id: string): void {
 
 /** Hard-delete a task row (call after deleteTask cleanup is done). */
 export function hardDeleteTask(id: string): void {
-  // Plugin facts are task-scoped and die with the task (SHR-255). `plugin_facts`
-  // deliberately has no FK on task_id — the table is an observation log written
-  // by out-of-process plugins, and a FK would make a fact write fail on a task
-  // row that is mid-delete. Cleanup is explicit here instead. Ordered BEFORE the
-  // task row goes so a crash between the two leaves orphaned facts (harmless,
-  // task-keyed, never read) rather than a live task whose facts just vanished.
-  deleteFactsForTask(id);
+  // Task-scoped plugin records die with the task (SHR-282, formerly SHR-255).
+  // `plugin_records` deliberately has no FK on task_id — the table is an
+  // observation log written by out-of-process plugins, and a FK would make a
+  // record write fail on a task row that is mid-delete. Cleanup is explicit
+  // here instead. Ordered BEFORE the task row goes so a crash between the two
+  // leaves orphaned records (harmless, task-keyed, never read) rather than a
+  // live task whose records just vanished.
+  deleteRecordsForTask(id);
   getDb().prepare('DELETE FROM tasks WHERE id = ?').run(id);
   logger.info({ task_id: id, operation: 'hardDeleteTask' }, 'task hard-deleted');
 }
@@ -767,6 +785,7 @@ export function findExistingPrTask(
       runtime_state: string;
       source: string | null;
       pr_head_sha: string | null;
+      pr_review_requested_at: string | null;
       initial_prompt: string | null;
       tmux_session: string | null;
       worktree_path: string | null;
@@ -776,7 +795,9 @@ export function findExistingPrTask(
     .prepare(
       `SELECT t.id AS id, t.runtime_state AS runtime_state,
               t.source AS source,
-              t.pr_head_sha AS pr_head_sha, t.initial_prompt AS initial_prompt,
+              t.pr_head_sha AS pr_head_sha,
+              t.pr_review_requested_at AS pr_review_requested_at,
+              t.initial_prompt AS initial_prompt,
               t.tmux_session AS tmux_session,
               w.path AS worktree_path
          FROM tasks t
@@ -791,6 +812,7 @@ export function findExistingPrTask(
         runtime_state: string;
         source: string | null;
         pr_head_sha: string | null;
+        pr_review_requested_at: string | null;
         initial_prompt: string | null;
         tmux_session: string | null;
         worktree_path: string | null;
@@ -970,6 +992,50 @@ export function listTasksAwaitingQuiescence(debounceMs: number): Array<{ id: str
 }
 
 /**
+ * Auto-review tasks whose agent looks stalled: still running, but no hook
+ * activity for stallMs. A turn that dies on a dropped API stream never fires
+ * the Stop hook, so hook_activity stays 'active' with a stale timestamp —
+ * unlike quiescence, this deliberately does NOT require hook_activity='idle'.
+ *
+ * Nudge bookkeeping lives in task_updates (kind='note', body='auto: stall
+ * nudge'): tasks already nudged maxNudges times, or nudged within the last
+ * stallMs, are excluded so the sweep can't spam a dead session.
+ */
+export function listStalledAutoReviewTasks(
+  stallMs: number,
+  maxNudges: number,
+): Array<{ id: string; tmux_session: string }> {
+  const cutoff = `-${Math.ceil(stallMs / 1000)}`;
+  return getDb()
+    .prepare(
+      `SELECT t.id, t.tmux_session
+         FROM tasks t
+        WHERE t.source = 'auto_review'
+          AND t.runtime_state = 'running'
+          AND t.deleted_at IS NULL
+          AND t.tmux_session IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM workers w WHERE w.task_id = t.id AND w.status != 'stopped'
+          )
+          AND (
+            SELECT MAX(w.hook_activity_updated_at)
+              FROM workers w
+             WHERE w.task_id = t.id AND w.status != 'stopped'
+          ) <= datetime('now', ? || ' seconds')
+          AND (
+            SELECT COUNT(*) FROM task_updates u
+             WHERE u.task_id = t.id AND u.kind = 'note' AND u.body = 'auto: stall nudge'
+          ) < ?
+          AND NOT EXISTS (
+            SELECT 1 FROM task_updates u
+             WHERE u.task_id = t.id AND u.kind = 'note' AND u.body = 'auto: stall nudge'
+               AND u.created_at > datetime('now', ? || ' seconds')
+          )`,
+    )
+    .all(cutoff, maxNudges, cutoff) as Array<{ id: string; tmux_session: string }>;
+}
+
+/**
  * Tasks that need the user's attention right now: pending permission prompts,
  * or errored tasks whose error hasn't been viewed. Used by the inbox.
  */
@@ -1025,7 +1091,8 @@ export interface AddTaskUpdateInput {
   id?: string;
   task_id: string;
   agent_id?: string | null;
-  kind: 'transition' | 'summary' | 'note';
+  // 'policy' is written by core when a plugin policy hook denies or patches an intent.
+  kind: 'transition' | 'summary' | 'note' | 'policy';
   from_status?: string | null;
   to_status?: string | null;
   body?: string | null;

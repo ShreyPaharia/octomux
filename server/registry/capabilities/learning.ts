@@ -43,6 +43,7 @@ import {
 import { lintLearning } from '../../repositories/learn-lint.js';
 import { getTask } from '../../repositories/tasks.js';
 import { revParseHead } from '../../task-engine/git.js';
+import { sessionFor } from '../../compute/index.js';
 import { badRequest, notFound, ServiceError } from '../../services/errors.js';
 import { recallLearnings, REVIEW_LANE, REVIEW_LIST_LIMIT } from '../../routes/learnings.js';
 import { childLogger } from '../../logger.js';
@@ -108,7 +109,10 @@ async function addLearningHandler(input: z.infer<typeof learningAddInputSchema>)
     throw new ServiceError(`learning rejected: ${lint.reason}`, 422);
   }
 
-  const commit = task.worktree ? await revParseHead(task.worktree).catch(() => null) : null;
+  // This task's own worktree — run git on the task's compute, not the server's.
+  const commit = task.worktree
+    ? await revParseHead(await sessionFor(task), task.worktree).catch(() => null)
+    : null;
   const lane = b.private === true ? laneFor(task) : SHARED_LANE;
   const row = addLearning({
     repo_path: task.repo_path,

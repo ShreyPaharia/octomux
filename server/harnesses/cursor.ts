@@ -9,13 +9,14 @@ import {
   formatHarnessFlags,
   formatJsonConfig,
   validateSettingsObject,
-  writeJsonConfig,
 } from './shared.js';
 import { registerHarness } from './registry.js';
 import type { OctomuxSettings } from '../settings.js';
 import { childLogger } from '../logger.js';
 import { execTmux } from '../tmux-bin.js';
 import { shellQuoteSingle } from '../shell-quote.js';
+import type { ComputeFiles } from '../compute/types.js';
+import { localFiles } from '../compute/index.js';
 
 const logger = childLogger('harness:cursor');
 
@@ -106,63 +107,66 @@ export const cursorHarness: Harness = {
     return null;
   },
 
-  async installHooks(worktreePath: string, baseUrl: string, hookToken: string): Promise<void> {
+  async installHooks(
+    worktreePath: string,
+    baseUrl: string,
+    hookToken: string,
+    files: ComputeFiles = localFiles,
+  ): Promise<void> {
     const hooksDir = path.join(worktreePath, '.octomux-hooks');
-    fs.mkdirSync(hooksDir, { recursive: true, mode: 0o700 });
-    fs.chmodSync(hooksDir, 0o700);
+    // Holds the hook token — kept owner-only even if the dir already existed
+    // (mkdirp chmods an existing dir too, see server/compute/local.ts).
+    await files.mkdirp(hooksDir, { mode: 0o700 });
 
+    // bridgeSrc is octomux's own bundled asset, resolved from the running
+    // server module — it lives on the SERVER's disk regardless of which
+    // compute the workspace is on, so this stays real `fs`, not `files`.
     const bridgeSrc = resolveBridgeSource();
     const bridgeDest = path.join(hooksDir, 'bridge.js');
-    try {
-      if (fs.existsSync(bridgeDest)) {
-        fs.chmodSync(bridgeDest, 0o600);
-      }
-    } catch {
-      /* best-effort: dest may not exist yet or be inaccessible */
-    }
-    fs.copyFileSync(bridgeSrc, bridgeDest);
-    fs.chmodSync(bridgeDest, 0o500);
+    const bridgeContent = fs.readFileSync(bridgeSrc, 'utf-8');
+    // bridge.js ends up 0o500 (no write bit for anyone), so a prior install's
+    // file can't be overwritten in place — `write`'s chmod-after-write can't
+    // save it either, since the write itself EACCESs first. Delete, then
+    // `write` creates it fresh at the target mode.
+    await files.rm(bridgeDest).catch(() => {});
+    await files.write(bridgeDest, bridgeContent, { mode: 0o500 });
 
     const expectedConfig = formatJsonConfig({ baseUrl, token: hookToken });
     const configPath = path.join(hooksDir, 'config.json');
-    try {
-      if (!fs.existsSync(configPath) || fs.readFileSync(configPath, 'utf-8') !== expectedConfig) {
-        writeJsonConfig(configPath, { baseUrl, token: hookToken }, { mode: 0o600 });
-      }
-    } catch {
-      writeJsonConfig(configPath, { baseUrl, token: hookToken }, { mode: 0o600 });
+    const existingConfig = await files.read(configPath).catch(() => null);
+    if (existingConfig !== expectedConfig) {
+      await files.write(configPath, expectedConfig, { mode: 0o600 });
+    } else {
+      // Content already matches — still fix the mode in case something
+      // external left it wrong; `write` is skipped so it can't chmod for us.
+      await files.chmod(configPath, 0o600);
     }
-    fs.chmodSync(configPath, 0o600);
 
     const hooksJsonObj = hooksJsonObject(bridgeDest);
     const hooksJsonExpected = formatJsonConfig(hooksJsonObj);
     const cursorDir = path.join(worktreePath, '.cursor');
-    fs.mkdirSync(cursorDir, { recursive: true });
+    await files.mkdirp(cursorDir);
     const hooksJsonPath = path.join(cursorDir, 'hooks.json');
-    try {
-      if (
-        !fs.existsSync(hooksJsonPath) ||
-        fs.readFileSync(hooksJsonPath, 'utf-8') !== hooksJsonExpected
-      ) {
-        writeJsonConfig(hooksJsonPath, hooksJsonObj);
-      }
-    } catch {
-      writeJsonConfig(hooksJsonPath, hooksJsonObj);
+    const existingHooksJson = await files.read(hooksJsonPath).catch(() => null);
+    if (existingHooksJson !== hooksJsonExpected) {
+      await files.write(hooksJsonPath, hooksJsonExpected);
     }
   },
 
-  async uninstallHooks(dirPath: string): Promise<void> {
+  async uninstallHooks(dirPath: string, files: ComputeFiles = localFiles): Promise<void> {
     // `.cursor/hooks.json` is written wholesale by installHooks and every entry
     // points at our bridge — drop it only when that still holds, so a
     // hand-edited file survives.
     const hooksJsonPath = path.join(dirPath, '.cursor', 'hooks.json');
     try {
-      const raw = fs.readFileSync(hooksJsonPath, 'utf-8');
-      if (raw.includes('.octomux-hooks')) fs.rmSync(hooksJsonPath, { force: true });
+      const raw = await files.read(hooksJsonPath);
+      if (raw !== null && raw.includes('.octomux-hooks')) {
+        await files.rm(hooksJsonPath);
+      }
     } catch {
       /* absent or unreadable — nothing to clean */
     }
-    fs.rmSync(path.join(dirPath, '.octomux-hooks'), { recursive: true, force: true });
+    await files.rm(path.join(dirPath, '.octomux-hooks'), { recursive: true });
   },
 
   async postLaunch(target: string): Promise<void> {

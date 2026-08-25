@@ -9,6 +9,7 @@ import {
   closeShellTerminal,
 } from '../task-engine/index.js';
 import { sendMessageToAgent } from '../tmux-input.js';
+import { sessionFor } from '../compute/index.js';
 import { broadcast } from '../events.js';
 import { getAgentByIdAndTask, getUserTerminalByIdAndTask } from '../repositories/index.js';
 import type { AddAgentRequest } from '../types.js';
@@ -77,7 +78,8 @@ router.post('/api/tasks/:id/workers/:agentId/message', async (req: Request, res:
     throw badRequest('message is required');
   }
 
-  await sendMessageToAgent(task.tmux_session!, agent.window_index, message);
+  const compute = await sessionFor(task);
+  await sendMessageToAgent(compute, task.tmux_session!, agent.window_index, message);
 
   res.json({ success: true });
 });

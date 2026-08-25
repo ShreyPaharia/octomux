@@ -1,7 +1,13 @@
-import { describe, it, expect, vi } from '../../bun-test.js';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from '../../bun-test.js';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { SchemaConfigForm, defaultsFromSchema } from './SchemaConfigForm';
+
+const { listSecretsMock } = vi.hoisted(() => ({ listSecretsMock: vi.fn() }));
+vi.mock('@/lib/api/secretsApi', () => ({
+  secretsApi: { listSecrets: listSecretsMock },
+}));
+
+const { SchemaConfigForm, defaultsFromSchema } = await import('./SchemaConfigForm');
 
 const schema = {
   type: 'object',
@@ -10,6 +16,11 @@ const schema = {
     maxIterations: { type: 'integer', title: 'Max iterations', minimum: 1, default: 5 },
   },
 };
+
+beforeEach(() => {
+  listSecretsMock.mockReset();
+  listSecretsMock.mockResolvedValue({ secrets: [] });
+});
 
 describe('SchemaConfigForm', () => {
   it('extracts defaults from schema properties', () => {
@@ -121,6 +132,123 @@ describe('SchemaConfigForm', () => {
       await user.clear(field);
       await user.type(field, 'my-prefix');
       expect(onChange).toHaveBeenCalled();
+    });
+  });
+
+  describe('secretRef', () => {
+    const secretRefSchema = {
+      type: 'object',
+      properties: {
+        apiToken: { type: 'string', title: 'API token', secretRef: true },
+      },
+    };
+
+    it('renders a select, not a text input', async () => {
+      listSecretsMock.mockResolvedValue({
+        secrets: [{ name: 'MY_TOKEN', description: null, created_at: '', updated_at: '' }],
+      });
+      render(<SchemaConfigForm schema={secretRefSchema} value={{}} onChange={vi.fn()} />);
+
+      const field = screen.getByLabelText('API token');
+      expect(field.tagName.toLowerCase()).toBe('select');
+      await waitFor(() => expect((field as HTMLSelectElement).options.length).toBe(2));
+    });
+
+    it('lists the secret names returned by the API as options, plus a blank first option', async () => {
+      listSecretsMock.mockResolvedValue({
+        secrets: [
+          { name: 'MY_TOKEN', description: null, created_at: '', updated_at: '' },
+          { name: 'OTHER_TOKEN', description: null, created_at: '', updated_at: '' },
+        ],
+      });
+      render(<SchemaConfigForm schema={secretRefSchema} value={{}} onChange={vi.fn()} />);
+
+      const field = (await screen.findByLabelText('API token')) as HTMLSelectElement;
+      await waitFor(() => {
+        const options = Array.from(field.options).map((o) => o.value);
+        expect(options).toEqual(['', 'MY_TOKEN', 'OTHER_TOKEN']);
+      });
+    });
+
+    it('selecting a name calls onChange with the wrapped ${secret:NAME} form', async () => {
+      listSecretsMock.mockResolvedValue({
+        secrets: [{ name: 'MY_TOKEN', description: null, created_at: '', updated_at: '' }],
+      });
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<SchemaConfigForm schema={secretRefSchema} value={{}} onChange={onChange} />);
+
+      const field = await screen.findByLabelText('API token');
+      await waitFor(() => {
+        expect((field as HTMLSelectElement).options.length).toBe(2);
+      });
+      await user.selectOptions(field, 'MY_TOKEN');
+      expect(onChange).toHaveBeenCalledWith({ apiToken: '${secret:MY_TOKEN}' });
+    });
+
+    it('shows a stored ${secret:FOO} value as the selected option', async () => {
+      listSecretsMock.mockResolvedValue({
+        secrets: [
+          { name: 'FOO', description: null, created_at: '', updated_at: '' },
+          { name: 'BAR', description: null, created_at: '', updated_at: '' },
+        ],
+      });
+      render(
+        <SchemaConfigForm
+          schema={secretRefSchema}
+          value={{ apiToken: '${secret:FOO}' }}
+          onChange={vi.fn()}
+        />,
+      );
+
+      const field = (await screen.findByLabelText('API token')) as HTMLSelectElement;
+      await waitFor(() => expect(field.value).toBe('FOO'));
+    });
+
+    it('selects nothing when the stored value is not a ${secret:...} wrapper', async () => {
+      listSecretsMock.mockResolvedValue({
+        secrets: [{ name: 'FOO', description: null, created_at: '', updated_at: '' }],
+      });
+      render(
+        <SchemaConfigForm
+          schema={secretRefSchema}
+          value={{ apiToken: 'plain-text-value' }}
+          onChange={vi.fn()}
+        />,
+      );
+
+      const field = (await screen.findByLabelText('API token')) as HTMLSelectElement;
+      await waitFor(() => expect(listSecretsMock).toHaveBeenCalled());
+      expect(field.value).toBe('');
+    });
+
+    it('renders a disabled select with a hint option when there are no secrets', async () => {
+      listSecretsMock.mockResolvedValue({ secrets: [] });
+      render(<SchemaConfigForm schema={secretRefSchema} value={{}} onChange={vi.fn()} />);
+
+      const field = (await screen.findByLabelText('API token')) as HTMLSelectElement;
+      await waitFor(() => expect(listSecretsMock).toHaveBeenCalled());
+      expect(field.disabled).toBe(true);
+      expect(field.options.length).toBe(1);
+      expect(field.options[0].textContent).toContain('octomux secrets set');
+    });
+
+    it('still renders the description paragraph', async () => {
+      const schemaWithDescription = {
+        type: 'object',
+        properties: {
+          apiToken: {
+            type: 'string',
+            title: 'API token',
+            secretRef: true,
+            description: 'Used to authenticate outbound calls',
+          },
+        },
+      };
+      render(<SchemaConfigForm schema={schemaWithDescription} value={{}} onChange={vi.fn()} />);
+
+      expect(screen.getByText('Used to authenticate outbound calls')).toBeInTheDocument();
+      await waitFor(() => expect(listSecretsMock).toHaveBeenCalled());
     });
   });
 });

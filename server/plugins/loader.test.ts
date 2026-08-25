@@ -13,9 +13,12 @@ import {
 import { manifestPath as defaultManifestPath } from './paths.js';
 import { listHarnesses, resetHarnesses, getHarness } from '../harnesses/registry.js';
 import { getWorkflow } from '../workflows/registry.js';
-import { resetPluginRoutes, pluginRouteCounts } from './http-registry.js';
-import { resetFacts } from './facts.js';
+import { resetPluginRoutes, listPluginRoutes } from './http-registry.js';
+import { resetRecords } from './records.js';
 import { subscribeServerEvents } from '../events.js';
+import { resetPluginGrants } from './grants.js';
+import { resetServices } from './services.js';
+import { createTestDb } from '../test-helpers.js';
 
 let tmpDir: string;
 let nodeModulesDir: string;
@@ -35,11 +38,17 @@ function writeModule(name: string, source: string): string {
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-loader-test-'));
   nodeModulesDir = path.join(tmpDir, 'node_modules');
+  // ctx.records now reads/writes real SQLite (plugin_records) rather than
+  // throwing a stub — give it an in-memory DB so the "hands apply() a real
+  // context" test below can exercise it without touching the real data dir.
+  createTestDb();
 });
 
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   vi.unstubAllEnvs();
+  resetPluginGrants();
+  resetServices();
 });
 
 describe('loadPlugins', () => {
@@ -440,14 +449,22 @@ plugins:
   it('hands apply() a real context, not a silent no-op', async () => {
     // The default makeContext must be the real createPluginContext: a stub
     // whose registrars do nothing would report this plugin as loaded while
-    // registering nothing. ctx.kv throws by design until storage lands, which
-    // is the cheapest observable proof the real context arrived.
+    // registering nothing. This row declares no grants, so ctx.records.query()
+    // (an ungated read) works while ctx.records.put() (gated on records.write)
+    // throws "not granted" — the cheapest observable proof the real context,
+    // with its real grant wiring, arrived.
     const abs = writeModule(
       'ctx-plugin.mjs',
-      `export function apply(ctx) {
+      `export async function apply(ctx) {
+         let queryWorks = false;
+         try { await ctx.records.query('x'); queryWorks = true; } catch {}
+         let putThrowsNotGranted = false;
+         try { await ctx.records.put('x', 1); }
+         catch (err) { putThrowsNotGranted = /not granted/.test(String(err)); }
          globalThis.__octomuxCtxProbe = {
            id: ctx.id,
-           kvThrows: (() => { try { ctx.kv.get('x'); return false; } catch { return true; } })(),
+           queryWorks,
+           putThrowsNotGranted,
          };
        }\n`,
     );
@@ -462,9 +479,202 @@ plugins:
     expect(report.failed).toEqual([]);
     expect((globalThis as Record<string, unknown>).__octomuxCtxProbe).toEqual({
       id: 'ctxplug',
-      kvThrows: true,
+      queryWorks: true,
+      putThrowsNotGranted: true,
     });
     delete (globalThis as Record<string, unknown>).__octomuxCtxProbe;
+  });
+});
+
+describe('capability grants (SHR-259)', () => {
+  afterEach(() => {
+    resetMountedPlugins();
+    resetHarnesses();
+    resetPluginRoutes();
+    resetPluginGrants();
+  });
+
+  const harnessSource = (id: string) =>
+    `export async function apply(ctx) {
+       ctx.harnesses.register({ id: '${id}', displayName: '${id}', sessionIdMode: 'orchestrator-assigned', newSessionId: () => 'x', buildLaunchCommand: () => '', buildResumeCommand: () => '', buildContinueCommand: () => null, installHooks: async () => {}, uninstallHooks: async () => {}, resolveFlags: () => '', validateSettings: () => ({}) });
+     }\n`;
+
+  it('a row with no grants key whose apply() calls a gated registrar fails with phase apply, naming the plugin and the capability', async () => {
+    const abs = writeModule('no-grants.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: nogrants
+    name: ${abs}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'nogrants', phase: 'apply' });
+    expect(report.failed[0].error).toContain('nogrants');
+    expect(report.failed[0].error).toContain('harnesses.register');
+  });
+
+  it('a row that declares the grant loads, and LoadReport.grants reflects what was granted', async () => {
+    const abs = writeModule('with-grant.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: withgrant
+    name: ${abs}
+    grants: [harnesses.register]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(1);
+    expect(report.grants).toEqual({ withgrant: ['harnesses.register'] });
+    expect(report.pendingGrants).toBeUndefined();
+  });
+
+  it('a widened grant on a second load is reported in pendingGrants and withheld, while the plugin still loads with its previously-acknowledged set', async () => {
+    const abs = writeModule('widen.mjs', harnessSource('v1'));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: widenplug
+    name: ${abs}
+    grants: [harnesses.register]
+`);
+
+    const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    expect(first.failed).toEqual([]);
+    expect(first.grants).toEqual({ widenplug: ['harnesses.register'] });
+    expect(first.pendingGrants).toBeUndefined();
+
+    // A plugin update (or a hand-edit) widens the declared grants without
+    // anyone running `octomux plugins approve` yet.
+    fs.writeFileSync(
+      manifestPath,
+      `
+plugins:
+  - id: widenplug
+    name: ${abs}
+    grants: [harnesses.register, http.route]
+`,
+      'utf-8',
+    );
+
+    const second = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+    // Still loads — the plugin's apply() never touches ctx.http.route, so
+    // the withheld capability is never actually exercised this boot.
+    expect(second.failed).toEqual([]);
+    expect(second.loaded).toHaveLength(1);
+    expect(second.grants).toEqual({ widenplug: ['harnesses.register'] });
+    expect(second.pendingGrants).toEqual({ widenplug: ['http.route'] });
+  });
+});
+
+describe('ctx.services mount-time resolution (SHR-260)', () => {
+  afterEach(() => {
+    resetMountedPlugins();
+    resetPluginGrants();
+    resetServices();
+  });
+
+  it('a consumer listed BEFORE its provider in the manifest still resolves', async () => {
+    const consumer = writeModule(
+      'services-consumer.mjs',
+      "export async function apply(ctx) { ctx.services.require('chat.send'); }\n",
+    );
+    const provider = writeModule(
+      'services-provider.mjs',
+      "export async function apply(ctx) { ctx.services.provide('chat.send', { send: () => {} }); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: consumer
+    name: ${consumer}
+  - id: provider
+    name: ${provider}
+    grants: [services.provide]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toEqual([]);
+    expect(report.loaded.map((p) => p.id).sort()).toEqual(['consumer', 'provider']);
+  });
+
+  it('an unmet requirement fails only the consumer, naming the plugin and the service', async () => {
+    const consumer = writeModule(
+      'services-lonely-consumer.mjs',
+      "export async function apply(ctx) { ctx.services.require('chat.send'); }\n",
+    );
+    const ok = writeModule('services-unrelated-ok.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: lonelyconsumer
+    name: ${consumer}
+  - id: unrelatedok
+    name: ${ok}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded.map((p) => p.id)).toEqual(['unrelatedok']);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0]).toMatchObject({ id: 'lonelyconsumer', phase: 'apply' });
+    expect(report.failed[0].error).toContain('lonelyconsumer');
+    expect(report.failed[0].error).toContain('chat.send');
+  });
+
+  it('cascades: unmounting a provider for its own unmet requirement strands its consumer too', async () => {
+    // A provides "x" but requires "y", which nothing provides — A must be
+    // unmounted. B requires "x", which only A provided — B must be unmounted
+    // as a consequence, in a second pass.
+    const a = writeModule(
+      'services-cascade-a.mjs',
+      "export async function apply(ctx) { ctx.services.provide('x', {}); ctx.services.require('y'); }\n",
+    );
+    const b = writeModule(
+      'services-cascade-b.mjs',
+      "export async function apply(ctx) { ctx.services.require('x'); }\n",
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: cascadea
+    name: ${a}
+    grants: [services.provide]
+  - id: cascadeb
+    name: ${b}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed.map((f) => f.id).sort()).toEqual(['cascadea', 'cascadeb']);
+  });
+
+  it('order has no gaps after a services failure removes a middle plugin', async () => {
+    const ok1 = writeModule('services-order-ok1.mjs', 'export async function apply() {}\n');
+    const badConsumer = writeModule(
+      'services-order-bad.mjs',
+      "export async function apply(ctx) { ctx.services.require('nope'); }\n",
+    );
+    const ok2 = writeModule('services-order-ok2.mjs', 'export async function apply() {}\n');
+    const manifestPath = writeManifest(`
+plugins:
+  - id: ordok1
+    name: ${ok1}
+  - id: ordbad
+    name: ${badConsumer}
+  - id: ordok2
+    name: ${ok2}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
+
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0].id).toBe('ordbad');
+    expect(report.loaded).toHaveLength(2);
+    expect(report.loaded[0]).toMatchObject({ id: 'ordok1', order: 0 });
+    expect(report.loaded[1]).toMatchObject({ id: 'ordok2', order: 1 });
   });
 });
 
@@ -473,7 +683,8 @@ describe('unloadPlugin / reloadPlugin', () => {
     resetMountedPlugins();
     resetHarnesses();
     resetPluginRoutes();
-    resetFacts();
+    resetRecords();
+    resetPluginGrants();
   });
 
   it('reloadPlugin mounts a plugin that was not previously loaded', async () => {
@@ -485,6 +696,7 @@ describe('unloadPlugin / reloadPlugin', () => {
 plugins:
   - id: reloadfresh
     name: ${abs}
+    grants: [harnesses.register]
 `);
 
     const result = await reloadPlugin({
@@ -512,6 +724,7 @@ plugins:
 plugins:
   - id: reloadhot
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -573,6 +786,7 @@ plugins:
 plugins:
   - id: reloadunloadable
     name: ${abs}
+    grants: [workflows.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -604,6 +818,7 @@ plugins:
 plugins:
   - id: unloadbasic
     name: ${abs}
+    grants: [harnesses.register]
 `);
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
     expect(getMountedPlugin('unloadbasic')).toBeDefined();
@@ -647,6 +862,7 @@ plugins:
 plugins:
   - id: racer
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -678,6 +894,7 @@ plugins:
 plugins:
   - id: rollbackgood
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -728,6 +945,7 @@ plugins:
 plugins:
   - id: rollbackbad
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     const first = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -757,9 +975,9 @@ plugins:
     expect(getMountedPlugin('rollbackbad')).toBeUndefined();
   });
 
-  it('a plugin that registers a route and a fact type and THEN throws in apply() leaves nothing registered, so a later reload of the same id succeeds', async () => {
+  it('a plugin that registers a route and a record store and THEN throws in apply() leaves nothing registered, so a later reload of the same id succeeds', async () => {
     // Finding 5: before the fix, a partial apply() failure only revoked the
-    // context — the route/fact registered before the throw leaked forever,
+    // context — the route/store registered before the throw leaked forever,
     // `mounted` never got an entry, and the next reload skipped the unmount
     // (mounted.has() === false) and hit "already registered"/"already
     // defined" against those leftovers.
@@ -768,7 +986,7 @@ plugins:
       modPath,
       `export async function apply(ctx) {
          ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+         ctx.records.define({ name: 'observed', scope: 'task', mode: 'append', schema: { type: 'object' } });
          throw new Error('boom after partial registration');
        }\n`,
       'utf-8',
@@ -777,6 +995,7 @@ plugins:
 plugins:
   - id: partialfail
     name: ${modPath}
+    grants: [http.route, records.define]
 `);
 
     const report = await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -784,7 +1003,7 @@ plugins:
     expect(report.failed[0]).toMatchObject({ id: 'partialfail', phase: 'apply' });
     // Nothing survives the failed apply() — the route it registered before
     // throwing is already gone, and the plugin was never added to `mounted`.
-    expect(pluginRouteCounts()['partialfail']).toBeUndefined();
+    expect(listPluginRoutes('partialfail')).toEqual([]);
     expect(getMountedPlugin('partialfail')).toBeUndefined();
 
     // Fix the source (no throw) and reload — must succeed, not error with
@@ -794,7 +1013,7 @@ plugins:
       modPath,
       `export async function apply(ctx) {
          ctx.http.route('GET', '/thing', async (_req, res) => res.json({}));
-         ctx.facts.define({ type: 'observed', schema: { type: 'object' } });
+         ctx.records.define({ name: 'observed', scope: 'task', mode: 'append', schema: { type: 'object' } });
        }\n`,
       'utf-8',
     );
@@ -806,7 +1025,7 @@ plugins:
     });
 
     expect(result.ok).toBe(true);
-    expect(pluginRouteCounts()['partialfail']).toBe(1);
+    expect(listPluginRoutes('partialfail')).toEqual(['GET /thing']);
   });
 
   it('broadcasts plugin:ui-updated on a successful mount', async () => {
@@ -870,6 +1089,7 @@ describe('watchLocalPlugins', () => {
 plugins:
   - id: watchhot
     name: ${modPath}
+    grants: [harnesses.register]
 `);
 
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
@@ -932,6 +1152,7 @@ plugins:
 plugins:
   - id: watchstop
     name: ${modPath}
+    grants: [harnesses.register]
 `);
     await loadPlugins({ manifestPath, resolveFrom: nodeModulesDir });
 

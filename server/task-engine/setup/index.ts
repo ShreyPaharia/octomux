@@ -1,3 +1,4 @@
+import type { ComputeSession } from '../../compute/types.js';
 import type { RunMode } from '../../types.js';
 import type { Task } from '../../types.js';
 import type { SetupFn, SetupResult } from './types.js';
@@ -15,10 +16,10 @@ const STRATEGIES: Record<RunMode, SetupFn> = {
   scratch: setupScratch,
 };
 
-export async function runSetup(task: Task): Promise<SetupResult> {
+export async function runSetup(c: ComputeSession, task: Task): Promise<SetupResult> {
   const strategy = STRATEGIES[task.run_mode];
   if (!strategy) {
     throw new Error(`unknown run_mode: ${String(task.run_mode)}`);
   }
-  return strategy(task);
+  return strategy(c, task);
 }

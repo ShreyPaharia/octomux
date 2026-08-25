@@ -1,5 +1,6 @@
 import type { Server } from 'http';
 import { WebSocket } from 'ws';
+import { inflateRawSync } from 'zlib';
 import Database from './sqlite.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
@@ -19,6 +20,7 @@ vi.mock('./pty.js', () => ({
 
 // Mock execFile to work naturally with util.promisify (callback-style)
 let execFileShouldFail = false;
+let capturePaneOutput = 'line one\nline two\n';
 
 const mockExecFile = vi.fn(
   (
@@ -33,7 +35,7 @@ const mockExecFile = vi.fn(
         const stdout = _args?.includes('list-clients')
           ? '/dev/ttys001\n'
           : _args?.includes('capture-pane')
-            ? 'line one\nline two\n'
+            ? capturePaneOutput
             : '';
         process.nextTick(() => callback(null, stdout, ''));
       }
@@ -103,6 +105,7 @@ beforeEach(async () => {
   db = createTestDb();
   vi.clearAllMocks();
   execFileShouldFail = false;
+  capturePaneOutput = 'line one\nline two\n';
 
   // Reset mock callbacks
   mockPty.onData.mockReset();
@@ -201,14 +204,19 @@ describe('terminal WebSocket', () => {
     const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
     await waitForSetup();
 
-    // Should attach to the linked session, not directly to session:windowIndex
+    // compute.spawn() takes a shell command string, so the pty is now
+    // launched as `$SHELL -c '<quoted tmux argv>'` rather than tmux
+    // directly — the underlying tmux invocation (binary, args, env) is
+    // still byte-identical, just wrapped. Parse the single-quoted argv back
+    // out of the command string to assert on it.
     const spawnCall = vi.mocked(nodePty.spawn).mock.calls[0];
-    expect(spawnCall[0]).toBe('tmux');
-    // tmuxSpawnSpec prepends '-S <sock>', so 'attach-session' is at index 2
-    expect(spawnCall[1]).toContain('attach-session');
+    expect(spawnCall[1]).toEqual(['-c', expect.any(String)]);
+    const command = (spawnCall[1] as string[])[1];
+    const tokens = [...command.matchAll(/'([^']*)'/g)].map((m) => m[1]);
+    expect(tokens).toContain('attach-session');
     // The target should be the linked session name (contains '-v-'), not session:0
-    const attachIdx = (spawnCall[1] as string[]).indexOf('attach-session');
-    const target = (spawnCall[1] as string[])[attachIdx + 2]; // -t <target>
+    const attachIdx = tokens.indexOf('attach-session');
+    const target = tokens[attachIdx + 2]; // -t <target>
     expect(target).toContain(`${DEFAULTS.runningTask.tmux_session}-v-`);
     expect(target).not.toContain(':');
 
@@ -366,6 +374,105 @@ describe('terminal WebSocket', () => {
     ws.close();
   });
 
+  // ─── App-level deflate (Bun's ws shim can't negotiate permessage-deflate) ──
+
+  it('deflates large frames as binary when the client opts in via ?deflate=1', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0?deflate=1`);
+    await waitForSetup();
+
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+
+    const big = 'z'.repeat(4096);
+    mockPty.onData.mock.calls[0][0](big);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].isBinary).toBe(true);
+    expect(inflateRawSync(frames[0].data).toString()).toBe(big);
+    ws.close();
+  });
+
+  it('keeps small frames as plain text even when deflate is on', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0?deflate=1`);
+    await waitForSetup();
+
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+
+    mockPty.onData.mock.calls[0][0]('keystroke echo');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].isBinary).toBe(false);
+    expect(frames[0].data.toString()).toBe('keystroke echo');
+    ws.close();
+  });
+
+  it('never deflates for clients that did not opt in', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+
+    const big = 'z'.repeat(4096);
+    mockPty.onData.mock.calls[0][0](big);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].isBinary).toBe(false);
+    expect(frames[0].data.toString()).toBe(big);
+    ws.close();
+  });
+
+  it('deflates the initial snapshot frame when large', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    capturePaneOutput = 'w'.repeat(4096) + '\n';
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0?deflate=1`);
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+    await waitForSetup();
+
+    expect(frames.length).toBeGreaterThanOrEqual(1);
+    expect(frames[0].isBinary).toBe(true);
+    expect(inflateRawSync(frames[0].data).toString()).toBe(
+      '\x1b[?1049h\x1b[H\x1b[J' + 'w'.repeat(4096) + '\r\n',
+    );
+    ws.close();
+  });
+
+  // ─── Liveness ping ─────────────────────────────────────────────────────────
+
+  it('replies to a liveness ping with an empty frame, without writing to the pty', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const frames: string[] = [];
+    ws.on('message', (data) => frames.push(data.toString()));
+
+    ws.send(JSON.stringify({ type: 'ping' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toEqual(['']);
+    expect(mockPty.write).not.toHaveBeenCalled();
+    ws.close();
+  });
+
   it('forwards WebSocket input to PTY', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
     insertAgent(db);
@@ -465,9 +572,13 @@ describe('terminal WebSocket', () => {
 
     mockExecFile.mockClear();
 
-    // Simulate PTY exit
-    const onExitCb = mockPty.onExit.mock.calls[0][0];
-    onExitCb({ exitCode: 0, signal: 0 });
+    // Simulate PTY exit. The ProcessHandle wrapper (substrate-pty.ts)
+    // registers its own internal onExit listener before terminal.ts
+    // registers its cleanup one, so a real exit event fires every
+    // registered listener, not just the first.
+    for (const [cb] of mockPty.onExit.mock.calls) {
+      cb({ exitCode: 0, signal: 0 });
+    }
 
     const code = await new Promise<number>((resolve) => {
       ws.on('close', (code) => resolve(code));

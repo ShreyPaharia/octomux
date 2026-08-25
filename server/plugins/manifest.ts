@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { KIND_NAME_RE } from './qualify.js';
+import { PLUGIN_CAPABILITIES, isPluginCapability } from './grants.js';
 import type { PluginManifest, PluginRow } from '@octomux/plugin-api';
 
 function fail(msg: string): never {
@@ -26,7 +27,15 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 }
 
 const ALLOWED_TOP_LEVEL_KEYS = new Set(['plugins']);
-const ALLOWED_ROW_KEYS = new Set(['id', 'name', 'version', 'integrity', 'config', 'disabled']);
+const ALLOWED_ROW_KEYS = new Set([
+  'id',
+  'name',
+  'version',
+  'integrity',
+  'config',
+  'disabled',
+  'grants',
+]);
 
 // npm package name shape (scoped or unscoped) — deliberately stricter than npm's
 // own rules (no dots-only segments, no leading dot/underscore weirdness) since
@@ -78,7 +87,7 @@ function checkRow(row: unknown, index: number): PluginRow {
     }
   }
 
-  const { id, name, version, integrity, config, disabled } = row;
+  const { id, name, version, integrity, config, disabled, grants } = row;
 
   if (typeof id !== 'string' || !KIND_NAME_RE.test(id)) {
     fail(`plugins[${index}].id must match ${KIND_NAME_RE} (got ${JSON.stringify(id)})`);
@@ -104,6 +113,26 @@ function checkRow(row: unknown, index: number): PluginRow {
   if (disabled !== undefined && typeof disabled !== 'boolean') {
     fail(`plugins[${index}].disabled must be a boolean`);
   }
+  let dedupedGrants: PluginRow['grants'];
+  if (grants !== undefined) {
+    if (!Array.isArray(grants)) {
+      fail(`plugins[${index}].grants must be an array of strings`);
+    }
+    for (const g of grants) {
+      if (typeof g !== 'string') {
+        fail(`plugins[${index}].grants must contain only strings (got ${JSON.stringify(g)})`);
+      }
+      if (!isPluginCapability(g)) {
+        fail(
+          `plugins[${index}].grants has unknown capability ${JSON.stringify(g)} ` +
+            `(valid: ${PLUGIN_CAPABILITIES.join(', ')})`,
+        );
+      }
+    }
+    // De-dupe silently — a manifest author repeating a grant isn't an error,
+    // just noise; nothing downstream cares about order or multiplicity.
+    dedupedGrants = Array.from(new Set(grants as string[])) as PluginRow['grants'];
+  }
 
   return {
     id,
@@ -112,6 +141,7 @@ function checkRow(row: unknown, index: number): PluginRow {
     ...(integrity !== undefined ? { integrity } : {}),
     ...(config !== undefined ? { config: config as Record<string, unknown> } : {}),
     ...(disabled !== undefined ? { disabled } : {}),
+    ...(dedupedGrants !== undefined ? { grants: dedupedGrants } : {}),
   };
 }
 

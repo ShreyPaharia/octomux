@@ -1,17 +1,17 @@
-import { execTmux } from '../tmux-bin.js';
 import { childLogger } from '../logger.js';
+import type { ComputeSession } from '../compute/types.js';
 
 const logger = childLogger('agent-session/substrate-tmux-windowed');
 
 /** Get the active window index of a tmux session. */
-export async function getActiveWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['display-message', '-t', session, '-p', '#{window_index}']);
+export async function getActiveWindowIndex(c: ComputeSession, session: string): Promise<number> {
+  const { stdout } = await c.tmux(['display-message', '-t', session, '-p', '#{window_index}']);
   return parseInt(stdout.trim(), 10);
 }
 
 /** Get the index of the last window in a tmux session. */
-export async function getLastWindowIndex(session: string): Promise<number> {
-  const { stdout } = await execTmux(['list-windows', '-t', session, '-F', '#{window_index}']);
+export async function getLastWindowIndex(c: ComputeSession, session: string): Promise<number> {
+  const { stdout } = await c.tmux(['list-windows', '-t', session, '-F', '#{window_index}']);
   const indices = stdout.trim().split('\n').map(Number);
   return Math.max(...indices);
 }
@@ -32,8 +32,8 @@ export interface TmuxWindowLaunchOptions {
  */
 export interface TmuxWindowSubstrate {
   readonly kind: 'tmux-windowed';
-  launchWindow(opts: TmuxWindowLaunchOptions): Promise<number>;
-  createEmptySession(opts: { session: string; cwd: string }): Promise<void>;
+  launchWindow(c: ComputeSession, opts: TmuxWindowLaunchOptions): Promise<number>;
+  createEmptySession(c: ComputeSession, opts: { session: string; cwd: string }): Promise<void>;
 }
 
 function appendStartupCmd(args: string[], startupCmd?: string): string[] {
@@ -44,7 +44,7 @@ function appendStartupCmd(args: string[], startupCmd?: string): string[] {
 export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
   kind: 'tmux-windowed',
 
-  async launchWindow(opts: TmuxWindowLaunchOptions): Promise<number> {
+  async launchWindow(c: ComputeSession, opts: TmuxWindowLaunchOptions): Promise<number> {
     const { session, cwd, startupCmd, fresh } = opts;
 
     logger.debug(
@@ -56,7 +56,7 @@ export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
     // tmux's command separator) — one process spawn instead of three. Each
     // spawn is ~140ms, which was ~25% of task-creation wall clock.
     if (fresh) {
-      const { stdout } = await execTmux([
+      const { stdout } = await c.tmux([
         ...appendStartupCmd(['new-session', '-d', '-s', session, '-c', cwd], startupCmd),
         ';',
         'set-option',
@@ -74,14 +74,17 @@ export const tmuxWindowSubstrate: TmuxWindowSubstrate = {
       return parseInt(stdout.trim(), 10);
     }
 
-    await execTmux(appendStartupCmd(['new-window', '-t', session, '-c', cwd], startupCmd));
-    return getLastWindowIndex(session);
+    await c.tmux(appendStartupCmd(['new-window', '-t', session, '-c', cwd], startupCmd));
+    return getLastWindowIndex(c, session);
   },
 
-  async createEmptySession(opts: { session: string; cwd: string }): Promise<void> {
+  async createEmptySession(
+    c: ComputeSession,
+    opts: { session: string; cwd: string },
+  ): Promise<void> {
     const { session, cwd } = opts;
     logger.debug({ session, cwd }, 'creating empty tmux session');
-    await execTmux([
+    await c.tmux([
       'new-session',
       '-d',
       '-s',

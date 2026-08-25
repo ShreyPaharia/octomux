@@ -34,18 +34,54 @@ runtime yet either — it's reserved for a future compatibility check.
 
 ```ts
 export interface PluginContext {
-  readonly id: string; // this row's bare manifest id
+  readonly id: string; // manifest row id (bare, unqualified)
   readonly logger: PluginLogger;
   readonly settings: PluginSettingsScope;
-  readonly kv: PluginKv;
   readonly workflows: WorkflowRegistrar;
   readonly integrations: IntegrationRegistrar;
   readonly harnesses: HarnessRegistrar;
+  readonly compute: ComputeRegistrar;
+  readonly http: HttpRegistrar;
+  readonly records: RecordsRegistrar;
+  readonly services: ServicesRegistrar;
+  readonly artifacts: ArtifactsApi;
+  readonly secrets: SecretsApi;
+  readonly agents: AgentRunner;
+  readonly ui: UiRegistrar;
+  readonly policy: PolicyRegistrar;
+  readonly surfaces: SurfaceRegistrar;
+  readonly attention: AttentionApi;
+  readonly fanout: FanOutApi;
+  readonly catalog: CatalogReader;
+  effect(dispose: () => void | Promise<void>): void;
 }
 ```
 
 One context is built per manifest row (`createPluginContext(row.id)` in
-`context.ts`) and handed only to that row's `apply()`/`reconcile()`.
+`context.ts`) and handed only to that row's `apply()`/`reconcile()`. Every
+member:
+
+| Member                                                             | What it does                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| [`ctx.logger`](#ctxlogger)                                         | structured logging — ungated                                       |
+| [`ctx.settings`](#ctxsettings)                                     | this plugin's own settings blob — ungated                          |
+| [`ctx.workflows`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a cron-schedulable workflow kind                         |
+| [`ctx.integrations`](#ctxworkflows--ctxintegrations--ctxharnesses) | registers an outbound integration provider                         |
+| [`ctx.harnesses`](#ctxworkflows--ctxintegrations--ctxharnesses)    | registers a coding-agent harness                                   |
+| [`ctx.compute`](#ctxcompute)                                       | registers where a task's worktree/processes live                   |
+| [`ctx.http`](#ctxhttp)                                             | registers a route at `/api/p/<pluginId>/...`                       |
+| [`ctx.records`](#ctxrecords)                                       | the one store for plugin data — task-scoped or durable, one shape  |
+| [`ctx.services`](#ctxservices)                                     | depend on a capability by name, not on a plugin package            |
+| [`ctx.artifacts`](#ctxartifacts)                                   | files written into a task's worktree                               |
+| [`ctx.agents`](#ctxagents)                                         | runs a headless, structured-output agent session                   |
+| [`ctx.ui`](#ctxui)                                                 | declarative panel bindings and action declarations, never code     |
+| [`ctx.policy`](#ctxpolicy)                                         | the one member that can deny a core action                         |
+| [`ctx.surfaces`](#ctxsurfaces)                                     | registers a place octomux presents itself to a human               |
+| [`ctx.attention`](#ctxattention)                                   | asks a human a question across every prompt-capable surface        |
+| [`ctx.fanout`](#ctxfanout)                                         | runs a step per item, with retries and a host-enforced cap         |
+| [`ctx.catalog`](#ctxcatalog)                                       | reads what's installed — every plugin's registrations, plus core   |
+| [`ctx.secrets`](#ctxsecrets)                                       | resolves a credential by name — the value never reaches the caller |
+| [`ctx.effect()`](#ctxeffect)                                       | registers your own teardown, run in reverse order on unmount       |
 
 ### `ctx.logger`
 
@@ -79,20 +115,6 @@ shallow-merges the patch onto the existing blob. Backed by
 under `settings.plugins.<row-id>` in the same settings file octomux already
 uses, and **never validated** — your config shape is your own business.
 External access: `PATCH /api/settings` with `{ "plugins": { "<id>": {...} } }`.
-
-### `ctx.kv`
-
-```ts
-interface PluginKv {
-  get<T>(key: string): T | undefined;
-  set(key: string, value: unknown): void;
-  del(key: string): void;
-  list(prefix?: string): Array<{ key: string; value: unknown }>;
-}
-```
-
-Every method throws (`createKv` in `context.ts`) — plugin-owned key/value
-storage hasn't landed. See README §"`ctx.kv` throws today".
 
 ### `ctx.workflows` / `ctx.integrations` / `ctx.harnesses`
 
@@ -192,6 +214,1097 @@ The eight bold-"yes" functions are exactly `HARNESS_REQUIRED_FN_FIELDS` in
 hot path (task launch, hook install/uninstall, settings validate/merge, flag
 resolution).
 
+### `ctx.http`
+
+```ts
+interface HttpRegistrar {
+  route(method: HttpMethod, path: string, handler: PluginRouteHandler): void;
+}
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+type PluginRouteHandler = (req: PluginRequest, res: PluginResponse) => void | Promise<void>;
+interface PluginRequest {
+  readonly params: Record<string, string>;
+  readonly query: Record<string, unknown>;
+  readonly body: unknown;
+  readonly headers: Record<string, string | string[] | undefined>;
+}
+interface PluginResponse {
+  status(code: number): PluginResponse;
+  json(body: unknown): void;
+}
+```
+
+Routes are DATA in a lookup table (`server/plugins/http-registry.ts`), not an
+Express `Router` — that is the whole reason hot reload is possible at all.
+`WorkflowType.apiRouter` hands a plugin a real `Router`, and express 5 cannot
+unmount one; a route registered here is a row that ONE permanently-mounted
+parent router looks up (`createPluginParentRouter()`, mounted at `/api/p` by
+`server/api.ts`), so removing a plugin just deletes its rows — nothing was
+ever mounted.
+
+A plugin declares a path relative to its own namespace: `ctx.http.route('GET',
+'/coverage/:task', handler)` serves at `/api/p/<pluginId>/coverage/:task`.
+Dispatch is a hand-rolled segment matcher, not `path-to-regexp` — **first
+match wins with no specificity ranking**, so register a literal route
+(`/coverage/latest`) before a param route that would otherwise shadow it
+(`/coverage/:task`).
+
+`PluginRequest`/`PluginResponse` are deliberately not express's own types — a
+types-only package must not depend on express, and the host owns the adapter.
+`headers` is lowercased, the way express normalizes them — without it a
+plugin route has no way to authenticate a caller at all.
+
+```js
+ctx.http.route('GET', '/coverage/:task', (req, res) => {
+  res.status(200).json({ pct: lookupCoverage(req.params.task) });
+});
+```
+
+Gate: `http.route`. Unmount: every route this plugin registered is dropped
+(`unregisterPluginRoutes`).
+
+**Read the warning.** A route handler receives the raw request headers,
+including the remote-mode auth token of whoever called it, and `/api/p/*`
+sits behind `remoteAuthMiddleware` like every other API route — nothing
+sandboxes what a handler does with that header.
+
+### `ctx.catalog`
+
+```ts
+interface CatalogEntry {
+  id: string; // bare plugin id, or 'core'
+  kind: 'plugin' | 'core';
+  provides: string[]; // 'workflow:demo:changelog' | 'harness:demo:foo' | …
+  source: string; // 'pkg@1.2.3' | '/abs/local/path' | 'built-in'
+}
+interface CatalogReader {
+  list(): CatalogEntry[];
+}
+```
+
+```js
+const installed = ctx.catalog.list();
+ctx.logger.info({ installed: installed.map((e) => e.id) }, 'who else is here');
+```
+
+Read-only — `ctx.catalog` has exactly one method, `list()`. There is no write
+path and no override path: reading what is installed is a query, not an
+implementation choice, so this is not a fourth registrar and it never will
+grow a `register()`. See [`#not-seams`](#not-seams).
+
+Ordering caveat: the loader (`server/plugins/loader.ts`) only marks a row
+mounted — what `ctx.catalog` iterates — AFTER its `apply()` returns
+successfully. Called from inside your own `apply()`, `ctx.catalog.list()`
+never includes yourself, even in a single-plugin manifest; it includes
+siblings that finished mounting earlier (manifest order) and always includes
+`core`. Call it later — a route handler, a `run`, anything that executes
+after `apply()` finishes — to see yourself.
+
+### `ctx.secrets`
+
+Credentials live in a named store, never in `schedules.config_json`. A plugin
+resolves one **by name**; the value is produced at the point of use and is never
+returned by any HTTP route.
+
+```ts
+const names = await ctx.secrets.list(); // metadata only, ungated
+const token = await ctx.secrets.resolve('slack-bot');
+```
+
+Gate: `secrets.read` on `resolve`. `list` is ungated, matching `records.read` and
+`artifacts.list` — knowing a secret exists is not knowing its value.
+
+Config referencing uses `${secret:NAME}`, mirroring `${env:VAR}`. Unlike
+`${env:}`, an unknown name **throws** rather than degrading to `''`: sending an
+empty credential surfaces as a 401 three layers away, which is worse than
+failing here.
+
+Resolution happens at two core egress points only — the hook dispatcher and
+compute config. It is deliberately **not** wired into schedule prompt
+interpolation: that path feeds `{{configKey}}` into the agent's prompt, and
+resolving there would hand the credential to the agent, which is the exact
+failure the store exists to prevent.
+
+Values are redacted from logs at the stream destination and from
+`runs.result_json`, so no call site has to remember.
+
+### `ctx.records`
+
+```ts
+interface RecordStoreDefinition {
+  name: string; // BARE local name — the host qualifies it to `<pluginId>:<name>`.
+  schema?: Record<string, unknown>; // JSON Schema validated on write. Omit for an opaque store.
+  key?: string; // Record field used as identity. Required when `mode` is 'upsert'.
+  scope: 'task' | 'durable'; // 'task' rows die with their task; 'durable' rows outlive unmount.
+  mode: 'append' | 'upsert'; // 'append' adds a row; 'upsert' replaces the row with the same key.
+}
+interface RecordEnvelope {
+  seq: number;
+  store: string; // qualified — `<pluginId>:<name>`
+  taskId: string | null; // null for a durable row
+  key: string | null; // null for an appended row
+  payload: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+interface QuerySpec {
+  where?: Record<string, unknown>; // exact match on top-level payload fields
+  orderBy?: string; // top-level payload field; default `updatedAt`
+  order?: 'asc' | 'desc'; // default `asc`
+  limit?: number;
+  offset?: number;
+}
+interface RecordsRegistrar {
+  define(def: RecordStoreDefinition): void;
+  put(name: string, record: unknown, opts?: { taskId?: string }): Promise<void>;
+  read(name: string, opts?: { taskId: string }): Promise<RecordEnvelope[]>;
+  query(name: string, q?: QuerySpec): Promise<RecordEnvelope[]>;
+  watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void): () => void;
+  begin(name: string, key: string, value: unknown): void; // checkpoint
+  end(name: string, key: string): void; // checkpoint settled
+  interrupted(name?: string): RecordEnvelope[]; // checkpoints left by a PREVIOUS mount
+}
+```
+
+The one store for plugin data (SHR-282), replacing three prior APIs — a
+task-scoped append-only log, a durable keyed collection, and a plugin-private
+opaque blob store — with one `RecordStoreDefinition` shape. `scope` and
+`mode` pick which of the three prior lifetimes a store has:
+
+| `scope`   | `mode`   | `key`    | `schema` | Recovers the old…                           |
+| --------- | -------- | -------- | -------- | ------------------------------------------- |
+| `task`    | `append` | omit     | typical  | task-scoped, append-only observation log    |
+| `durable` | `upsert` | required | typical  | durable, keyed, schema-validated collection |
+| `durable` | `upsert` | required | omit     | plugin-private opaque blob store            |
+
+`mode:'append'` with a `key`, or `mode:'upsert'` without one, are both
+rejected at `define()` time. A `core:` name is refused — core stores are
+published by core, never defined via `ctx.records`.
+
+```js
+export default {
+  async apply(ctx) {
+    ctx.records.define({
+      name: 'coverage',
+      scope: 'task',
+      mode: 'append',
+      schema: { type: 'object', required: ['pct'], properties: { pct: { type: 'number' } } },
+    });
+    await ctx.records.put('coverage', { pct: 87.4 }, { taskId });
+    const all = await ctx.records.read('coverage', { taskId });
+
+    ctx.records.define({
+      name: 'baselines',
+      scope: 'durable',
+      mode: 'upsert',
+      key: 'repo',
+      schema: {
+        type: 'object',
+        required: ['repo', 'pct'],
+        properties: { repo: { type: 'string' }, pct: { type: 'number' } },
+        additionalProperties: false,
+      },
+    });
+    // Upserts on `repo`. Writing the same repo twice replaces, never appends.
+    await ctx.records.put('baselines', { repo: '/src/api', pct: 87.4 });
+    const low = await ctx.records.query('baselines', { orderBy: 'pct', order: 'asc', limit: 10 });
+  },
+};
+```
+
+`define()` declares a BARE local name; the host qualifies it to
+`<pluginId>:<name>` (`qualify()`). `put(name, record, opts?)` validates scope
+against `opts.taskId` (a `task` store requires it, a `durable` store rejects
+it), then `record` against the store's schema if any, then — for
+`mode:'upsert'` — extracts and validates the key field. `read(name, opts)` is
+task-scoped and requires `opts.taskId`; `query(name, q?)` is unscoped —
+`name` may be bare or already-qualified, so any plugin can query a sibling's
+store, same discipline every read here has always had. `watch(qualifiedName,
+cb)` takes a QUALIFIED name and returns an unsubscribe that is also
+auto-disposed on unmount.
+
+Gates: `records.define` on `define()`; `records.write` on `put()`,
+`begin()`, `end()`. `read`, `query`, `watch`, `interrupted` are ungated —
+reading what's already written isn't the thing capability grants exist to
+flag.
+
+**Definition lifetime follows ROW lifetime.** A `task`-scoped store's
+definition drops on unmount, same as rows written into it die with their
+task. A `durable` store's rows outlive unmount, so its definition must too —
+a durable store whose rows survive but whose definition vanished would be
+unreadable. Watchers this plugin registered via `ctx.records.watch` are
+auto-unsubscribed on unmount; a _sibling_ plugin's watcher on one of this
+plugin's stores is deliberately left running — a reload redefines the same
+qualified name moments later, and tearing down every watcher on it would
+silently kill a sibling's live subscription with no error and no log.
+
+#### Checkpoints — `begin`, `end`, `interrupted`
+
+The crash-recovery pair recovered from the old plugin-private blob store.
+Each `PluginContext` gets a fresh mount id for its lifetime (one per boot, or
+per hot reload). `begin(name, key, value)` stamps that mount id onto a
+checkpoint row holding whatever this plugin needs to resume the operation;
+`end(name, key)` settles it once the operation completes, without changing
+the underlying record's payload. `interrupted(name?)` returns every
+checkpoint stamped by a mount **other than the current one** — exactly the
+set of operations still open the last time this plugin's process went away.
+`name` is required on `begin`/`end` (one plugin can own several stores, and a
+flat per-plugin checkpoint key would let two of them collide); omit it on
+`interrupted()` for every store this plugin owns.
+
+```js
+export async function apply(ctx) {
+  for (const { key, payload } of ctx.records.interrupted('sync')) {
+    ctx.logger.warn({ key }, 'resuming interrupted operation');
+    await resume(key, payload);
+    ctx.records.end('sync', key);
+  }
+
+  ctx.records.begin('sync', 'report:42', { stage: 'uploading' });
+  await uploadReport(42);
+  ctx.records.end('sync', 'report:42');
+}
+```
+
+This is the plugin-side analogue of core's own boot recovery —
+`recoverTasks()` (`server/task-engine/reconcile.ts`) and
+`rehydrateConversations()` (`server/index.ts`). A hot reload also mints a new
+mount id, so an operation the reload interrupted correctly shows up in
+`interrupted()` on the next `apply()` — it really was abandoned
+mid-operation, the same as a crash. Checkpoint writes are not registrations,
+so unmount does not touch them; the only way a checkpoint row goes away is an
+ordinary `put()` on the same key, which settles `owner` back to `NULL` as a
+side effect.
+
+This is also what makes a durable UI panel possible. `ctx.ui.panel()` binds
+to a store:
+
+```js
+ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', record: 'baselines', as: 'table' });
+```
+
+A task-scoped store's panel renders that task's records; a durable store's
+panel renders the store's records, with no task involved. Records reach the
+SPA over `GET /api/plugin-records/<qualified-name>`.
+
+### `ctx.services`
+
+```ts
+interface ServicesRegistrar {
+  provide(name: string, impl: unknown): void;
+  require<T = unknown>(name: string): ServiceHandle<T>;
+}
+interface ServiceHandle<T = unknown> {
+  readonly name: string;
+  get(): T; // resolves live — throws if nothing provides `name`
+}
+```
+
+Dependency by CAPABILITY, not by package name. A plugin says "I need
+something that can send chat messages" (`ctx.services.require('chat.send')`)
+instead of importing `octomux-plugin-slack`; a provider says "I am that"
+(`ctx.services.provide('chat.send', impl)`). Neither one names the other.
+
+**Service names are the one thing in this API that is NOT qualified.**
+Everything else a plugin registers is prefixed `<pluginId>:` so two plugins
+can't collide; a service name is the opposite on purpose — `chat.send` has to
+mean the same string on both sides of the contract, or the whole idea
+collapses back into naming packages.
+
+**First provider wins.** Two plugins may `provide` the same name — the one
+that appears EARLIER in `octomux.yml` is live, the other queues behind it and
+takes over if the first one unmounts. There is deliberately no `prefer:` key;
+reordering the two manifest rows is how you choose.
+
+**Resolution is at mount, not at call.** `require()` just records the
+dependency. `server/plugins/loader.ts` checks every requirement only after the
+whole manifest has been applied, so a consumer may be listed before its
+provider. A name nothing provides fails only that plugin (and anything that
+transitively depended on it) as a `phase: 'apply'` load-report entry naming
+the plugin and the service — the same shape an ungranted capability produces.
+It never fails the boot.
+
+```js
+// provider
+export default {
+  apply(ctx) {
+    ctx.services.provide('chat.send', {
+      async send(text) {
+        /* ... */
+      },
+    });
+  },
+};
+
+// consumer — may load before or after the provider's row
+export default {
+  apply(ctx) {
+    const chat = ctx.services.require('chat.send');
+    ctx.http.route('post', '/notify', async (req, res) => {
+      await chat.get().send(req.body.text); // resolves live, on every call
+      res.sendStatus(204);
+    });
+  },
+};
+```
+
+Gate: `services.provide`. `require` is ungated — declaring a dependency is a
+statement about your own plugin, not a reach into anyone else's, same
+reasoning as `records.read`/`catalog.list`.
+
+Providing plugins show up in `ctx.catalog.list()` as `service:<name>` entries.
+
+**Known limitation.** The mount-time check is boot-only: `octomux plugins
+reload <id>` does not re-run it. A hot-reloaded plugin with an unmet
+requirement mounts anyway and throws at its first `handle.get()` instead of
+failing at load time.
+
+### `ctx.artifacts`
+
+```ts
+interface ArtifactsApi {
+  write(taskId: string, artifact: ArtifactInput): Promise<ArtifactEntry>;
+  list(taskId: string): Promise<ArtifactEntry[]>;
+}
+interface ArtifactInput {
+  name: string; // `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` — no separators, no `..`
+  mime: string; // e.g. `text/markdown`, `application/json`, `image/svg+xml`
+  body: string;
+}
+interface ArtifactEntry {
+  pluginId: string; // artifacts are namespaced by the writing plugin
+  name: string;
+  mime: string;
+  size: number; // utf8 byte length of the body
+  updatedAt: string; // `YYYY-MM-DD HH:MM:SS` UTC — sqlite `datetime('now')` shape
+  url: string; // `/api/tasks/<taskId>/artifacts/<pluginId>/<name>`
+}
+```
+
+A METHOD on `ctx`, not a registrar — nobody needs a different artifact
+implementation, they need to write one. `write(taskId, {name, mime, body})`
+drops a file at `<worktree>/.octomux/artifacts/<pluginId>/<name>`, with
+metadata in a sibling `index.json` (since `mime` isn't recoverable from the
+filesystem alone). Rejects if the task has no worktree yet. `name` must match
+`[A-Za-z0-9][A-Za-z0-9._-]{0,127}` — no path separators, no `..`.
+
+Artifacts land in the task's git worktree — they diff, and they outlive both
+the plugin and a DB wipe. There is no unmount teardown: an artifact is output
+a plugin already produced, not a live registration. `list(taskId)` is
+**unscoped**, like `records.read` — every plugin's artifacts on that task, not
+just this one's own. `server/services/run-detail.ts` surfaces them on
+`GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
+further core change.
+
+```js
+await ctx.artifacts.write(taskId, {
+  name: 'report.md',
+  mime: 'text/markdown',
+  body: '# Coverage report\n\n87.4%',
+});
+```
+
+Gate: `artifacts.write`. `list` is ungated.
+
+## `ctx.compute`
+
+```ts
+interface ComputeRegistrar {
+  register(p: PluginCompute): void;
+}
+```
+
+Registers a **compute provider** — the seam that decides _where a task's git
+worktree lives and where its processes run_ (`server/compute/types.ts`). It
+is **not** a pluggable isolation strategy: every provider still gets a real
+git worktree per task, that guarantee is not negotiable. A provider only
+changes which machine that worktree — and every process touching it — lives
+on. See [`examples/ssh-compute`](./examples/ssh-compute) for a complete,
+tested reference provider that runs a task over SSH.
+
+`PluginCompute` is `Record<string, unknown>` at the `@octomux/plugin-api`
+type level, same reason as the other three registrars. The concrete runtime
+shape:
+
+| Field    | Type                                                                 | Required by `ctx.compute.register`?                                                               |
+| -------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `kind`   | `string`                                                             | **yes** — non-empty, becomes the local half of `<row-id>:<kind>`                                  |
+| `create` | `(task: Task, ctx: ComputeCreateContext) => Promise<ComputeSession>` | **yes**, must be a function — `sessionFor()` dereferences it unconditionally on every task launch |
+| `resume` | `(task: Task, ctx: ComputeCreateContext) => Promise<ComputeSession>` | no, must be a function if present — the host falls back to `create()` when absent                 |
+
+Same qualification and warn-and-keep-first duplicate policy as
+`ctx.integrations`/`ctx.harnesses` (`server/compute/registry.ts`): you
+declare `kind: 'ssh'`, the kind every other part of octomux sees is
+`<row-id>:ssh`. Core providers (currently just `local`) register directly,
+outside `ctx.compute`, and are frozen against redefinition before any plugin
+loads — a plugin can never redefine `local`.
+
+### `ComputeSession` (`server/compute/types.ts`)
+
+What `create`/`resume` must return — the whole surface the rest of octomux
+uses instead of talking to tmux/git/fs/pty directly for a task on this
+provider:
+
+```ts
+interface ComputeSession {
+  readonly kind: string; // the provider kind that made this session
+  readonly taskId: string;
+  readonly repoPath: string; // the git repo root ON THE COMPUTE
+  exec(argv: string[], opts?: ExecOpts): Promise<ExecResult>; // throws non-zero unless opts.allowFailure
+  tmux(args: string[], opts?: { cwd?: string }): Promise<{ stdout: string; stderr: string }>;
+  spawn(opts: SpawnOptions): Promise<ProcessHandle>; // interactive pty, for xterm.js streaming
+  readonly files: ComputeFiles; // exists/mkdirp/read/write/chmod/copy/rm, all async
+  dispose(opts?: { destroy?: boolean }): Promise<void>;
+}
+```
+
+`tmux`'s signature must match `execTmux` (`server/tmux-bin.ts`) exactly,
+including that it **throws** on a non-zero exit with the error carrying
+`.stderr` — call sites read that field directly. `dispose({ destroy: true })`
+additionally tears down whatever this session's provider owns (a no-op for
+`local`); without `destroy` it only releases the host's own handles.
+
+### `ComputeCreateContext`
+
+What `create`/`resume` receive as their second argument — deliberately the
+**only** runtime capability a compute provider gets, since `@octomux/plugin-api`
+is types-only and a plugin has no other path to a real process:
+
+```ts
+interface ComputeCreateContext {
+  config: Record<string, unknown>; // settings.compute[<qualified-kind>], env-resolved
+  secrets: Record<string, string>; // resolved server-side, handed ONLY to create()/resume()
+  logger: PluginLogger;
+  host: ComputeHost; // the server's own machine — build your transport on this
+  execBackedFiles(exec: ComputeSession['exec']): ComputeFiles; // a ComputeFiles for free, over any exec
+}
+
+interface ComputeHost {
+  exec(argv: string[], opts?: ExecOpts): Promise<ExecResult>; // runs argv on the SERVER's own machine
+  spawnPty(opts: SpawnOptions): Promise<ProcessHandle>; // a local pty on the SERVER's own machine
+}
+```
+
+`host` is the reason a remote provider doesn't need a new dependency: every
+remote provider (ssh, docker, a cloud CLI) is fundamentally "run a local
+command that proxies to the remote box", and `host.exec`/`host.spawnPty` is
+that local command surface, already wired into the same observable/disposable
+process machinery as everything else octomux spawns. Prefer it over
+`node:child_process` directly — nothing stops a plugin from importing that
+(plugins run in-process with full Node/Bun privileges), but doing so opens a
+second, untracked spawn path.
+
+`execBackedFiles(exec)` builds a complete `ComputeFiles` — `exists`, `mkdirp`,
+`read`, `write`, `chmod`, `copy`, `rm` — purely by shelling `test`/`mkdir`/
+`cat`/`chmod`/`cp`/`rm` through whatever `exec` you pass it. A remote
+provider gets working file operations in one line:
+`files: ctx.execBackedFiles(exec)`.
+
+**The credential invariant.** `secrets` is resolved server-side from
+`settings.compute[<qualified-kind>].secrets`, with `${env:VAR}` placeholders
+expanded (`computeConfigFor()`, `server/settings.ts` — same convention
+integration providers use). It exists to build **transport** arguments only —
+an SSH `-i <keyfile>`, a cloud API token used to authenticate the CLI call
+that provisions a box. **It must never reach the agent**: not folded into a
+remote command string, not set as an env var on a spawned process, not
+written into the worktree. This is the actual security property compute
+providers exist to uphold — `docs/plugins/examples/ssh-compute`'s test file
+asserts it directly (register the provider with a recognizable secret, drive
+`create()` and a few `exec()`s, assert the secret string appears only in the
+transport argv).
+
+## `ctx.agents`
+
+```ts
+interface AgentRunOptions {
+  input: string;
+  outputSchema: object; // JSON Schema the structured result must conform to
+  model?: string | null;
+  timeoutMs?: number; // default 300_000
+  /** Defaults to a fresh ephemeral scratch dir. No git, no worktree. */
+  workspaceDir?: string;
+}
+interface AgentRunner {
+  run<T = unknown>(opts: AgentRunOptions): Promise<T>;
+}
+```
+
+Runs a headless agent and hands you back structured JSON — for a plugin that
+needs an LLM to read something and answer, not write code. `run()` wires
+straight to the host's `runAgentSession()` primitive
+(`server/agent-session/session.ts`) with the default harness and the **pty** substrate, the same
+primitive `server/services/session-vertical-service.ts` already uses to run
+scheduled workflow kinds. The agent is told to call the `submit_result` MCP
+tool with a result matching `outputSchema`; `run()` resolves with that
+result.
+
+```js
+async function classify(ctx, ticketBody) {
+  return ctx.agents.run({
+    input: `Classify this support ticket:\n\n${ticketBody}`,
+    outputSchema: {
+      type: 'object',
+      properties: {
+        category: { type: 'string', enum: ['bug', 'feature', 'question'] },
+        confidence: { type: 'number' },
+      },
+      required: ['category', 'confidence'],
+    },
+    timeoutMs: 60_000,
+  });
+}
+```
+
+- **Gated.** Your manifest row needs `grants: [agents.run]` or the call
+  throws — see "Capability grants" in the root `CLAUDE.md`.
+- **Explicitly git-free.** No worktree, no branch, no tmux session — that's
+  the _task_ lifecycle, for agents that write code. `run()` defaults to a
+  fresh empty scratch dir, which is also a clean room: no CLAUDE.md, no repo
+  checkout, no project skills bleeding into the prompt. Pass `workspaceDir`
+  if the agent genuinely needs to see a checkout.
+- **pty only** — not reattachable, doesn't survive a host restart, no tmux
+  window a human can attach to.
+- **No concurrency cap in the host.** A plugin that fans out owns its own
+  limiter.
+- **DB-free.** A plugin run is not a schedule run and gets no `runs` row.
+- `timeoutMs` (default 5 min) bounds the wait — a session that never submits
+  a result rejects rather than hanging.
+- Unmounting the plugin stops _new_ runs; an already in-flight run settles
+  on its own and is not awaited by teardown.
+
+## `ctx.fanout`
+
+Run a step **per item**, not once per schedule fire. One cron fire is one
+session and one output blob; a pipeline is "do this to each of N things".
+
+```ts
+interface FanOutApi {
+  run<T, R>(spec: FanOutSpec<T, R>): Promise<FanOutRunSummary>; // needs `fanout.run`
+  status(runId: string): Promise<FanOutRunStatus | undefined>; // ungated read
+  list(name?: string): Promise<FanOutRunSummary[]>; // ungated read
+}
+
+type FanOutSource<T> =
+  | { items: readonly T[] } // a plain array — e.g. the previous step's output
+  | { collection: string; query?: Record<string, unknown> } // a ctx.records query
+  | { resume: string }; // redrive a previous run
+
+interface FanOutSpec<T, R> {
+  name: string; // BARE — qualified to `<pluginId>:<name>`
+  source: FanOutSource<T>;
+  each: (item: T, meta: FanOutItemMeta) => Promise<R>;
+  key?: (item: T) => string; // default: stable hash of the item
+  concurrency?: number; // clamped DOWN to the host ceiling, never up
+  maxAttempts?: number; // default 3, minimum 1
+  backoffMs?: number; // default 1000 → 1s, 2s, 4s …
+}
+```
+
+```js
+const summary = await ctx.fanout.run({
+  name: 'enrich',
+  source: { items: leads },
+  key: (lead) => lead.id,
+  concurrency: 3,
+  async each(lead, { attempt, signal }) {
+    return enrich(lead, { signal });
+  },
+});
+// { runId, name: 'funnel:enrich', status: 'failed', total: 60,
+//   succeeded: 58, dead: 2, pending: 0, … }
+
+// Redrive just the two that dead-lettered:
+await ctx.fanout.run({ name: 'enrich', source: { resume: summary.runId }, each });
+```
+
+**Per-item status is persisted** in `fanout_runs` / `fanout_items`, so a partial
+run is legible — `GET /api/fanout/runs` and `GET /api/fanout/runs/:id` — and
+resumable. `each` throwing schedules a retry with bounded exponential backoff;
+an item that exhausts `maxAttempts` is **dead-lettered** (`status: 'dead'`) and
+the rest of the run carries on untouched.
+
+**The concurrency cap is the host's, and it is global.** One semaphore is shared
+across every fan-out run of every plugin, sized by
+`settings.fanout.maxConcurrency` (default 4). Three plugins each asking for 4
+get 4 in total, not 12. That placement is deliberate: `ctx.agents.run()` stays a
+thin accessor with no scheduling policy in it, and fan-out is where scheduling
+policy belongs — an uncapped fan-out over a subscription-backed harness is the
+runaway case, saturating the operator's rate limits with no backpressure and no
+signal.
+
+`meta.signal` is aborted when your plugin unmounts. Unmount stops the scheduler
+immediately and does **not** await in-flight handlers (a handler may be a
+multi-minute agent session), so honour the signal in anything long-running.
+Items interrupted that way go back to `pending`; a later `{ resume: runId }`
+picks them up. `run()` resolves with a `canceled` summary rather than rejecting.
+
+Deliberately **not** a DAG. There is no step composition — chain by writing to a
+collection and querying it from the next step. There is also no HTTP redrive
+route: a redrive needs your live `each` closure, which cannot be persisted.
+Expose one yourself with `ctx.http.route` if you want a button.
+
+Until a `ctx.records` query resolver lands, a `{ collection }` source throws with a message
+saying so — pass `{ items }` in the meantime.
+
+### `ctx.policy`
+
+```ts
+interface PolicyRegistrar {
+  intercept(point: PolicyPoint, hook: PolicyHook): void;
+}
+type PolicyPoint = 'task.launch' | 'harness.resume' | 'review.publish' | 'integration.send';
+interface PolicyIntent {
+  readonly point: PolicyPoint;
+  readonly taskId?: string; // present for task-scoped points
+  readonly repoPath?: string;
+  readonly data: Readonly<Record<string, unknown>>; // earlier hooks' patches already applied
+}
+type PolicyDecision =
+  | void
+  | { deny: string; patch?: never }
+  | { patch: Record<string, unknown>; deny?: never };
+type PolicyHook = (intent: PolicyIntent) => PolicyDecision | Promise<PolicyDecision>;
+```
+
+The one member of `ctx` that can say **no**, not just add. Every other
+registrar is additive — a workflow, a route, a record, a panel. `intercept`
+runs a hook between "a run wants to start" and "a run starts," and that hook
+may deny it with a reason or patch it on the way through.
+
+| point              | `data` keys                           | patchable |
+| ------------------ | ------------------------------------- | --------- |
+| `task.launch`      | `harnessId`, `model`, `agent`         | `model`   |
+| `harness.resume`   | `harnessId`, `model`, `prompt`        | `model`   |
+| `review.publish`   | `verdict`, `bodyLength`               | `verdict` |
+| `integration.send` | `integrationKind`, `event`, `payload` | `payload` |
+
+Hooks for a point run in registration order. The **first `deny` short-circuits**
+— later hooks never run. A `patch` is merged into `intent.data` and the next
+hook sees the patched values; a key a call site doesn't list as patchable
+above is ignored, since a patch is a request and core decides what it
+honours. A hook that throws or exceeds the host timeout (5s,
+`POLICY_HOOK_TIMEOUT_MS` in `server/plugins/policy.ts`) is logged and treated
+as no opinion — **fails open**, so a crashing plugin can't wedge every
+launch in the install.
+
+A deny or a patch on a task-scoped intent is recorded twice: a
+`core:policy.decision` record (via `ctx.records`) and a `task_updates` row of
+kind `policy`, which shows up in the task's Activity panel. Each write is
+best-effort — a failed audit write is logged and never reverses the decision
+that already happened.
+
+There is deliberately no `task.merge` point: core octomux never merges a PR
+(`server/poller/merged-pr.ts` only _observes_ merges that already happened on
+GitHub), so there's no call site to gate.
+
+```js
+ctx.policy.intercept('task.launch', (intent) => {
+  if (intent.data.harnessId === 'cursor' && isOffHours()) {
+    return { deny: 'cursor tasks are paused outside business hours' };
+  }
+});
+```
+
+Gate: `policy.intercept`. Unmount: every hook this plugin registered is
+removed (`unregisterPluginPolicy`).
+
+**Not containment.** A deny is a coordination and audit signal, not a
+security boundary — a plugin runs in-process with the DB handle, every
+credential, and `process.env`, and nothing stops it from calling the same
+functions core calls and bypassing its own hook entirely.
+
+### `ctx.ui`
+
+```ts
+interface UiRegistrar {
+  panel(binding: UiPanelBinding): void;
+  action(def: UiActionDefinition): void;
+}
+type UiSlot =
+  | 'task.panel'
+  | 'task.badge'
+  | 'board.card'
+  | 'nav.section'
+  | 'run.detail'
+  | 'settings.card';
+type UiRenderer = 'stat' | 'table' | 'timeline' | 'badge' | 'markdown' | 'json' | 'diff' | 'log';
+
+interface UiPanelBinding {
+  slot: UiSlot;
+  record: string; // BARE local store name — qualified like `records.define`
+  as: UiRenderer | string; // unknown renderer degrades to `json`, never a blank
+  value?: string;
+  delta?: string;
+  title?: string;
+}
+
+interface UiActionDefinition {
+  id: string; // BARE local id — qualified to `<pluginId>:<id>`
+  label: string; // button / command-entry text
+  slot?: UiSlot; // omit for a command-palette-only action
+  schema?: Record<string, unknown>; // JSON Schema — present means the client renders a form
+  command?: boolean; // surface this action in whatever command palette the surface has
+  confirm?: string; // confirmation string shown before running; absent runs immediately
+  run(invocation: UiActionInvocation): Promise<UiActionResult | void> | UiActionResult | void;
+}
+interface UiActionInvocation {
+  taskId?: string; // present when invoked from a task-scoped slot
+  input: Record<string, unknown>; // schema-validated when `schema` was declared; `{}` otherwise
+}
+interface UiActionResult {
+  message?: string; // shown to the human who triggered the action
+}
+/** What a client actually receives from `GET /api/plugin-ui/actions` — `run`
+ *  stripped, `id` qualified. */
+interface UiActionContribution {
+  pluginId: string;
+  actionId: string; // qualified — `<pluginId>:<id>` — the address `POST .../:actionId` takes
+  id: string; // bare, as the plugin declared it
+  label: string;
+  slot?: UiSlot;
+  schema?: Record<string, unknown>;
+  command?: boolean;
+  confirm?: string;
+}
+```
+
+Declarative BINDINGS and DECLARATIONS, never components. `panel` is the read
+half: a binding names a slot, a renderer, and a `ctx.records` store; the
+client owns every renderer and looks it up by name. `action` (SHR-257) is
+the write half: a plugin names a handler and the HOST holds it — `def.run`
+is a real function value that never crosses to a client. What a client gets
+back (`UiActionContribution`) is the declaration minus `run`: a label, an
+optional slot, an optional JSON Schema, an optional confirm string. That's
+enough to draw a button or a command-palette entry and build a form from,
+and it's the whole reason `action` doesn't take the obvious shape of "hand
+the client a callback" — a plugin ships zero browser JavaScript either way,
+and needs no build step. There is deliberately no `ctx.ui.component()` and
+no custom sidebar: that ceiling is what keeps a panel or an action written
+today renderable on a surface that doesn't exist yet — see `ctx.surfaces`
+below.
+
+`binding.record` names a BARE local `ctx.records` store — task-scoped or
+durable, whichever the store was defined as — and `registerPluginUiPanel`
+(`server/plugins/ui-registry.ts`) qualifies it. An unknown `as` renderer name
+is not rejected at registration — the client (or a `ctx.surfaces`
+implementation) degrades it to `json` rather than dropping the panel.
+
+```js
+ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', value: 'pct' });
+ctx.ui.panel({ slot: 'nav.section', record: 'baselines', as: 'table' });
+```
+
+Gate: `ui.panel`. Unmount: every contribution this plugin registered is
+removed (`unregisterPluginUi`) — the panel vanishes with no restart.
+Bindings are served to the client at `GET /api/plugin-ui/contributions`.
+
+**`ctx.ui.action(def)`** — a named handler the host invokes on request.
+`def.id` is a bare local id, qualified the same way as everything else
+(`<pluginId>:<id>`); `registerPluginUiAction` rejects a missing `id`,
+`label`, or `run`, and an unrecognized `slot`, at registration time — a bad
+action declaration is a load-time failure, not a silently-broken button.
+
+```js
+ctx.ui.action({
+  id: 'retry',
+  label: 'Retry failed check',
+  slot: 'task.panel',
+  command: true,
+  confirm: 'Re-run the coverage check for this task?',
+  schema: {
+    type: 'object',
+    properties: { reason: { type: 'string' } },
+  },
+  async run({ taskId, input }) {
+    await rerunCoverageCheck(taskId, input.reason);
+    return { message: 'Coverage check re-queued.' };
+  },
+});
+```
+
+`def.schema`, when present, is a JSON Schema: the client renders a form from
+it — the same schema-driven form the schedules UI already builds from a
+workflow's `config` schema — and the host validates the submitted `input`
+against that schema before `run` ever sees it (`invokeUiAction`,
+`server/plugins/ui-registry.ts`, via the same `validateAgainstSchema` call
+`ctx.records.put` uses). Omit `schema` and the action takes no input; the host
+still requires `input` to be a plain object (or absent) and rejects anything
+else. `def.command: true` surfaces the action in whatever command palette
+the surface offers — independent of `slot`, so an action can be
+palette-only, slot-only, or both. `def.confirm` is a string the client shows
+before invoking; omit it and the action runs on request with no
+confirmation step.
+
+REST (`server/routes/plugin-ui.ts`):
+
+- `GET /api/plugin-ui/actions[?slot=<slot>]` — lists `UiActionContribution`s,
+  optionally filtered to one slot. Ungated, like listing panels — reading
+  what's contributed isn't the thing capability grants exist to flag.
+- `POST /api/plugin-ui/actions/:actionId` with `{ taskId?, input? }` —
+  invokes one action. 404 for an unrecognized qualified id, 400 if `input`
+  fails the action's schema (or isn't a plain object when there's no
+  schema), otherwise runs `def.run` and returns its `UiActionResult` (or
+  `{}` if it returned nothing).
+
+Gate: `ui.action` on `ctx.ui.action()` — declaring an action is the gated
+act; invoking one already declared is not separately gated, and neither is
+listing them, matching `ui.panel`'s read side and `records.read`/
+`catalog.list`. Unmount: every action this plugin registered is removed
+alongside its panels (`unregisterPluginUi`) — same map, same call, one line
+of teardown for both halves of `ctx.ui`.
+
+**The ceiling is unchanged, and that's the point.** A plugin contributes a
+binding or a declaration, never code — that's what keeps the security model
+intact (there is no CSP anywhere in octomux, and `server/remote-auth.ts`
+returns `allow` unconditionally in local mode, so serving third-party
+JavaScript to a browser was never on the table) and it's what keeps a
+contribution portable onto a surface that didn't exist when it was written.
+
+**Known gap:** all four core surfaces (`web`, `cli`, `slack`, `telegram`) are
+still read-only for prompting; an action is invoked over REST by whatever
+client draws its trigger, and today only the web client draws one. Don't
+describe a CLI or Slack action button as working — nothing renders one yet.
+
+## `ctx.surfaces`
+
+```ts
+interface SurfaceRegistrar {
+  register(surface: SurfaceDefinition): void; // requires the `surfaces.register` grant
+}
+```
+
+Registers a **surface** — a place octomux presents itself to a human. Core
+already speaks four: `web`, `cli`, `slack`, `telegram`. All four are frozen
+before any plugin loads, same as `local` under `ctx.compute` — a plugin can
+never redefine one. `ctx.surfaces.register` is the seam that adds a fifth
+without editing core, and it works only because `ctx.ui` panels are
+declarative **bindings**, not components (see `UiRegistrar` above): a
+binding names a fact type and a renderer, never a DOM node, a Block Kit
+block, or an ANSI escape, so a panel written before your surface existed
+renders on it unchanged. See
+[`examples/discord-surface`](./examples/discord-surface) for a complete
+worked example.
+
+```ts
+interface SurfaceDefinition {
+  kind: string; // local id — becomes "<row-id>:<kind>"
+  renderers: Array<UiRenderer | string>; // renderer names this surface draws natively
+  fallback?: string; // renderer for anything else it can't draw; default 'json'
+  render?(panel: SurfacePanel): string | undefined; // REQUIRED for a plugin surface
+  prompt?(ask: SurfacePrompt): Promise<string | undefined>; // absent → read-only
+}
+```
+
+| Field       | Type                                                   | Required by `ctx.surfaces.register`?                                                                                                                                                                                      |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`      | `string`                                               | **yes** — non-empty, becomes the local half of `<row-id>:<kind>`                                                                                                                                                          |
+| `renderers` | `Array<UiRenderer \| string>`                          | **yes**, must be an array                                                                                                                                                                                                 |
+| `fallback`  | `string`                                               | no — defaults to `'json'`                                                                                                                                                                                                 |
+| `render`    | `(panel: SurfacePanel) => string \| undefined`         | **yes for a plugin surface** — the registrar rejects one that omits it. Core's `web` is the one exception: the browser owns every renderer and reads the binding table over REST, so it registers with no `render` at all |
+| `prompt`    | `(ask: SurfacePrompt) => Promise<string \| undefined>` | no — absent means the surface is **read-only**                                                                                                                                                                            |
+
+### The renderer contract
+
+A surface declares the renderer names it draws (`renderers`). The host
+resolves every panel against that list **before** calling `render` — your
+`render` implementation never sees a renderer name outside what it declared:
+
+| Field            | Meaning                                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `panel.as`       | what the `ctx.ui` binding asked for                                                                                             |
+| `panel.renderer` | what this surface actually draws — `panel.as` if `renderers` includes it, otherwise the surface's `fallback` (default `'json'`) |
+
+Degraded, never dropped, never blank — the same rule the web client has
+always applied to an unknown renderer name. A surface that declares
+`renderers: ['markdown']` gets `renderer: 'markdown'` for a `stat` panel it
+never asked to draw as markdown; it does not get skipped and `render` is not
+called with `'stat'`.
+
+### Read-only surfaces
+
+`prompt` is optional. A surface without one is **read-only**: it draws
+panels and cannot ask a question. Calling `promptOn()` against a read-only
+surface **throws**, naming the surface — a question nobody can answer is a
+wedged run, not something to swallow silently.
+
+**All four core surfaces are read-only today.** octomux's only
+human-question path is the card-based approval gate
+(`server/orchestrator/gate.ts`), which is DB-backed and predates this
+registrar — nothing rewired it onto `ctx.surfaces`. The registrar exists so a
+_plugin_ surface can implement `prompt`; no core surface does yet. See
+[`examples/discord-surface`](./examples/discord-surface) for a surface that
+does implement it.
+
+### Qualification and freezing
+
+Same rule as every other registrar: you declare `kind: 'discord'`, the kind
+the rest of octomux sees is `<row-id>:discord` — `qualify()`,
+`server/plugins/qualify.ts`. `CORE_SURFACE_KINDS = ['web', 'cli', 'slack',
+'telegram']` is frozen before any plugin loads, the same pattern
+`freezeCoreHarnesses()`/`CORE_COMPUTE_KINDS` use — a plugin can declare
+`kind: 'slack'` but it registers as `<row-id>:slack`, never collides with
+core's bare `slack`.
+
+### Capability grant and unmount
+
+`register()` requires the `surfaces.register` grant in the manifest row's
+`grants:` list — omitted, and the registrar throws at registration and the
+row lands in the load report as an `apply`-phase failure naming the plugin
+and the capability, same as every other gated registrar
+(`server/plugins/context.ts`, `server/plugins/grants.ts`). A surface is
+deregistered when its plugin unmounts, same as a workflow, a harness, or a
+compute provider — nothing keeps serving a dead plugin's panels.
+
+### `SurfacePanel` and `SurfacePrompt`
+
+```ts
+interface SurfacePanel {
+  pluginId: string; // manifest row id of the plugin that declared the binding
+  slot: UiSlot;
+  recordStore: string; // qualified — "<pluginId>:<record>"
+  as: string; // renderer the binding asked for
+  renderer: string; // renderer this surface actually draws — `as`, or the fallback
+  value?: string;
+  delta?: string;
+  title?: string;
+  records: RecordEnvelope[]; // this binding's records — a task's rows or the store's full board, oldest first
+}
+
+interface SurfacePrompt {
+  taskId?: string; // present when the question is about a specific task
+  question: string;
+  choices?: string[]; // offered answers; absent means free text
+  signal?: AbortSignal; // aborted when another surface answered first, or the ask timed out — withdraw the prompt
+}
+```
+
+`render(panel)` returns the text this surface's transport takes — mrkdwn for
+Slack, plain text for CLI/Telegram, Discord-flavoured markdown for a Discord
+surface. Returning `undefined` means "nothing to show for this panel" and it
+is omitted, not rendered as an empty block.
+
+## `ctx.attention`
+
+```ts
+interface AttentionApi {
+  ask(ask: AttentionAsk): Promise<AttentionAnswer>; // requires the `attention.ask` grant
+}
+
+interface AttentionAsk {
+  taskId?: string; // present when the question is about a specific task
+  question: string;
+  choices?: string[]; // offered answers; absent means free text
+  timeoutMs?: number; // default 300_000 (5 min)
+  defaultAnswer?: string; // what `answer` holds when no human answers
+}
+
+interface AttentionAnswer {
+  status: 'answered' | 'timeout' | 'unanswerable';
+  answer?: string; // the human's answer, or `defaultAnswer` otherwise
+  surface?: string; // qualified kind of the answering surface — set only for 'answered'
+}
+```
+
+The one verb that makes a plugin STOP and ask a person. `ctx.surfaces` gave
+octomux a way to reach a human on more than its four compiled-in surfaces;
+`ctx.attention.ask()` is what a plugin calls to use that — one question,
+fanned out to **every registered surface that declares `prompt`**, resolved
+by whichever human answers first.
+
+```js
+const { status, answer } = await ctx.attention.ask({
+  taskId,
+  question: 'Ship this to prod?',
+  choices: ['ship', 'hold'],
+  defaultAnswer: 'hold',
+});
+```
+
+| Field           | Type                                        | Notes                                                            |
+| --------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| `taskId`        | `string?`                                   | passed through to every surface as `SurfacePrompt.taskId`        |
+| `question`      | `string`                                    | required                                                         |
+| `choices`       | `string[]?`                                 | absent means free text                                           |
+| `timeoutMs`     | `number?`                                   | default `DEFAULT_ATTENTION_TIMEOUT_MS` = 300,000 (5 min)         |
+| `defaultAnswer` | `string?`                                   | `answer` on `'timeout'`/`'unanswerable'`; `undefined` by default |
+| `status`        | `'answered' \| 'timeout' \| 'unanswerable'` | see below                                                        |
+| `answer`        | `string?`                                   | the human's text on `'answered'`, else `defaultAnswer`           |
+| `surface`       | `string?`                                   | qualified kind that answered — only set for `'answered'`         |
+
+### First answer wins, the rest are withdrawn
+
+The losing surfaces get their `SurfacePrompt.signal` aborted, so a Slack
+message can be deleted and a modal closed rather than left sitting there
+collecting an answer nobody will read. A surface that ignores the signal
+isn't broken — its late answer is simply discarded.
+
+### Bounded, always
+
+`timeoutMs` (default 5 minutes — `DEFAULT_ATTENTION_TIMEOUT_MS` in
+`server/attention/index.ts`) bounds the wait. On timeout, and when there is
+no prompt-capable surface to ask at all, the call **resolves** with
+`defaultAnswer` — it never rejects and never hangs. Read `status` before
+acting on `answer`: `'answered'` is a human, anything else is your own
+default coming back to you.
+
+### `unanswerable` is the out-of-the-box default
+
+`unanswerable` means nobody could be asked: no registered surface declares
+`prompt`, or every one of them declined or threw. **All four core surfaces
+(`web`, `cli`, `slack`, `telegram`) are read-only today** (see
+[Read-only surfaces](#read-only-surfaces) above) — so out of the box,
+`ctx.attention.ask()` returns `unanswerable` unless a plugin surface that
+implements `prompt` is installed.
+
+### Does not survive a restart
+
+In-memory only. A pending ask, and the surface's live `prompt()` call
+awaiting it, both die with the process — there is no DB row for it to resume
+from. Restart the server mid-ask and the question is gone; nothing is
+re-asked and nothing is answered. Don't build an approval gate that must not
+be lost on top of this — core's DB-backed one is `server/orchestrator/gate.ts`
+and was not rewired onto `ctx.attention`.
+
+## `ctx.effect()`
+
+```ts
+effect(dispose: () => void | Promise<void>): void;
+```
+
+Registers a teardown callback, run in **reverse** registration order when the
+plugin unmounts — the Cordis model, so a later effect never observes an
+earlier one already gone (`disposePluginContext()`, `server/plugins/context.ts`).
+
+Everything registered _through_ `ctx` — a workflow kind, a route, a fact
+type, a policy hook — is already tracked and undone automatically by the
+matching `unregisterPlugin*` call (`server/plugins/lifecycle.ts`).
+`ctx.effect()` covers what the plugin owns **outside** `ctx`: a
+`setInterval`, a filesystem watcher, an open socket. Anything not routed
+through `ctx` and not registered as an effect cannot be tracked and will not
+be released — a real limit of the model, not an oversight.
+
+```js
+const interval = setInterval(pollUpstream, 60_000);
+ctx.effect(() => clearInterval(interval));
+```
+
+One effect throwing does not strand the rest — `disposePluginContext` runs
+every callback and returns the failures for the caller to log, rather than
+stopping at the first one.
+
+Ungated, but `assertLive`-guarded: calling it after the plugin's own
+`apply()` already overran its timeout budget throws, naming the plugin.
+
+Two things settle on their own rather than being torn down by `effect`: an
+in-flight `ctx.agents.run()` keeps going after unmount (bounded by its own
+`timeoutMs`, default 5 min) since disposing the process handle happens in
+`runAgentSession`'s own `finally`; and an in-flight `ctx.fanout` run is
+**aborted** without awaiting its handlers (a handler may be a multi-minute
+agent session) — items it was mid-way through go back to `pending` for a
+later `{ resume: runId }`.
+
 ## Manifest (`octomux.yml`)
 
 ```ts
@@ -202,6 +1315,7 @@ interface PluginRow {
   integrity?: string; // parsed as a string; NEVER VERIFIED against the tarball
   config?: Record<string, unknown>; // not read by anything in this package — see note below
   disabled?: boolean;
+  grants?: PluginCapability[]; // see "Capability grants" below — absent/empty grants nothing
 }
 interface PluginManifest {
   plugins: PluginRow[];
@@ -213,7 +1327,7 @@ boundary. Rejected outright (whole manifest fails, zero plugins loaded, never
 a boot crash):
 
 - any top-level key other than `plugins`
-- any row key other than `id`, `name`, `version`, `integrity`, `config`, `disabled`
+- any row key other than `id`, `name`, `version`, `integrity`, `config`, `disabled`, `grants`
 - `id` not matching `^[a-z0-9][a-z0-9-]*$`, or a duplicate `id`
 - `name` that isn't a valid npm package name shape (scoped or unscoped) or an
   absolute filesystem path — this blocks `data:`/`http(s):`/`file:`/relative/
@@ -228,6 +1342,101 @@ a boot crash):
 nothing in `server/plugins/` reads its contents; it exists for a plugin's own
 future use, not consumed by `ctx` today.
 
+## Capability grants
+
+A manifest row declares the `ctx` capabilities its plugin actually uses:
+
+```yaml
+plugins:
+  - id: coverage-bot
+    name: '@acme/octomux-coverage-bot'
+    grants: [records.define, records.write, ui.panel]
+```
+
+### Deny by default
+
+A row with **no `grants:` key gets nothing**. The first gated call throws,
+`apply()` fails, and the row lands in `LoadReport.failed` with
+`phase: 'apply'` (`assertGranted`, `server/plugins/grants.ts`). This is the
+error every plugin author hits first — for example a row that omitted
+`ui.panel`:
+
+```
+plugin "coverage-bot": capability "ui.panel" is not granted. Add it to the plugin's row in octomux.yml:
+    grants: [ui.panel]
+```
+
+There is no warn-and-continue path — a warning nobody reads is not a
+decision.
+
+### Every capability
+
+All 17 names in `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`, mirrors
+`PluginCapability` in `@octomux/plugin-api`):
+
+| Capability              | Gates                                 | Undone on unmount?                                                                 |
+| ----------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`            | yes                                                                                |
+| `integrations.register` | `ctx.integrations.register()`         | yes                                                                                |
+| `harnesses.register`    | `ctx.harnesses.register()`            | yes                                                                                |
+| `compute.register`      | `ctx.compute.register()`              | yes                                                                                |
+| `http.route`            | `ctx.http.route()`                    | yes                                                                                |
+| `records.define`        | `ctx.records.define()`                | yes — the definition; records written survive                                      |
+| `records.write`         | `ctx.records.put()`/`begin()`/`end()` | n/a — a write, not a registration; a task-scoped row dies with its task regardless |
+| `services.provide`      | `ctx.services.provide()`              | yes                                                                                |
+| `ui.panel`              | `ctx.ui.panel()`                      | yes                                                                                |
+| `artifacts.write`       | `ctx.artifacts.write()`               | n/a — files land in the worktree and outlive the plugin                            |
+| `policy.intercept`      | `ctx.policy.intercept()`              | yes                                                                                |
+| `agents.run`            | `ctx.agents.run()`                    | n/a — an in-flight run settles on its own                                          |
+| `fanout.run`            | `ctx.fanout.run()`                    | n/a — an in-flight run is aborted, not "undone"                                    |
+| `surfaces.register`     | `ctx.surfaces.register()`             | yes                                                                                |
+| `attention.ask`         | `ctx.attention.ask()`                 | n/a — an in-flight ask is withdrawn, not "undone"                                  |
+| `ui.action`             | `ctx.ui.action()`                     | yes                                                                                |
+| `secrets.read`          | `ctx.secrets.resolve()`               | n/a — a read, not a registration                                                   |
+
+### What's ungated, and why
+
+Reads: `ctx.logger`, `ctx.settings`, `ctx.catalog.list`, `ctx.records.read`,
+`ctx.records.query`, `ctx.records.watch`, `ctx.records.interrupted`,
+`ctx.artifacts.list`, `ctx.fanout.status`/`ctx.fanout.list`, `ctx.effect()`.
+None of these pick a behavior or produce a side effect worth a human's
+second look — a plugin reading what's installed, what a task's facts say, or
+a fan-out run's status isn't the thing capability grants exist to flag.
+(`ctx.effect()` is ungated for a different reason: it registers _your own_
+teardown, not a host capability.)
+
+### Widen/approve
+
+The acknowledged grant set per row is persisted next to the manifest, in
+`plugin-grants.json` (`grantLedgerPath()`, `server/plugins/grants.ts`). A
+corrupt or missing ledger is treated as an empty one — never a boot failure,
+it just re-asks for acknowledgement. `resolveGrantsForRow` walks it on every
+boot:
+
+- row not in the ledger → first sight: grant everything declared, and record it
+- declared ⊆ acknowledged → narrowing (or unchanged) is free
+- declared ⊄ acknowledged → grant only the intersection; the newly added
+  grants are **pending and withheld** until `octomux plugins approve <id>`
+
+Why: an `npm update` that also edits `octomux.yml` must not hand a plugin
+`policy.intercept` without a human deciding to allow it. Widening never takes
+effect silently.
+
+`LoadReport.grants` (what each plugin actually got this boot) and
+`LoadReport.pendingGrants` (what's declared but withheld) are both keyed by
+plugin id. `octomux doctor` prints both — the granted capabilities under each
+loaded plugin, and a `⚠ withheld (not acknowledged)` line naming the pending
+ones plus the exact `octomux plugins approve <id>` command to run.
+
+### Not a sandbox
+
+A plugin runs **in-process**, with the DB handle, every credential, and
+`process.env` — it can do everything core can do without ever calling `ctx`.
+A grant confines nothing; it's a **coordination and audit mechanism**: it
+records what a plugin says it needs, enforces that claim at core's own seams,
+and makes it reviewable (`octomux doctor`). `octomux plugins approve` is an
+operator confirming intent, not a security check on the plugin's code.
+
 ## `LoadReport`
 
 ```ts
@@ -239,6 +1448,7 @@ interface LoadedPlugin {
   order: number;
   applyMs: number;
   reconcileMs?: number; // reconcileMs: reserved, never set today
+  provides?: string[]; // same '<registry>:<qualified id>' strings as CatalogEntry.provides
 }
 interface LoadReport {
   loaded: LoadedPlugin[];
@@ -250,13 +1460,32 @@ interface LoadReport {
   }>;
   manifestPath: string;
   safeMode: boolean;
+  manifestError?: string; // set when the manifest itself failed to read/parse
+  loadedAt?: string; // ISO timestamp this report was produced
+  grants?: Record<string, PluginCapability[]>; // effective grants per plugin id, this boot
+  pendingGrants?: Record<string, PluginCapability[]>; // declared but withheld, per plugin id
 }
 ```
 
-Persisted to `~/.octomux/plugin-load-report.json` after every boot
-(`server/index.ts`), read by `octomux doctor` — see README §Failure modes for
-what each `phase` means and when a row lands in `failed` vs. is silently
-skipped (`disabled: true` rows are skipped, not failed).
+`manifestError` distinguishes "zero plugins configured" from "boot couldn't
+even read the manifest." `loadedAt`, `grants`, and `pendingGrants` are all
+optional only so an older persisted report — or a fixture `LoadReport`
+literal — still type-checks; `octomux doctor` prints `unknown (older
+report)` for a missing `loadedAt` rather than failing. `grants`/
+`pendingGrants` are covered above under "Capability grants."
+
+There is no `routeCounts` field — `provides` (SHR-268) supersedes it: a route
+is just one more `route:METHOD /path` entry alongside a plugin's workflows,
+harnesses, integrations, UI slots, and fact types, instead of its own
+one-off counter.
+
+`provides` is filled in at boot (`server/index.ts`, from the same
+`pluginProvides()` that backs `ctx.catalog.list()`) and persisted with the
+rest of the report to `~/.octomux/plugin-load-report.json`. `octomux doctor`
+reads it back through `buildCatalog()` (`server/plugins/catalog.ts`) — see
+README §Failure modes for what each `phase` means and when a row lands in
+`failed` vs. is silently skipped (`disabled: true` rows are skipped, not
+failed).
 
 ## Namespacing (`qualify()`, `server/plugins/qualify.ts`)
 
@@ -275,3 +1504,44 @@ qualify('demo', 'changelog') === 'demo:changelog';
   calling `qualify()` yourself.
 - You never see the qualified form. `ctx.id` is always your row's bare id;
   what you pass to a registrar is always your bare local `kind`/`id`.
+
+## Not seams
+
+Not everything core can do is a plugin seam. Something with exactly one
+right implementation, or that's a pure read over state core already owns,
+doesn't get a registrar — it goes straight on `ctx`, or nowhere at all.
+
+1. **Skills and agent roles.** They ship in the bundled plugin
+   (`plugin/skills/`, `plugin/agents/`) and reach launched agents via
+   `--plugin-dir` — single source, there is no repo or home tier (there used
+   to be one, and it never delivered anything to a running agent). Users' own
+   skills/subagents live in Claude Code's native `~/.claude/skills`,
+   `~/.claude/agents`, `<repo>/.claude/` — the harness reads those directly
+   and octomux neither manages nor lists them. See the root `CLAUDE.md`
+   §"Skills and agent roles."
+2. **MCP servers.** The harness owns MCP configuration; octomux does not
+   proxy or register it.
+3. **Models.** A model is a per-task/per-worker value (`tasks.model`,
+   `--model`, `applyModel(flags, model)`), not a registrable implementation.
+   A plugin influences it through `ctx.policy` (`task.launch` /
+   `harness.resume` can patch `model`), not through a registrar.
+4. **History / task lifecycle.** Tasks remain the source of truth.
+   `ctx.records` is an observation log, not event sourcing — a plugin does not
+   get to redefine what a task is.
+5. **Artifacts.** A method on `ctx`, not a registrar (see
+   [`ctx.artifacts`](#ctxartifacts) above) — nobody needs a different
+   artifact implementation, they need to write one.
+6. **Catalog.** Reading what is installed (`ctx.catalog.list()`) is a query,
+   not an implementation choice: no `register()`, no override path.
+7. **Isolation.** A git worktree per run is octomux's guarantee, not a
+   preference — the public docs say so. `ctx.compute` decides only _where_
+   that worktree lives, never whether one exists. It is not a pluggable
+   isolation strategy.
+8. **Storage.** `ctx.records` covers the three storage shapes a plugin
+   needs — task-scoped and dies with the task, durable and keyed/queryable,
+   or durable and opaque (`scope`/`mode`/`schema` pick which) — and is not a
+   registrar; a plugin does not bring its own storage engine.
+
+The rule that generalises all eight: a purely read-only view over state core
+already owns belongs on `ctx` directly, and something that has exactly one
+right implementation is not a choice worth registering.

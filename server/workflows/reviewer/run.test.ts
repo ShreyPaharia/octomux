@@ -227,7 +227,10 @@ describe('review-service.triggerReviewRun', () => {
     await triggerReviewRun(task);
 
     expect(mockStartTask).not.toHaveBeenCalled();
+    // sendMessageToAgent(compute, session, windowIndex, message) — compute
+    // session is now the leading argument (SHR-261/266 compute split).
     expect(mockSendMessageToAgent).toHaveBeenCalledWith(
+      expect.anything(),
       'octomux-agent-rev-2',
       1,
       manualReRunNudge(),

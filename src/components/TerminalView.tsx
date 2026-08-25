@@ -7,6 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalWheelCoalesce } from '@/lib/terminal-wheel-coalesce';
+import { supportsDeflate, makeFrameWriter } from '@/lib/terminal-frames';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import { CloudOffIcon } from './icons';
@@ -23,6 +24,12 @@ interface TerminalViewProps {
 
 const MAX_RECONNECT_DELAY = 10_000;
 const INITIAL_RECONNECT_DELAY = 1_000;
+// Liveness watchdog: a NAT drop or laptop sleep leaves a half-open socket that
+// still reports OPEN, so onclose never fires and the terminal silently freezes
+// until a manual refresh. Probe an idle link with an app-level ping (the server
+// replies with an empty frame); a silent one is dead — replace it.
+const WATCHDOG_IDLE_MS = 15_000;
+const PONG_TIMEOUT_MS = 5_000;
 
 export function TerminalView({
   taskId,
@@ -47,6 +54,7 @@ export function TerminalView({
   const androidImeCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const visibleRef = useRef(visible);
+  const lastMessageAt = useRef(Date.now());
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
   // True while the WebSocket is opening (initial connect or a reconnect) and no
@@ -60,9 +68,10 @@ export function TerminalView({
 
   const getWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const deflate = supportsDeflate ? '?deflate=1' : '';
     return wsUrlProp
-      ? `${protocol}//${window.location.host}${wsUrlProp}`
-      : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}`;
+      ? `${protocol}//${window.location.host}${wsUrlProp}${deflate}`
+      : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}${deflate}`;
   }, [taskId, windowIndex, wsUrlProp]);
 
   const scrollCursorIntoView = useCallback(() => {
@@ -107,9 +116,12 @@ export function TerminalView({
       // reconnects — cleared on open or as soon as the first chunk arrives.
       setConnecting(true);
       const ws = new WebSocket(getWsUrl());
+      ws.binaryType = 'arraybuffer';
+      const writeFrame = makeFrameWriter((data) => term.write(data));
 
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+        lastMessageAt.current = Date.now();
         setDisconnected(false);
         // Deliberately NOT clearing `connecting` here: the socket opens in ~5ms
         // but the server's first frame lands later, so clearing on open left the
@@ -136,7 +148,8 @@ export function TerminalView({
       ws.onmessage = (event) => {
         // First chunk means the terminal has real content — drop the placeholder.
         setConnecting(false);
-        term.write(event.data);
+        lastMessageAt.current = Date.now();
+        writeFrame(event.data);
       };
 
       ws.onclose = (event) => {
@@ -352,21 +365,50 @@ export function TerminalView({
     }
   }, [connectWs]);
 
+  // Send a liveness ping if the link has been silent past the watchdog window;
+  // a ping that goes unanswered means the socket is half-open — replace it.
+  // Silent recovery: no overlay, the reconnect repaints from the tmux snapshot.
+  const probeLiveness = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - lastMessageAt.current < WATCHDOG_IDLE_MS) return;
+    const sentAt = Date.now();
+    ws.send(JSON.stringify({ type: 'ping' }));
+    setTimeout(() => {
+      if (unmounted.current || wsRef.current !== ws) return;
+      if (lastMessageAt.current >= sentAt) return; // pong (or any output) arrived
+      // close() on a half-open socket can wait out a long TCP timeout before
+      // onclose fires — reconnect immediately; the stale socket's onclose is
+      // ignored via the wsRef identity guard.
+      ws.close();
+      handleRetryNow();
+    }, PONG_TIMEOUT_MS);
+  }, [handleRetryNow]);
+
+  useEffect(() => {
+    const timer = setInterval(probeLiveness, WATCHDOG_IDLE_MS);
+    return () => clearInterval(timer);
+  }, [probeLiveness]);
+
   // A reconnect scheduled while the tab is hidden gets throttled by the browser
   // (background timers fire at most ~once a minute), so a dropped connection can
   // stay down long after the user returns. Retry immediately on tab return if
-  // the socket is dead. CONNECTING/OPEN sockets are left alone — retrying then
-  // would leak a duplicate connection.
+  // the socket is dead. An OPEN socket is probed instead of replaced — after a
+  // laptop sleep it often only *looks* OPEN. CONNECTING is left to the
+  // browser's own connect timeout.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       const ws = wsRef.current;
-      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) return;
+      if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+        probeLiveness();
+        return;
+      }
       handleRetryNow();
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [handleRetryNow]);
+  }, [handleRetryNow, probeLiveness]);
 
   // Connect on mount and reconnect when taskId/windowIndex changes
   useEffect(() => {

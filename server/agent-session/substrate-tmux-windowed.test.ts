@@ -8,6 +8,7 @@ const { execFile } = await import('child_process');
 const { findExecCall, countExecCalls } = await import('../test-helpers.js');
 const { tmuxWindowSubstrate, getActiveWindowIndex, getLastWindowIndex } =
   await import('./substrate-tmux-windowed.js');
+const { localSession } = await import('../compute/index.js');
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -30,7 +31,7 @@ beforeEach(() => {
 
 describe('tmuxWindowSubstrate.launchWindow', () => {
   it('fresh=true emits new-session with the startup command', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -45,7 +46,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=true emits set-option aggressive-resize', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -60,7 +61,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=true queries active window index via display-message', async () => {
-    const idx = await tmuxWindowSubstrate.launchWindow({
+    const idx = await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -76,7 +77,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=false emits new-window (not new-session)', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -97,7 +98,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=false queries last window index via list-windows', async () => {
-    const idx = await tmuxWindowSubstrate.launchWindow({
+    const idx = await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'octomux-agent-test01',
       cwd: '/wt',
       startupCmd: 'bash -ic claude',
@@ -113,7 +114,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=true passes session and cwd to new-session', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'my-session',
       cwd: '/my/worktree',
       startupCmd: 'bash -ic claude',
@@ -128,7 +129,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('fresh=false passes session and cwd to new-window', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'my-session',
       cwd: '/my/worktree',
       startupCmd: 'bash -ic claude',
@@ -143,7 +144,7 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
   });
 
   it('omits startup command when not provided', async () => {
-    await tmuxWindowSubstrate.launchWindow({
+    await tmuxWindowSubstrate.launchWindow(localSession, {
       session: 'my-session',
       cwd: '/my/worktree',
       fresh: false,
@@ -171,7 +172,10 @@ describe('tmuxWindowSubstrate.launchWindow', () => {
 
 describe('tmuxWindowSubstrate.createEmptySession', () => {
   it('creates a detached session without a startup command', async () => {
-    await tmuxWindowSubstrate.createEmptySession({ session: 'octomux-agent-x', cwd: '/wt' });
+    await tmuxWindowSubstrate.createEmptySession(localSession, {
+      session: 'octomux-agent-x',
+      cwd: '/wt',
+    });
 
     const sessionCall = findExecCall(vi.mocked(execFile), {
       cmd: 'tmux',
@@ -189,12 +193,12 @@ describe('tmuxWindowSubstrate.createEmptySession', () => {
 
 describe('window index helpers', () => {
   it('getActiveWindowIndex parses display-message output', async () => {
-    const idx = await getActiveWindowIndex('octomux-agent-test');
+    const idx = await getActiveWindowIndex(localSession, 'octomux-agent-test');
     expect(idx).toBe(0);
   });
 
   it('getLastWindowIndex returns max window index', async () => {
-    const idx = await getLastWindowIndex('octomux-agent-test');
+    const idx = await getLastWindowIndex(localSession, 'octomux-agent-test');
     expect(idx).toBe(2);
   });
 });

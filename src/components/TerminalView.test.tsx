@@ -160,7 +160,15 @@ describe('TerminalView', () => {
     render(<TerminalView taskId="task-A" windowIndex={0} />);
 
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances[0].url).toMatch(/\/ws\/terminal\/task-A\/0$/);
+    expect(MockWebSocket.instances[0].url).toMatch(/\/ws\/terminal\/task-A\/0(\?|$)/);
+  });
+
+  it('advertises deflate support in the ws URL', async () => {
+    // bun's runtime has DecompressionStream, so the component opts in — the
+    // server only compresses for clients that set this flag.
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+    expect(MockWebSocket.instances[0].url).toMatch(/\?deflate=1$/);
   });
 
   it('reconnects to the new endpoint when windowIndex changes', async () => {
@@ -171,7 +179,7 @@ describe('TerminalView', () => {
 
     expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
     const latest = MockWebSocket.instances.at(-1)!;
-    expect(latest.url).toMatch(/\/ws\/terminal\/task-A\/1$/);
+    expect(latest.url).toMatch(/\/ws\/terminal\/task-A\/1(\?|$)/);
   });
 
   it('routes keystrokes to the NEW endpoint after windowIndex changes', async () => {
@@ -351,8 +359,72 @@ describe('TerminalView', () => {
     // Must NOT have created a 3rd WebSocket — especially not one pointing
     // back at the old windowIndex=0.
     expect(MockWebSocket.instances).toHaveLength(2);
-    const stale = MockWebSocket.instances.find((ws, idx) => idx >= 2 && ws.url.endsWith('/0'));
+    const stale = MockWebSocket.instances.find(
+      (ws, idx) => idx >= 2 && ws.url.includes('/ws/terminal/task-A/0'),
+    );
     expect(stale).toBeUndefined();
+  });
+
+  it('reconnects when a liveness ping goes unanswered (half-open socket)', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    // Idle past the watchdog window — the client probes the link.
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(ws.sent).toContain('{"type":"ping"}');
+
+    // Nothing comes back within the pong timeout → the socket is half-open;
+    // it gets replaced without waiting for a TCP-level close.
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('keeps the socket when the liveness ping is answered', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+    });
+    expect(ws.sent).toContain('{"type":"ping"}');
+
+    // Server's empty pong frame proves the link is alive.
+    act(() => ws.onmessage?.({ data: '' } as MessageEvent));
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('probes an OPEN socket on tab return instead of trusting readyState', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    // Simulate a laptop-sleep gap: time passes with no traffic, then the tab
+    // returns. The socket still reports OPEN but may be half-open.
+    await act(async () => {
+      vi.setSystemTime(Date.now() + 60_000);
+    });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(ws.sent).toContain('{"type":"ping"}');
   });
 
   it('reconnects immediately on tab return when the socket is dead', async () => {

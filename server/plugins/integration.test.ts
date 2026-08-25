@@ -10,7 +10,7 @@
  * `loadPlugins`'s `resolve` seam only skips the anchor.js/createRequire
  * bare-package lookup; an absolute-path row bypasses that seam entirely and
  * still needs a real file for `import()` to load) through mount -> HTTP ->
- * unmount, and a second fixture pair through the cross-plugin `ctx.facts`
+ * unmount, and a second fixture pair through the cross-plugin `ctx.records`
  * watch path.
  */
 import fs from 'fs';
@@ -22,11 +22,17 @@ const { default: request } = await import('supertest');
 const { loadPlugins, unloadPlugin, reloadPlugin, resetMountedPlugins } =
   await import('./loader.js');
 const { resetPluginRoutes } = await import('./http-registry.js');
-const { resetFacts, putFact } = await import('./facts.js');
+const { resetRecords, putRecord } = await import('./records.js');
+const { readRecordsForTask } = await import('../repositories/plugin-records.js');
+const { evaluatePolicy, resetPolicy } = await import('./policy.js');
+const { acknowledgeGrants, resetPluginGrants } = await import('./grants.js');
+const { listTaskUpdates } = await import('../repositories/tasks.js');
 const { resetPluginUi } = await import('./ui-registry.js');
 const { subscribeServerEvents } = await import('../events.js');
 const { createTestDb, insertTestTask } = await import('../test-helpers.js');
+const { insertRun } = await import('../repositories/runs.js');
 const { createApp } = await import('../app.js');
+const { listCatalog } = await import('./catalog.js');
 
 let tmpDir: string;
 
@@ -43,7 +49,7 @@ function writeModule(name: string, source: string): string {
 }
 
 /** Fixture plugin that exercises all four SHR-253..256 registrars in one
- *  apply(): a route, a fact type + a write, a ui panel, and an effect that
+ *  apply(): a route, a record store + a write, a ui panel, and an effect that
  *  records (to a marker file, since the effect only runs post-unmount, after
  *  every registry has already been torn down) that it ran. */
 function fixtureCoverageSource(taskId: string, effectMarkerPath: string): string {
@@ -55,17 +61,19 @@ export async function apply(ctx) {
     res.status(200).json({ id: req.params.id });
   });
 
-  ctx.facts.define({
-    type: 'coverage',
+  ctx.records.define({
+    name: 'coverage',
+    scope: 'task',
+    mode: 'append',
     schema: {
       type: 'object',
       properties: { pct: { type: 'number' } },
       required: ['pct'],
     },
   });
-  await ctx.facts.put(${JSON.stringify(taskId)}, 'coverage', { pct: 92 });
+  await ctx.records.put('coverage', { pct: 92 }, { taskId: ${JSON.stringify(taskId)} });
 
-  ctx.ui.panel({ slot: 'task.panel', fact: 'coverage', as: 'stat', title: 'Coverage' });
+  ctx.ui.panel({ slot: 'task.panel', record: 'coverage', as: 'stat', title: 'Coverage' });
 
   ctx.effect(() => {
     fs.writeFileSync(${JSON.stringify(effectMarkerPath)}, 'ran');
@@ -74,13 +82,15 @@ export async function apply(ctx) {
 `;
 }
 
-/** Fixture "A": defines+writes `coverage` facts on demand via an HTTP route,
+/** Fixture "A": defines+writes `coverage` records on demand via an HTTP route,
  *  so a test can trigger a write after A has been reloaded. */
 function fixtureWriterSource(taskId: string): string {
   return `
 export async function apply(ctx) {
-  ctx.facts.define({
-    type: 'coverage',
+  ctx.records.define({
+    name: 'coverage',
+    scope: 'task',
+    mode: 'append',
     schema: {
       type: 'object',
       properties: { pct: { type: 'number' } },
@@ -88,23 +98,70 @@ export async function apply(ctx) {
     },
   });
   ctx.http.route('POST', '/emit/:pct', async (req, res) => {
-    await ctx.facts.put(${JSON.stringify(taskId)}, 'coverage', { pct: Number(req.params.pct) });
+    await ctx.records.put('coverage', { pct: Number(req.params.pct) }, { taskId: ${JSON.stringify(taskId)} });
     res.status(200).json({ ok: true });
   });
 }
 `;
 }
 
-/** Fixture "B": watches A's QUALIFIED fact type and appends every fact it
+/** Fixture "B": watches A's QUALIFIED store and appends every record it
  *  sees to a log file, so the test can inspect delivery across A's reload
  *  and confirm the subscription only dies when B itself unmounts. */
-function fixtureWatcherSource(qualifiedType: string, watchLogPath: string): string {
+function fixtureWatcherSource(qualifiedName: string, watchLogPath: string): string {
   return `
 import fs from 'fs';
 
 export async function apply(ctx) {
-  ctx.facts.watch(${JSON.stringify(qualifiedType)}, (fact) => {
-    fs.appendFileSync(${JSON.stringify(watchLogPath)}, JSON.stringify(fact) + '\\n');
+  ctx.records.watch(${JSON.stringify(qualifiedName)}, (record) => {
+    fs.appendFileSync(${JSON.stringify(watchLogPath)}, JSON.stringify(record) + '\\n');
+  });
+}
+`;
+}
+
+/** Body the reporter fixture writes. Shared so the test can assert byte-exact
+ *  content and the derived `size` without restating it. */
+const REPORT_BODY = '# Coverage\n\n92%\n';
+
+/** Fixture that produces OUTPUT rather than registering anything: it writes an
+ *  artifact for a task on demand (`POST /report`), writes one under a
+ *  caller-chosen name (`POST /report-as?task=&name=`) so the test can probe
+ *  name validation through the real plugin surface, and reads them back
+ *  (`GET /list`). Both write routes report the rejection as JSON instead of
+ *  throwing, so the test asserts the plugin-visible error rather than
+ *  whatever express's error middleware renders. */
+function fixtureReporterSource(taskId: string): string {
+  return `
+export async function apply(ctx) {
+  ctx.http.route('POST', '/report', async (req, res) => {
+    try {
+      const entry = await ctx.artifacts.write(${JSON.stringify(taskId)}, {
+        name: 'coverage.md',
+        mime: 'text/markdown',
+        body: ${JSON.stringify(REPORT_BODY)},
+      });
+      res.status(200).json({ ok: true, entry });
+    } catch (err) {
+      res.status(200).json({ ok: false, error: String(err && err.message) });
+    }
+  });
+
+  ctx.http.route('POST', '/report-as', async (req, res) => {
+    try {
+      const entry = await ctx.artifacts.write(String(req.query.task), {
+        name: String(req.query.name ?? ''),
+        mime: 'text/markdown',
+        body: 'x',
+      });
+      res.status(200).json({ ok: true, entry });
+    } catch (err) {
+      res.status(200).json({ ok: false, error: String(err && err.message) });
+    }
+  });
+
+  ctx.http.route('GET', '/list', async (req, res) => {
+    res.status(200).json({ artifacts: await ctx.artifacts.list(${JSON.stringify(taskId)}) });
   });
 }
 `;
@@ -119,12 +176,53 @@ function readWatchLog(watchLogPath: string): Array<{ payload: { pct: number } }>
     .map((line) => JSON.parse(line));
 }
 
+/** Fixture that registers a route and a record store (enough to show up in
+ *  its own `provides[]`), then exercises `ctx.catalog` two ways:
+ *
+ *  1. At `apply()` time — written to a marker file, since `loader.ts` only
+ *     adds a row to `mounted` (what `listCatalog()` iterates) AFTER `apply()`
+ *     returns successfully, so even a single-plugin manifest does NOT see
+ *     itself yet here. That's the ordering caveat, captured rather than
+ *     asserted around.
+ *  2. From a `/catalog` route handler — by request time the plugin IS
+ *     mounted, so this is where "the plugin sees itself" actually holds,
+ *     proven over real HTTP through the plugin's own closed-over `ctx`. */
+function fixtureCatalogSource(markerPath: string): string {
+  return `
+import fs from 'fs';
+
+export async function apply(ctx) {
+  ctx.http.route('GET', '/ping', (req, res) => {
+    res.status(200).json({ ok: true });
+  });
+
+  ctx.records.define({
+    name: 'seen',
+    scope: 'task',
+    mode: 'append',
+    schema: { type: 'object', properties: {} },
+  });
+
+  fs.writeFileSync(${JSON.stringify(markerPath)}, JSON.stringify({
+    catalogKeys: Object.keys(ctx.catalog),
+    atApplyTime: ctx.catalog.list().map((e) => e.id),
+  }));
+
+  ctx.http.route('GET', '/catalog', (req, res) => {
+    res.status(200).json({ entries: ctx.catalog.list() });
+  });
+}
+`;
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'octomux-plugin-integration-'));
   resetMountedPlugins();
   resetPluginRoutes();
-  resetFacts();
+  resetRecords();
   resetPluginUi();
+  resetPolicy();
+  resetPluginGrants();
   createTestDb();
 });
 
@@ -132,12 +230,14 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
   resetMountedPlugins();
   resetPluginRoutes();
-  resetFacts();
+  resetRecords();
   resetPluginUi();
+  resetPolicy();
+  resetPluginGrants();
 });
 
 describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
-  it('serves a fixture plugin over real HTTP, then releases everything on unloadPlugin except already-written facts', async () => {
+  it('serves a fixture plugin over real HTTP, then releases everything on unloadPlugin except already-written records', async () => {
     const task = insertTestTask();
     const effectMarker = path.join(tmpDir, 'effect-ran.txt');
     const fixturePath = writeModule(
@@ -148,6 +248,7 @@ describe('plugin runtime integration: mount -> HTTP -> unmount', () => {
 plugins:
   - id: fixture-a
     name: ${fixturePath}
+    grants: [http.route, records.define, records.write, ui.panel]
 `);
 
     // 1. Mount via the real loadPlugins().
@@ -168,16 +269,16 @@ plugins:
     expect(contribRes.body.contributions[0]).toMatchObject({
       pluginId: 'fixture-a',
       slot: 'task.panel',
-      // Fact type must be QUALIFIED as `<pluginId>:coverage`, not bare.
-      factType: 'fixture-a:coverage',
+      // Store name must be QUALIFIED as `<pluginId>:coverage`, not bare.
+      recordStore: 'fixture-a:coverage',
       as: 'stat',
     });
 
-    const factsRes = await request(app).get(`/api/tasks/${task.id}/facts`);
-    expect(factsRes.status).toBe(200);
-    expect(factsRes.body.facts).toHaveLength(1);
-    expect(factsRes.body.facts[0]).toMatchObject({
-      type: 'fixture-a:coverage',
+    const recordsRes = await request(app).get(`/api/tasks/${task.id}/records`);
+    expect(recordsRes.status).toBe(200);
+    expect(recordsRes.body.records).toHaveLength(1);
+    expect(recordsRes.body.records[0]).toMatchObject({
+      store: 'fixture-a:coverage',
       payload: { pct: 92 },
     });
 
@@ -198,15 +299,15 @@ plugins:
     const contribAfter = await request(app).get('/api/plugin-ui/contributions');
     expect(contribAfter.body.contributions).toEqual([]);
 
-    // The fact TYPE is gone: a further put is rejected...
-    await expect(putFact('fixture-a', task.id, 'coverage', { pct: 1 })).rejects.toThrow(
+    // The store definition is gone: a further put is rejected...
+    await expect(putRecord('fixture-a', 'coverage', { pct: 1 }, task.id)).rejects.toThrow(
       /not defined/,
     );
-    // ...but the already-written fact survives — it dies with the task, not
-    // the plugin.
-    const factsAfter = await request(app).get(`/api/tasks/${task.id}/facts`);
-    expect(factsAfter.body.facts).toHaveLength(1);
-    expect(factsAfter.body.facts[0]).toMatchObject({ type: 'fixture-a:coverage' });
+    // ...but the already-written record survives — it dies with the task,
+    // not the plugin.
+    const recordsAfter = await request(app).get(`/api/tasks/${task.id}/records`);
+    expect(recordsAfter.body.records).toHaveLength(1);
+    expect(recordsAfter.body.records[0]).toMatchObject({ store: 'fixture-a:coverage' });
 
     // ctx.effect() ran.
     expect(fs.existsSync(effectMarker)).toBe(true);
@@ -222,7 +323,7 @@ plugins:
   });
 });
 
-describe('plugin runtime integration: cross-plugin ctx.facts.watch (SHR-255)', () => {
+describe('plugin runtime integration: cross-plugin ctx.records.watch (SHR-255)', () => {
   it("delivers A's writes to B's watcher, survives A's reload, and only dies when B unmounts", async () => {
     const task = insertTestTask();
     const watchLog = path.join(tmpDir, 'watch-log.txt');
@@ -236,6 +337,7 @@ describe('plugin runtime integration: cross-plugin ctx.facts.watch (SHR-255)', (
 plugins:
   - id: fixture-a
     name: ${writerPath}
+    grants: [http.route, records.define, records.write]
   - id: fixture-b
     name: ${watcherPath}
 `);
@@ -274,5 +376,337 @@ plugins:
     const emit3 = await request(app).post('/api/p/fixture-a/emit/99');
     expect(emit3.status).toBe(200);
     expect(readWatchLog(watchLog)).toHaveLength(2); // unchanged — B is gone.
+  });
+});
+
+describe('plugin runtime integration: ctx.catalog (SHR-268)', () => {
+  it('is a read-only view a real fixture plugin can see itself and core through, and loses its own entry on unload', async () => {
+    const marker = path.join(tmpDir, 'catalog-marker.json');
+    const fixturePath = writeModule('fixture-catalog.mjs', fixtureCatalogSource(marker));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: fixture-catalog
+    name: ${fixturePath}
+    grants: [http.route, records.define, workflows.register, harnesses.register, integrations.register, ui.panel]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+    expect(report.loaded).toHaveLength(1);
+
+    // What the plugin itself saw, from INSIDE its own apply() — this is the
+    // real ctx.catalog handed to a real fixture module, not a hand-built
+    // PluginContext.
+    const seenFromInside = JSON.parse(fs.readFileSync(marker, 'utf-8')) as {
+      catalogKeys: string[];
+      atApplyTime: string[];
+    };
+
+    // Read-only: `ctx.catalog` has exactly one method. No register/put/etc.
+    expect(seenFromInside.catalogKeys).toEqual(['list']);
+
+    // Ordering caveat: `loader.ts` only adds a row to `mounted` AFTER
+    // `apply()` returns, so a plugin never sees ITSELF from inside its own
+    // apply() — not even in a single-plugin manifest. Core is always visible
+    // (it isn't gated on `mounted`).
+    expect(seenFromInside.atApplyTime).not.toContain('fixture-catalog');
+    expect(seenFromInside.atApplyTime).toContain('core');
+
+    const app = createApp();
+
+    // By request time the plugin IS mounted — this is where "sees itself"
+    // actually holds, proven over real HTTP through the plugin's own ctx.
+    const catalogRes = await request(app).get('/api/p/fixture-catalog/catalog');
+    expect(catalogRes.status).toBe(200);
+    const entries = catalogRes.body.entries as Array<{
+      id: string;
+      kind: string;
+      provides: string[];
+      source: string;
+    }>;
+
+    const self = entries.find((e) => e.id === 'fixture-catalog');
+    expect(self).toMatchObject({ id: 'fixture-catalog', kind: 'plugin', source: fixturePath });
+    expect(self?.provides).toEqual(
+      expect.arrayContaining([
+        'route:GET /ping',
+        'route:GET /catalog',
+        'record:fixture-catalog:seen',
+      ]),
+    );
+
+    const core = entries.find((e) => e.id === 'core');
+    expect(core).toMatchObject({ id: 'core', kind: 'core', source: 'built-in' });
+    expect(core?.provides).toEqual(expect.arrayContaining(['harness:claude-code']));
+
+    // Same property from OUTSIDE, via the real listCatalog() import.
+    const afterLoad = listCatalog();
+    expect(afterLoad.find((e) => e.id === 'fixture-catalog')).toBeDefined();
+    expect(afterLoad.find((e) => e.id === 'core')).toBeDefined();
+
+    const unloadResult = await unloadPlugin('fixture-catalog');
+    expect(unloadResult.ok).toBe(true);
+
+    // Gone from the catalog on unmount; core survives.
+    const afterUnload = listCatalog();
+    expect(afterUnload.find((e) => e.id === 'fixture-catalog')).toBeUndefined();
+    const coreAfterUnload = afterUnload.find((e) => e.id === 'core');
+    expect(coreAfterUnload).toMatchObject({ id: 'core', kind: 'core' });
+  });
+});
+
+describe('plugin runtime integration: ctx.artifacts (SHR-269)', () => {
+  it('writes a file during a run that surfaces on the run detail and outlives the plugin', async () => {
+    // A real worktree dir, because artifacts are FILES under
+    // `<worktree>/.octomux/artifacts/` — not DB rows.
+    const worktree = fs.mkdtempSync(path.join(tmpDir, 'worktree-'));
+    const task = insertTestTask({ worktree });
+    const run = insertRun({ workflowKind: 'loop', trigger: 'manual', taskId: task.id });
+
+    const fixturePath = writeModule('fixture-reporter.mjs', fixtureReporterSource(task.id));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reporter
+    name: ${fixturePath}
+    grants: [http.route, artifacts.write]
+`);
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+
+    const app = createApp();
+
+    // 1. The plugin produces output mid-run, through ctx.artifacts.write().
+    const emit = await request(app).post('/api/p/reporter/report');
+    expect(emit.status).toBe(200);
+    expect(emit.body.entry).toMatchObject({
+      pluginId: 'reporter',
+      name: 'coverage.md',
+      mime: 'text/markdown',
+      url: `/api/tasks/${task.id}/artifacts/reporter/coverage.md`,
+    });
+
+    // 2. It's on disk in the worktree, where it diffs and survives a DB wipe.
+    expect(
+      fs.readFileSync(path.join(worktree, '.octomux/artifacts/reporter/coverage.md'), 'utf-8'),
+    ).toBe(REPORT_BODY);
+
+    // 3. It shows up in the RUN DETAIL payload — the point of the ticket. No
+    //    core change was needed for THIS plugin: `services/run-detail.ts` reads
+    //    whatever any plugin wrote.
+    const runRes = await request(app).get(`/api/runs/${run.id}`);
+    expect(runRes.status).toBe(200);
+    expect(runRes.body.artifacts).toHaveLength(1);
+    expect(runRes.body.artifacts[0]).toMatchObject({
+      pluginId: 'reporter',
+      name: 'coverage.md',
+      mime: 'text/markdown',
+      size: Buffer.byteLength(REPORT_BODY, 'utf8'),
+    });
+
+    // 4. And the body is fetchable over HTTP at the advertised url.
+    const bodyRes = await request(app).get(runRes.body.artifacts[0].url);
+    expect(bodyRes.status).toBe(200);
+    expect(bodyRes.text).toBe(REPORT_BODY);
+
+    // 5. ctx.artifacts.list() reads it back.
+    const listRes = await request(app).get('/api/p/reporter/list');
+    expect(listRes.body.artifacts).toHaveLength(1);
+
+    // 6. Unmounting the plugin does NOT delete its output. An artifact is a
+    //    file in the worktree; it dies with the task, not with the plugin —
+    //    the same rule as an already-written fact.
+    expect((await unloadPlugin('reporter')).ok).toBe(true);
+    const afterUnload = await request(app).get(`/api/runs/${run.id}`);
+    expect(afterUnload.body.artifacts).toHaveLength(1);
+    expect((await request(app).get(`/api/tasks/${task.id}/artifacts`)).body.artifacts).toHaveLength(
+      1,
+    );
+  });
+
+  it('rejects a write to a task with no worktree, and cannot escape its own namespace', async () => {
+    const worktree = fs.mkdtempSync(path.join(tmpDir, 'worktree-'));
+    const noWorktree = insertTestTask({ id: 'task-no-wt', worktree: null });
+    const withWorktree = insertTestTask({ id: 'task-with-wt', worktree });
+
+    const manifestPath = writeManifest(`
+plugins:
+  - id: reporter
+    name: ${writeModule('fixture-reporter.mjs', fixtureReporterSource(noWorktree.id))}
+    grants: [http.route, artifacts.write]
+`);
+    expect((await loadPlugins({ manifestPath, resolveFrom: tmpDir })).failed).toEqual([]);
+    const app = createApp();
+
+    // No worktree -> the write REJECTS. Not a silent no-op: a plugin awaiting
+    // write() has to learn its output went nowhere.
+    const emit = await request(app).post('/api/p/reporter/report');
+    expect(emit.status).toBe(200);
+    expect(emit.body).toMatchObject({ ok: false });
+    expect(emit.body.error).toMatch(/no worktree/);
+
+    // A traversing name never reaches the filesystem, and nothing lands
+    // outside `<worktree>/.octomux/artifacts/`.
+    for (const name of ['../escaped.md', 'nested/deep.md', '.hidden.md', '']) {
+      const bad = await request(app)
+        .post(`/api/p/reporter/report-as`)
+        .query({ task: withWorktree.id, name });
+      expect(bad.body).toMatchObject({ ok: false });
+      expect(bad.body.error).toMatch(/invalid artifact name/);
+    }
+    expect(fs.existsSync(path.join(worktree, '..', 'escaped.md'))).toBe(false);
+    // Not one of them created the plugin's artifact dir, let alone a file.
+    expect(fs.existsSync(path.join(worktree, '.octomux', 'artifacts', 'reporter'))).toBe(false);
+  });
+});
+
+function fixtureGuardSource(opts: { deny?: string; patchModel?: string }): string {
+  const body = opts.deny
+    ? `return { deny: ${JSON.stringify(opts.deny)} };`
+    : `return { patch: { model: ${JSON.stringify(opts.patchModel)} } };`;
+  return `
+export function apply(ctx) {
+  ctx.policy.intercept('task.launch', async (intent) => {
+    ${body}
+  });
+}
+`;
+}
+
+describe('plugin runtime integration: ctx.policy + capability grants (SHR-259)', () => {
+  it('refuses a plugin that calls ctx.policy without the grant, naming plugin and capability', async () => {
+    const fixturePath = writeModule('fixture-ungranted.mjs', fixtureGuardSource({ deny: 'nope' }));
+    const manifestPath = writeManifest(`
+plugins:
+  - id: ungranted
+    name: ${fixturePath}
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+
+    expect(report.loaded).toEqual([]);
+    expect(report.failed).toHaveLength(1);
+    expect(report.failed[0].id).toBe('ungranted');
+    expect(report.failed[0].phase).toBe('apply');
+    expect(report.failed[0].error).toContain('plugin "ungranted"');
+    expect(report.failed[0].error).toContain('policy.intercept');
+    expect(report.failed[0].error).toContain('grants: [policy.intercept]');
+
+    // Denied means denied: no hook reached the table, so the gate stays open.
+    const outcome = await evaluatePolicy('task.launch', { taskId: 'nope', data: {} });
+    expect(outcome.allowed).toBe(true);
+  });
+
+  it('denies a task.launch with the plugin reason and records it as a fact and in task history', async () => {
+    const task = insertTestTask();
+    const fixturePath = writeModule(
+      'fixture-spendcap.mjs',
+      fixtureGuardSource({ deny: 'monthly cap reached' }),
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: spendcap
+    name: ${fixturePath}
+    grants: [policy.intercept]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+    expect(report.grants?.spendcap).toEqual(['policy.intercept']);
+
+    const outcome = await evaluatePolicy('task.launch', {
+      taskId: task.id,
+      repoPath: task.repo_path,
+      data: { harnessId: 'claude-code', model: null, agent: null },
+    });
+
+    expect(outcome).toEqual({
+      allowed: false,
+      reason: 'monthly cap reached',
+      pluginId: 'spendcap',
+    });
+
+    // Recorded as a plugin_records row (SHR-282) — machine-readable audit.
+    const records = readRecordsForTask(task.id, 'core:policy.decision');
+    expect(records).toHaveLength(1);
+    expect(records[0].payload).toMatchObject({
+      point: 'task.launch',
+      pluginId: 'spendcap',
+      decision: 'deny',
+      reason: 'monthly cap reached',
+    });
+
+    // ...and in the task's own history, which is what a human actually sees.
+    const updates = listTaskUpdates(task.id);
+    const policyRow = updates.find((u) => u.kind === 'policy');
+    expect(policyRow).toBeDefined();
+    expect(policyRow?.body).toContain('spendcap');
+    expect(policyRow?.body).toContain('monthly cap reached');
+
+    // Unmounting the plugin takes the refusal with it.
+    const unloaded = await unloadPlugin('spendcap');
+    expect(unloaded.ok).toBe(true);
+    const afterUnmount = await evaluatePolicy('task.launch', { taskId: task.id, data: {} });
+    expect(afterUnmount.allowed).toBe(true);
+  });
+
+  it('rewrites the model on the way through', async () => {
+    const task = insertTestTask();
+    const fixturePath = writeModule(
+      'fixture-router.mjs',
+      fixtureGuardSource({ patchModel: 'claude-haiku-4-5-20251001' }),
+    );
+    const manifestPath = writeManifest(`
+plugins:
+  - id: router
+    name: ${fixturePath}
+    grants: [policy.intercept]
+`);
+
+    const report = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(report.failed).toEqual([]);
+
+    const outcome = await evaluatePolicy('task.launch', {
+      taskId: task.id,
+      data: { harnessId: 'claude-code', model: 'claude-opus-5', agent: null },
+    });
+
+    expect(outcome.allowed).toBe(true);
+    expect(outcome.allowed && outcome.data.model).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('withholds a grant added to an already-acknowledged row until it is approved', async () => {
+    const fixturePath = writeModule('fixture-widen.mjs', fixtureGuardSource({ deny: 'nope' }));
+    const narrow = `
+plugins:
+  - id: widen
+    name: ${fixturePath}
+    grants: [records.write]
+`;
+    // First boot acknowledges whatever the row declares — the user added it.
+    const manifestPath = writeManifest(narrow);
+    const first = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    // `records.write` alone is not enough for this fixture's apply(), so it fails —
+    // what matters here is the ledger it left behind.
+    expect(first.failed[0]?.error).toContain('policy.intercept');
+
+    resetMountedPlugins();
+
+    // Now the row asks for more. The added grant is withheld, not silently taken.
+    writeManifest(`
+plugins:
+  - id: widen
+    name: ${fixturePath}
+    grants: [records.write, policy.intercept]
+`);
+    const second = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(second.pendingGrants?.widen).toEqual(['policy.intercept']);
+    expect(second.failed[0]?.error).toContain('policy.intercept');
+
+    // Acknowledge it the way `octomux plugins approve` does, and it takes effect.
+    acknowledgeGrants(manifestPath, 'widen', ['records.write', 'policy.intercept']);
+    resetMountedPlugins();
+    const third = await loadPlugins({ manifestPath, resolveFrom: tmpDir });
+    expect(third.failed).toEqual([]);
+    expect(third.pendingGrants).toBeUndefined();
   });
 });

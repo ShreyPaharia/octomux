@@ -41,7 +41,14 @@ Add a row to `~/.octomux/octomux.yml` (create it if it doesn't exist):
 plugins:
   - id: myplugin # local namespace — must match ^[a-z0-9][a-z0-9-]*$
     name: my-plugin-package # npm package name, or an absolute path for local dev
+    grants: [workflows.register] # required — see §Capability grants below
 ```
+
+Capability grants are **deny-by-default**: `ctx.workflows.register` (and every
+other registrar) throws for a row with no matching entry in `grants:`, so
+`apply()` fails and `myplugin` never loads. The row above declares exactly
+what this example's `apply()` uses; see [§Capability grants](#capability-grants)
+for the full list and the widen/approve flow.
 
 Restart octomux and check it took:
 
@@ -53,6 +60,7 @@ octomux doctor
 ```
 Loaded (1)
   ✓ myplugin (my-plugin-package@1.0.0) — 3.2ms
+      grants: workflows.register
 
 Failed (0)
   none
@@ -66,17 +74,150 @@ See [`examples/hello-plugin`](./examples/hello-plugin) for a full package
 (`package.json`, a kind preset, a `README.md` showing both manifest-row
 styles) verified against the real loader.
 
-## The three registrars
+For a bigger, non-toy example — a real compute provider that runs a task's
+git worktree and processes on another machine over SSH — see
+[`examples/ssh-compute`](./examples/ssh-compute), covered in
+[§`ctx.compute.register(p)`](#ctxcomputeregisterp) below. For a surface
+plugin — a `discord` surface that renders panels to Discord markdown and
+answers prompts — see [`examples/discord-surface`](./examples/discord-surface),
+covered in [§`ctx.surfaces.register(surface)`](#ctxsurfacesregistersurface)
+below.
 
-`ctx.workflows`, `ctx.integrations`, `ctx.harnesses` are the only way a
-plugin reaches core's registries — there is no other API surface
-(`packages/plugin-api/src/index.ts`). Each takes a plain object typed as
-`Record<string, unknown>` at the type level (the plan keeps `@octomux/plugin-api`
-free of a dependency on the concrete server-side registry types), which means
-**nothing at the type level stops you from handing back a bad payload** — the
-guards below (`server/plugins/context.ts`) are the actual enforcement, and
-they're what turns a bad payload into a clean `LoadReport.failed` entry
-instead of a boot crash.
+## Capability grants
+
+A manifest row declares the `ctx` capabilities its plugin uses. **Undeclared
+is denied** — there is no warn-and-continue path. Try the Quickstart plugin
+without the `grants:` line and `ctx.workflows.register` throws
+(`assertGranted` in `server/plugins/grants.ts`), `apply()` fails, and the row
+lands in `octomux doctor` under `Failed` with `phase: 'apply'`:
+
+```
+plugin "myplugin": capability "workflows.register" is not granted. Add it to the plugin's row in octomux.yml:
+    grants: [workflows.register]
+```
+
+That message is the actual thrown error, verbatim — it already names the
+line to add.
+
+### The 17 capabilities
+
+Each name is the `ctx` path it gates (`PLUGIN_CAPABILITIES` in
+`server/plugins/grants.ts`, `PluginCapability` in
+`packages/plugin-api/src/index.ts`):
+
+| Capability              | Gates                                 |
+| ----------------------- | ------------------------------------- |
+| `workflows.register`    | `ctx.workflows.register()`            |
+| `integrations.register` | `ctx.integrations.register()`         |
+| `harnesses.register`    | `ctx.harnesses.register()`            |
+| `compute.register`      | `ctx.compute.register()`              |
+| `http.route`            | `ctx.http.route()`                    |
+| `records.define`        | `ctx.records.define()`                |
+| `records.write`         | `ctx.records.put()`/`begin()`/`end()` |
+| `ui.panel`              | `ctx.ui.panel()`                      |
+| `artifacts.write`       | `ctx.artifacts.write()`               |
+| `policy.intercept`      | `ctx.policy.intercept()`              |
+| `secrets.read`          | `ctx.secrets.resolve()`               |
+| `services.provide`      | `ctx.services.provide()`              |
+| `agents.run`            | `ctx.agents.run()`                    |
+| `fanout.run`            | `ctx.fanout.run()`                    |
+| `surfaces.register`     | `ctx.surfaces.register()`             |
+| `ui.action`             | `ctx.ui.action()`                     |
+
+Reads and logging are ungated — no grant needed for `ctx.logger`,
+`ctx.settings`, `ctx.catalog.list()`, `ctx.records.read()`/`ctx.records.query()`/
+`ctx.records.watch()`/`ctx.records.interrupted()`, `ctx.artifacts.list()`,
+`ctx.fanout.status()`/`ctx.fanout.list()`, `ctx.services.require()`, or
+`ctx.effect()`. `ctx.records.put()`/`begin()`/`end()` need `records.write` —
+see [§`ctx.records`](#ctxrecords).
+
+### Figuring out which grants you need
+
+Start from the `ctx.*` calls in your `apply()` — the grant name IS the `ctx`
+path, so `ctx.compute.register(...)` needs `grants: [compute.register]` and
+nothing else. Get it wrong and the thrown error tells you the exact line to
+add; there's no need to cross-reference the table above unless you're
+grant-listing up front.
+
+### Widening a grant needs an ack
+
+The effective set isn't just what's declared — it's checked against
+`plugin-grants.json`, a ledger kept next to `octomux.yml`
+(`resolveGrantsForRow` in `server/plugins/grants.ts`):
+
+- **First time octomux sees a row** — grants everything declared, and
+  records it in the ledger.
+- **Removing a grant** — free, takes effect next boot, re-recorded.
+- **Adding a grant** to a row octomux has already seen — withheld. The
+  plugin loads with its previous (narrower) grant set; the new capability
+  throws until you run `octomux plugins approve <id>`
+  (`cli/src/commands/plugins.ts`). `octomux doctor` prints what's pending:
+
+  ```
+        ⚠ withheld (not acknowledged): policy.intercept — run: octomux plugins approve myplugin
+  ```
+
+This exists because an `npm update` that also rewrites `octomux.yml` must not
+silently hand a plugin `policy.intercept` — widening takes a human
+acknowledging it, narrowing doesn't need one.
+
+### Grants are not a sandbox
+
+A plugin runs in-process with the DB handle, every credential, and
+`process.env`; it can do everything core can do without ever calling `ctx`.
+Grants record and enforce a claim at core's own seams so a human can review
+it — they confine nothing. `octomux plugins approve` is an operator
+confirming intent, not a security check on the plugin's code. See
+[§Limits, stated honestly](#limits-stated-honestly) for the full trust model.
+
+## The registrars and methods on `ctx`
+
+There are more than three now: `ctx.workflows`, `ctx.integrations`,
+`ctx.harnesses`, `ctx.compute`, `ctx.surfaces`, `ctx.http`, `ctx.records`,
+`ctx.services`, `ctx.attention`, `ctx.ui`, and `ctx.policy` are
+**registrars** — each adds something to core's registries, or (only
+`ctx.policy`) can refuse something core was about to do. `ctx.artifacts`,
+`ctx.agents`, `ctx.fanout`, and `ctx.catalog` are **methods on `ctx`**, not
+registrars — nobody needs a different artifact/agent-run/fan-out
+implementation, they need to run one, so none of them has a `register()`.
+`ctx.effect()`, `ctx.logger`, `ctx.settings`, and `ctx.records`'s checkpoint
+trio round out the object.
+
+| `ctx` member                                          | What it's for                                           | This guide     | Deep reference                                                                     |
+| ----------------------------------------------------- | ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
+| `ctx.workflows.register()`                            | register a workflow kind                                | §below         | [api-reference.md](./api-reference.md#ctxworkflows--ctxintegrations--ctxharnesses) |
+| `ctx.integrations.register()`                         | register an integration provider                        | §below         | same                                                                               |
+| `ctx.harnesses.register()`                            | register a harness                                      | §below         | same                                                                               |
+| `ctx.compute.register()`                              | choose where a task's worktree/processes run            | §below         | [api-reference.md](./api-reference.md#ctxcompute)                                  |
+| `ctx.surfaces.register()`                             | add a place octomux presents itself to a human          | §below         | [api-reference.md](./api-reference.md#ctxsurfaces)                                 |
+| `ctx.http.route()`                                    | add an HTTP route                                       | reference only | [api-reference.md](./api-reference.md#ctxhttp)                                     |
+| `ctx.records` (`define`/`put`/`read`/`query`/`watch`) | task-scoped or durable plugin records, one shape        | §below         | [api-reference.md](./api-reference.md#ctxrecords)                                  |
+| `ctx.services` (`provide`/`require`)                  | depend on a capability by name, not a plugin package    | §below         | [api-reference.md](./api-reference.md#ctxservices)                                 |
+| `ctx.ui.panel()`                                      | bind a declarative panel to a `ctx.records` store       | reference only | [api-reference.md](./api-reference.md#ctxui)                                       |
+| `ctx.policy.intercept()`                              | deny or patch a task intent at a gate point             | reference only | [api-reference.md](./api-reference.md#ctxpolicy)                                   |
+| `ctx.artifacts` (`write`/`list`)                      | drop a file into the task's worktree                    | reference only | [api-reference.md](./api-reference.md#ctxartifacts)                                |
+| `ctx.agents.run()`                                    | headless, structured-output agent session               | reference only | [api-reference.md](./api-reference.md#ctxagents)                                   |
+| `ctx.attention.ask()`                                 | ask a human a question, fanned out across surfaces      | reference only | [api-reference.md](./api-reference.md#ctxattention)                                |
+| `ctx.fanout.run()`                                    | run a step per item, with retry and resume              | reference only | [api-reference.md](./api-reference.md#ctxfanout)                                   |
+| `ctx.catalog.list()`                                  | read what's currently installed                         | §below         | [api-reference.md](./api-reference.md#ctxcatalog)                                  |
+| `ctx.settings`                                        | your plugin's own opaque config                         | §below         | [api-reference.md](./api-reference.md#ctxsettings)                                 |
+| `ctx.logger`                                          | structured logging, scoped `plugin:<id>`                | —              | [api-reference.md](./api-reference.md#ctxlogger)                                   |
+| `ctx.effect()`                                        | register a teardown callback, run in reverse on unmount | reference only | [api-reference.md](./api-reference.md#plugincontext)                               |
+| `ctx.ui.panel()` / `ctx.ui.action()`                  | bind a declarative panel, or declare a host-run action  | §below         | [api-reference.md](./api-reference.md#ctxui)                                       |
+
+"Reference only" rows aren't walked through step by step in this guide — the
+full shape lives in `api-reference.md`. This file stays a guide: it covers
+`workflows`/`integrations`/`harnesses`/`compute`/`surfaces`/`ui.action` (the
+registrars that need the most explaining), plus `catalog`/`settings`/`records`, in
+depth below.
+
+Every registrar payload is typed as `Record<string, unknown>` at the type
+level (the plan keeps `@octomux/plugin-api` free of a dependency on the
+concrete server-side registry types), which means **nothing at the type
+level stops you from handing back a bad payload** — the guards below
+(`server/plugins/context.ts`) are the actual enforcement, and they're what
+turns a bad payload into a clean `LoadReport.failed` entry instead of a boot
+crash.
 
 ### `ctx.workflows.register(wf)`
 
@@ -87,7 +228,8 @@ instead of a boot crash.
 | `run`                                                                                      | no                        | if present, must be a function |
 | everything else (`displayName`, `surfaces`, `execution`, `config`, `output`, `trigger`, …) | not validated by the host | —                              |
 
-Full shape: `WorkflowType` in `server/workflows/types.ts`.
+Full shape: `WorkflowType` in `server/workflows/types.ts`. Requires the
+`workflows.register` grant — see [§Capability grants](#capability-grants).
 
 Your `kind` is a **local, bare id** — octomux qualifies it to
 `<row-id>:<kind>` before it ever reaches the registry
@@ -110,7 +252,8 @@ impossible.
 | `test`                        | no                        | if present, must be a function |
 | `displayName`, `configSchema` | not validated by the host | —                              |
 
-Full shape: `IntegrationProvider` in `server/integrations/types.ts`.
+Full shape: `IntegrationProvider` in `server/integrations/types.ts`. Requires
+the `integrations.register` grant — see [§Capability grants](#capability-grants).
 `events` is `HookEventName[]` — `workflow_status_changed`, `summary_updated`,
 `note_added`, `ref_added`, `ref_removed`, `task_created`,
 `runtime_state_changed` (`server/hook-types.ts`).
@@ -137,7 +280,8 @@ receive) is set through the existing integrations API —
 
 Full shape (including several **unwired** optional members —
 `postLaunch`, `buildPromptDelivery`, `attachMcp`, `sendMessage` — see
-`api-reference.md`): `Harness` in `server/harnesses/types.ts`.
+`api-reference.md`): `Harness` in `server/harnesses/types.ts`. Requires the
+`harnesses.register` grant — see [§Capability grants](#capability-grants).
 
 That required-field list is exactly `HARNESS_REQUIRED_FN_FIELDS` in
 `context.ts` — it's every member core calls unconditionally on the hot paths
@@ -150,6 +294,187 @@ on your object.
 
 Same qualification and same warn-and-keep-first duplicate policy as
 integrations (`server/harnesses/registry.ts`).
+
+## Reading what is installed — ctx.catalog
+
+`ctx.catalog.list()` returns what's currently installed — every plugin's own
+registrations, every sibling's, and core's — as one flat list, computed live
+from the same registries every other `ctx.*` registrar writes into. It's a
+plain read, not another registrar: there's no `register()` on it and no way to
+override another entry, because "what's installed" is a query, never an
+implementation choice. See [`api-reference.md#not-seams`](./api-reference.md#not-seams)
+for the reasoning and [`api-reference.md`](./api-reference.md#ctxcatalog) for
+the full shape.
+
+```js
+const installed = ctx.catalog.list();
+ctx.logger.info({ installed: installed.map((e) => e.id) }, 'who else is here');
+```
+
+## Depending on a capability — ctx.services
+
+`ctx.services` lets a plugin depend on "something that can send chat
+messages" instead of on `octomux-plugin-slack` by name. One plugin provides
+a name, another requires it, and neither imports the other:
+
+```js
+// provider (e.g. a Slack plugin)
+ctx.services.provide('chat.send', {
+  async send(text) {
+    /* ... */
+  },
+});
+
+// consumer — order in octomux.yml doesn't matter, resolution happens at mount
+const chat = ctx.services.require('chat.send');
+await chat.get().send('build failed');
+```
+
+Service names are the one unqualified thing in this API — `chat.send` has to
+be the same string on both sides, so it isn't prefixed with a plugin id like
+everything else you register. If two plugins provide the same name, the one
+listed earlier in `octomux.yml` wins; the other takes over only if the first
+unmounts. An unmet `require()` fails just that plugin at boot, in the load
+report, never the whole boot. Full semantics, including the reload gap:
+[`api-reference.md` §`ctx.services`](./api-reference.md#ctxservices).
+
+```yaml
+plugins:
+  - id: slack-notify
+    name: '@acme/octomux-slack-notify'
+    grants: [services.provide]
+```
+
+### `ctx.compute.register(p)`
+
+A fourth registrar, alongside the three above: it decides **where a task's
+git worktree lives and where its processes run**. Not a pluggable isolation
+strategy — every provider still gets a real git worktree per task, that's
+octomux's guarantee, not a preference — a provider only changes which
+machine that worktree (and everything touching it: `git`, tmux, the agent
+process) lives on.
+
+```js
+ctx.compute.register({
+  kind: 'ssh', // local id — becomes "<row-id>:ssh"
+  async create(task, computeCtx) {
+    /* ... make sure the repo exists on the remote, return a ComputeSession */
+  },
+  async resume(task, computeCtx) {
+    /* optional — re-attach after a server restart; falls back to create() */
+  },
+});
+```
+
+Requires the `compute.register` grant — see
+[§Capability grants](#capability-grants).
+
+`create`/`resume` get a `ComputeCreateContext` with `config` (your
+`settings.compute[<qualified-kind>]` blob), `secrets` (env-resolved,
+handed to `create`/`resume` only — **must never reach the agent**), and
+`host` (the server's own machine — `host.exec`/`host.spawnPty` is how a
+remote provider spawns anything, without a new dependency). Full field-by-
+field reference, including the credential invariant and why `host` exists
+instead of a plugin importing `node:child_process` directly:
+[`api-reference.md` §`ctx.compute`](./api-reference.md#ctxcompute).
+
+See [`examples/ssh-compute`](./examples/ssh-compute) for a complete provider
+built on exactly this — it runs a task over SSH, with a README covering
+config/secrets, remote-box prerequisites, the trust model, and precisely
+what its test suite verifies versus what still needs a real remote host.
+
+### `ctx.surfaces.register(surface)`
+
+A fifth registrar: it adds a place octomux presents itself to a human. Core
+already speaks four — `web`, `cli`, `slack`, `telegram` — all frozen before
+any plugin loads, same as `ctx.compute`'s `local`. This works only because
+`ctx.ui` panels are declarative bindings, not components: a panel written
+before your surface existed still renders on it, unchanged.
+
+```js
+ctx.surfaces.register({
+  kind: 'discord', // local id — becomes "<row-id>:discord"
+  renderers: ['markdown', 'json'],
+  render(panel) {
+    /* ... turn one resolved panel into Discord-flavoured markdown */
+  },
+  async prompt(ask) {
+    /* optional — ask a human a question on this surface; omit it and the
+       surface is read-only */
+  },
+});
+```
+
+The host resolves `panel.as` → `panel.renderer` against your `renderers`
+list **before** calling `render` — a surface that declares
+`['markdown']` only ever gets called with `renderer: 'markdown'`, never with
+a renderer name it didn't declare. Unsupported degrades to your `fallback`
+(default `'json'`), never drops the panel.
+
+`prompt` is optional; without it the surface is read-only, and asking it
+throws. **All four core surfaces are read-only today** — octomux's only
+human-question path is the DB-backed approval gate
+(`server/orchestrator/gate.ts`), untouched by this registrar — so a plugin
+surface implementing `prompt` is doing something no core surface does yet.
+
+Requires the `surfaces.register` grant — see
+[§Capability grants](#capability-grants). Full field-by-field reference,
+including the renderer-resolution table and the qualification/freeze rule:
+[`api-reference.md` §`ctx.surfaces`](./api-reference.md#ctxsurfaces).
+
+See [`examples/discord-surface`](./examples/discord-surface) for a complete
+surface — renders panels to Discord markdown and implements `prompt`, with
+its README stating plainly what would need a real Discord token/webhook to
+actually post.
+
+### `ctx.ui.action(def)`
+
+`ctx.ui.panel()` shows something; `ctx.ui.action()` does something. It's the
+write half of `ctx.ui`: you declare a named handler, the host holds it, and
+the client only ever sees the declaration minus the handler — a label, an
+optional slot, an optional JSON Schema, an optional confirm string. Your
+`run` function never leaves the process it was registered in.
+
+```yaml
+plugins:
+  - id: coverage-bot
+    name: '@acme/octomux-coverage-bot'
+    grants: [records.define, records.write, ui.panel, ui.action]
+```
+
+```js
+ctx.ui.action({
+  id: 'retry',
+  label: 'Retry failed check',
+  slot: 'task.panel', // omit for a command-palette-only action
+  command: true, // also surface it in the command palette
+  confirm: 'Re-run the coverage check for this task?',
+  schema: { type: 'object', properties: { reason: { type: 'string' } } },
+  async run({ taskId, input }) {
+    await rerunCoverageCheck(taskId, input.reason);
+    return { message: 'Coverage check re-queued.' };
+  },
+});
+```
+
+A `schema`, if you give it one, is what makes this more than a bare button:
+the client renders a form from it — the same schema-driven form the
+schedules UI builds from a workflow's `config` schema — and the host
+validates the submission against it before `run` ever sees `input`. Skip
+`schema` and the action takes no input at all.
+
+Invocation is over REST, not a direct call from the client into your code:
+`GET /api/plugin-ui/actions[?slot=]` lists what's contributed (ungated, like
+listing panels), and `POST /api/plugin-ui/actions/:actionId` with
+`{ taskId?, input? }` runs it (404 unknown id, 400 bad input). Requires the
+`ui.action` grant — see [§Capability grants](#capability-grants). Unmount
+removes an action the same way it removes a panel: gone with no restart.
+
+**Stated plainly:** all four core surfaces (`web`, `cli`, `slack`,
+`telegram`) are still read-only for prompting, and today only the web client
+actually draws an action trigger. A CLI or Slack action button is not a
+thing yet — don't build a plugin assuming one exists. Full shape:
+[`api-reference.md` §`ctx.ui`](./api-reference.md#ctxui).
 
 ## Kind presets (`kinds/*.json`)
 
@@ -210,18 +535,96 @@ scoped under `settings.plugins.<row-id>`, shallow-merged on `update`, and
 same as an integration's own `config` blob. Reachable from outside the plugin
 via `PATCH /api/settings` with `{ "plugins": { "<row-id>": { ... } } }`.
 
-## `ctx.kv` throws today
+## `ctx.records`
 
-```ts
-ctx.kv.get('anything'); // throws
+The one store for plugin data (SHR-282): a task-scoped append-only log, a
+durable keyed collection, and a plugin-private opaque blob store all used to
+be three separate tables. Now they're one `RecordStoreDefinition` shape,
+picked apart by `scope` (`task` dies with the task; `durable` outlives
+unmount) and `mode` (`append` adds a row; `upsert` replaces the row sharing
+its key). Omit `schema` for an opaque store — no schema, no query language,
+the old plugin-private scratch use case.
+
+| `scope`/`mode`                   | lifetime           | shape                       | meant for                            |
+| -------------------------------- | ------------------ | --------------------------- | ------------------------------------ |
+| `task` / `append`                | dies with the task | append-only log             | a task's history                     |
+| `durable` / `upsert` (schema)    | durable            | schema-validated, queryable | records a `ctx.ui` panel renders     |
+| `durable` / `upsert` (no schema) | durable            | opaque blob, get/set by key | scratch state only this plugin reads |
+
+```js
+ctx.records.define({
+  name: 'cursor',
+  scope: 'durable',
+  mode: 'upsert',
+  key: 'id',
+});
+await ctx.records.put('cursor', { id: 'main', lastSeenId: 42 });
+const [row] = await ctx.records.query('cursor', { where: { id: 'main' } });
 ```
 
-Every method — `get`, `set`, `del`, `list` — throws
-`ctx.kv.<method>() is not available for plugin "<id>" — the plugin storage
-task has not landed yet` (`createKv` in `context.ts`). It's on the interface
-because the shape is pinned, but there's no backing store. Don't build on it;
-use `ctx.settings` for opaque config, or your own storage (a file under the
-repo, your own DB) if you need more.
+Gate: `records.define` on `define()`; `records.write` on `put()`/`begin()`/
+`end()`. `read`/`query`/`watch`/`interrupted` are ungated reads, matching
+`artifacts.list`.
+
+### Crash recovery — `begin` / `end` / `interrupted`
+
+Every mount of a plugin (a fresh boot, or a hot reload) gets its own mount
+id. `begin(name, key, value)` checkpoints an in-flight operation under that
+id; `end(name, key)` settles the checkpoint once the operation finishes;
+`interrupted(name?)` returns every checkpoint stamped by a mount **other
+than the current one** — work this plugin was in the middle of the last time
+its process went away, crash or reload alike. Call it first thing in
+`apply()`:
+
+```js
+export async function apply(ctx) {
+  for (const { key, payload } of ctx.records.interrupted('sync')) {
+    ctx.logger.warn({ key }, 'resuming an interrupted operation');
+    await resume(key, payload);
+    ctx.records.end('sync', key);
+  }
+
+  ctx.records.begin('sync', 'full', { startedAt: new Date().toISOString() });
+  await runSync();
+  ctx.records.end('sync', 'full');
+}
+```
+
+`name` is required on `begin`/`end` — one plugin can own several stores, and
+a flat per-plugin checkpoint key would let two of them collide.
+`begin`/`end` and an ordinary `put()` share the same row per key — a plain
+`put` on a key currently marked in-flight settles the mark as a side effect,
+so prefix checkpoint keys (`sync:`, `upload:`) separately from your plain
+state keys to avoid an accidental collision wiping your own recovery marker.
+
+This is the plugin-side analogue of core's own boot recovery
+(`recoverTasks()` in `server/task-engine/reconcile.ts`,
+`rehydrateConversations()` in `server/index.ts`): the recovery point is a
+plugin's own `apply()`, so core runs no separate boot pass for plugin state
+and there's no parallel resume mechanism to hook into. A hot reload counts as
+a new mount too — whatever it interrupted correctly shows up in
+`interrupted()` on the next `apply()`, because it really was abandoned
+mid-operation.
+
+### Unmount follows ROW lifetime, not registration
+
+Every _registration_ a plugin makes through `ctx` — a workflow, a route, a
+harness, a UI panel, a policy hook — is undone on unmount. A `ctx.records`
+**definition** follows its rows instead: a `task`-scoped store's definition
+drops on unmount (its rows already died with their task), but a `durable`
+store's definition survives — a hot reload re-runs `apply()` moments later
+expecting its own durable records still there, and a store whose rows
+survived but whose definition vanished would be unreadable. Checkpoint state
+is not a registration either, so nothing deregisters it on unmount; deleting
+it is only ever explicit, via an ordinary `put()` on the same key.
+
+### Limits
+
+`records.write` gates the `ctx` surface, not the process: a plugin runs
+in-process and can read or write the `plugin_records` table directly, the
+same caveat as every other grant. There's no size cap, no TTL, and no
+eviction on a durable store — an unbounded writer grows the DB, and nothing
+here enforces a quota.
 
 ## Failure modes
 
@@ -267,7 +670,11 @@ harnesses/providers are unaffected.
 - **No sandbox.** A plugin's `apply()` (and any `run`/`handler`/`validate`
   it registers) executes **in-process**, with full Node/Bun privileges —
   filesystem, network, `child_process`, everything. Treat every manifest row
-  the same way you'd treat an npm `postinstall` script.
+  the same way you'd treat an npm `postinstall` script. Capability grants
+  (see [§Capability grants](#capability-grants)) don't change this: they gate
+  the `ctx` surface only, a plugin can do everything core can do without ever
+  calling `ctx`, and `octomux plugins approve` is an operator confirming
+  intent, not a security check on the code.
 - **`reconcile()` is declared, not called.** `OctomuxPlugin.reconcile?(ctx)`
   exists on the interface (`packages/plugin-api/src/index.ts`) for plugins
   owning out-of-process state (worktrees, tmux, files in a repo), and the

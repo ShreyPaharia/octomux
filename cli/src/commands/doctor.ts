@@ -2,31 +2,10 @@ import fs from 'fs';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { pluginReportPath } from '../../../server/plugins/paths.js';
+import { buildCatalog } from '../../../server/plugins/catalog.js';
 import { getContext } from '../action.js';
 import { heading, label, outputJson } from '../format.js';
 import type { LoadReport } from '@octomux/plugin-api';
-
-/**
- * `@octomux/plugin-api`'s `LoadReport` is gaining `manifestError?: string`
- * and `loadedAt: string` (a sibling change, not landed yet) so `doctor` can
- * tell "manifest failed to parse, nothing loaded" apart from "cleanly loaded
- * zero plugins". Declared locally so this file type-checks against the shape
- * doctor needs today; once the upstream type lands this becomes a no-op
- * (still-correct) intersection and can be dropped.
- *
- * `routeCounts` (SHR-253, keyed by plugin id) is the same story: `LoadReport`
- * is pinned and off-limits (plugin-api types only). The write side now lives
- * in `server/index.ts`, which snapshots `pluginRouteCounts()`
- * (`server/plugins/http-registry.ts`) onto the persisted report right after
- * `loadPlugins()` resolves — so every report from a running server carries a
- * real `routeCounts`. Declared locally here only so this file type-checks
- * against `LoadReport` without importing the intersection type.
- */
-type LoadReportWithMeta = LoadReport & {
-  manifestError?: string;
-  loadedAt?: string;
-  routeCounts?: Record<string, number>;
-};
 
 // A `failed[].error` string comes straight from a plugin's own thrown Error —
 // fully attacker-controlled. Printed raw through chalk it could repaint the
@@ -39,10 +18,44 @@ function sanitize(text: string): string {
   return text.replace(CONTROL_CHARS_RE, '');
 }
 
+// `CatalogEntry.provides` entries are `<category>:<rest>` — 'route:GET /x/:id',
+// 'workflow:demo:changelog', 'ui:task.panel', etc. Only the counts per
+// category are printed, never the raw entries, so nothing plugin-controlled
+// (a route path, say) reaches the console here.
+const PROVIDES_ORDER = ['workflow', 'harness', 'integration', 'route', 'ui', 'fact'] as const;
+const PROVIDES_LABELS: Record<(typeof PROVIDES_ORDER)[number], [string, string]> = {
+  workflow: ['workflow', 'workflows'],
+  harness: ['harness', 'harnesses'],
+  integration: ['integration', 'integrations'],
+  route: ['route', 'routes'],
+  ui: ['panel', 'panels'],
+  fact: ['fact', 'facts'],
+};
+
+/** Short summary suffix like ` — 2 routes, 1 workflow, 1 panel`. Empty string
+ *  (no suffix at all) when `provides` is absent or empty — an older
+ *  persisted report, pre-SHR-268, must not read as "0 of everything". */
+function providesSuffix(provides: string[] | undefined): string {
+  if (!provides || provides.length === 0) return '';
+  const counts = new Map<string, number>();
+  for (const entry of provides) {
+    const category = entry.split(':', 1)[0];
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  const parts: string[] = [];
+  for (const category of PROVIDES_ORDER) {
+    const n = counts.get(category);
+    if (!n) continue;
+    const [singular, plural] = PROVIDES_LABELS[category];
+    parts.push(`${n} ${n === 1 ? singular : plural}`);
+  }
+  return parts.length > 0 ? ` — ${parts.join(', ')}` : '';
+}
+
 type ReadResult =
   | { status: 'missing' }
   | { status: 'corrupt'; error: string }
-  | { status: 'ok'; report: LoadReportWithMeta; mtime: Date };
+  | { status: 'ok'; report: LoadReport; mtime: Date };
 
 /** Distinguishes "no report has ever been persisted" (fresh install, fine)
  * from "a report exists but isn't valid JSON" (boot died mid-write — a real
@@ -62,7 +75,7 @@ function readReport(): ReadResult {
   }
 
   try {
-    return { status: 'ok', report: JSON.parse(raw) as LoadReportWithMeta, mtime };
+    return { status: 'ok', report: JSON.parse(raw) as LoadReport, mtime };
   } catch (err) {
     return { status: 'corrupt', error: err instanceof Error ? err.message : String(err) };
   }
@@ -135,13 +148,28 @@ export function registerDoctor(program: Command): void {
       if (report.loaded.length === 0) {
         console.log(chalk.dim('  none'));
       } else {
+        const catalogById = new Map(buildCatalog(report).map((entry) => [entry.id, entry]));
         for (const p of report.loaded) {
-          const routeCount = report.routeCounts?.[p.id];
-          const routesSuffix =
-            routeCount === undefined ? '' : ` — ${routeCount} route${routeCount === 1 ? '' : 's'}`;
+          const suffix = providesSuffix(catalogById.get(p.id)?.provides);
           console.log(
-            `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms${routesSuffix}`,
+            `  ${chalk.green('✓')} ${p.id} (${p.name}@${p.version}) — ${p.applyMs.toFixed(1)}ms${suffix}`,
           );
+          // An older report has no `grants` key at all — omit the line
+          // entirely rather than print a misleading "none", same convention
+          // as `routeCounts` above.
+          const granted = report.grants?.[p.id];
+          if (granted !== undefined) {
+            const grantsText = granted.length > 0 ? granted.map(sanitize).join(', ') : 'none';
+            console.log(`      grants: ${grantsText}`);
+          }
+          const pending = report.pendingGrants?.[p.id];
+          if (pending && pending.length > 0) {
+            console.log(
+              chalk.yellow(
+                `      ⚠ withheld (not acknowledged): ${pending.map(sanitize).join(', ')} — run: octomux plugins approve ${p.id}`,
+              ),
+            );
+          }
         }
       }
 

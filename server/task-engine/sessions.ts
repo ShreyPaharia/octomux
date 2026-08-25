@@ -1,4 +1,4 @@
-import { execTmux } from '../tmux-bin.js';
+import type { ComputeSession } from '../compute/types.js';
 
 export {
   getActiveWindowIndex,
@@ -18,10 +18,10 @@ export function isTmuxTargetMissing(err: unknown): boolean {
 /**
  * Kill all linked viewer sessions (`<tmuxSession>-v-*`) for a specific task.
  */
-export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> {
+export async function cleanupLinkedSessions(c: ComputeSession, tmuxSession: string): Promise<void> {
   let stdout: string;
   try {
-    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
+    ({ stdout } = await c.tmux(['list-sessions', '-F', '#{session_name}']));
   } catch {
     return;
   }
@@ -33,17 +33,17 @@ export async function cleanupLinkedSessions(tmuxSession: string): Promise<void> 
     .filter((name) => name.startsWith(prefix));
 
   for (const session of linked) {
-    await execTmux(['kill-session', '-t', session]).catch(() => {});
+    await c.tmux(['kill-session', '-t', session]).catch(() => {});
   }
 }
 
 /**
  * Clean up orphaned `-v-` viewer sessions from previous runs.
  */
-export async function cleanupOrphanedViewerSessions(): Promise<void> {
+export async function cleanupOrphanedViewerSessions(c: ComputeSession): Promise<void> {
   let stdout: string;
   try {
-    ({ stdout } = await execTmux(['list-sessions', '-F', '#{session_name}']));
+    ({ stdout } = await c.tmux(['list-sessions', '-F', '#{session_name}']));
   } catch {
     return;
   }
@@ -56,7 +56,7 @@ export async function cleanupOrphanedViewerSessions(): Promise<void> {
     if (match) {
       const parentSession = match[1];
       if (!sessions.has(parentSession)) {
-        await execTmux(['kill-session', '-t', name]).catch(() => {});
+        await c.tmux(['kill-session', '-t', name]).catch(() => {});
       }
     }
   }

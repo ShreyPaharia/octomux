@@ -1,24 +1,37 @@
 /**
- * The plugin unmount sequence (SHR-254). Reverses, in reverse registration
- * order, everything a plugin's `apply()` put into the live registries, then
- * runs its `ctx.effect()` teardown stack.
+ * The plugin unmount sequence (SHR-254, extended for SHR-259's policy hooks).
+ * Reverses, in reverse registration order, everything a plugin's `apply()`
+ * put into the live registries, then runs its `ctx.effect()` teardown stack.
  *
- * Order: routes -> facts -> ui -> the four registries (workflow kinds,
- * harnesses, providers) -> `ctx.effect()` callbacks. Each step is isolated —
- * one failing step is logged and skipped, never thrown, so a bad teardown
- * can't strand the rest of the sequence (matches the loader's own
- * per-plugin isolation policy).
+ * Order: routes -> records -> ui -> policy -> services -> the five
+ * registries (workflow kinds, harnesses, compute providers, surfaces,
+ * providers) -> ctx.effect() disposers
+ *
+ * Capability grants are NOT released as an explicit step here — that already
+ * happens inside `disposePluginContext()` (`server/plugins/context.ts`,
+ * pinned/DO NOT EDIT for this task), which clears a plugin's grants as the
+ * very last of its own `ctx.effect()` teardown. So "grants released before
+ * `ctx.effect()` disposal" already holds by construction: the grant-clearing
+ * callback is registered before any plugin-supplied effect, and effects run
+ * in REVERSE registration order, so it fires last of all — after every
+ * plugin-supplied effect has already run, with nothing left afterward that
+ * could re-register through `ctx`.
  */
 import { childLogger } from '../logger.js';
 import { broadcast } from '../events.js';
 import { disposePluginContext } from './context.js';
-import { unregisterPluginRoutes, pluginRouteCounts } from './http-registry.js';
-import { unregisterPluginFacts } from './facts.js';
-import { unregisterPluginUi, listUiContributions } from './ui-registry.js';
+import { unregisterPluginRoutes } from './http-registry.js';
+import { unregisterTaskScopedStores } from './records.js';
+import { unregisterPluginUi } from './ui-registry.js';
+import { unregisterPluginPolicy } from './policy.js';
+import { unregisterPluginServices } from './services.js';
 import { listWorkflows } from '../workflows/registry.js';
 import { unregisterPluginKinds } from '../workflows/presets.js';
-import { listHarnesses, unregisterHarness } from '../harnesses/registry.js';
-import { listProviders, unregisterProvider } from '../integrations/registry.js';
+import { unregisterHarness } from '../harnesses/registry.js';
+import { unregisterCompute } from '../compute/registry.js';
+import { unregisterSurface } from '../surfaces/index.js';
+import { unregisterProvider } from '../integrations/registry.js';
+import { pluginRegistrations } from './catalog.js';
 import type { PluginContext } from '@octomux/plugin-api';
 
 const logger = childLogger('plugins/lifecycle');
@@ -31,9 +44,25 @@ export interface UnmountFailure {
 export interface UnmountReleased {
   routes: number;
   uiContributions: number;
+  /** `ctx.ui.action()` registrations dropped (SHR-257). The `ui` step below
+   *  already drops these — `unregisterPluginUi` covers both tables — so
+   *  there is no separate unmount step, just this count alongside it. */
+  uiActions: number;
+  /** `ctx.policy.intercept()` hooks removed (`unregisterPluginPolicy`'s return). */
+  policyHooks: number;
   workflowKinds: string[];
   harnessIds: string[];
+  computeKinds: string[];
+  surfaceKinds: string[];
   providerKinds: string[];
+  /** `ctx.records.define()` qualified store names dropped (SHR-282) —
+   *  task-scoped only. Durable stores' definitions survive unmount, same as
+   *  their rows — see the `records` step below. */
+  recordStores: string[];
+  /** `ctx.services.provide()` names dropped (SHR-260). A queued second
+   *  provider of the same name is promoted implicitly when this one goes —
+   *  see the tie-break doc in `services.ts`. */
+  serviceNames: string[];
   /** `ctx.effect()` callbacks that ran (successfully or not). */
   effects: number;
 }
@@ -61,6 +90,11 @@ export interface PluginUnloadability {
  * a signal from `server/plugins/context.ts` — that file is pinned/DO NOT
  * EDIT for this task, and every workflow a plugin owns is already qualified
  * `<pluginId>:<kind>`, so a prefix scan is sufficient with no new plumbing.
+ *
+ * Does NOT go through `pluginRegistrations()` (`catalog.ts`) even though
+ * that now covers the equivalent workflow-kind scan: this needs the
+ * workflow OBJECT to read `wf.apiRouter` off it, and the catalog only ever
+ * hands back kind strings.
  */
 export function getPluginUnloadability(pluginId: string): PluginUnloadability {
   const prefix = `${pluginId}:`;
@@ -114,33 +148,47 @@ async function step<T>(
 export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promise<UnmountReport> {
   const failures: UnmountFailure[] = [];
 
-  // Snapshot counts BEFORE each unregister call — the registries only expose
-  // "what's there now", not "what did I just remove".
-  const routeCount = pluginRouteCounts()[pluginId] ?? 0;
+  // Snapshot BEFORE any unregister call runs — the registries (via
+  // `pluginRegistrations()`) only expose "what's there now", not "what did I
+  // just remove". One catalog read replaces the four hand-rolled prefix
+  // scans this used to do separately.
+  const registered = pluginRegistrations(pluginId);
+
   await step(pluginId, failures, 'routes', () => unregisterPluginRoutes(pluginId));
 
-  await step(pluginId, failures, 'facts', () => unregisterPluginFacts(pluginId));
-  // No public count for fact-type definitions — `facts.ts` is DO NOT EDIT for
-  // this task and exposes no getter beyond `unregisterPluginFacts` itself.
+  // Drops this plugin's TASK-SCOPED store definitions only — durable ones
+  // survive unmount, same rule their rows already follow (see
+  // `unregisterTaskScopedStores`'s doc comment). Deliberately does NOT delete
+  // any stored rows — a hot reload (SHR-254) re-runs apply() moments later
+  // expecting durable records still there. If a future change here starts
+  // deleting rows, that is a bug, not a missing cleanup.
+  const recordStores =
+    (await step(pluginId, failures, 'records', () => unregisterTaskScopedStores(pluginId))) ?? [];
 
-  const uiCount = listUiContributions().filter((c) => c.pluginId === pluginId).length;
   await step(pluginId, failures, 'ui', () => unregisterPluginUi(pluginId));
+
+  const policyHooks =
+    (await step(pluginId, failures, 'policy', () => unregisterPluginPolicy(pluginId))) ?? 0;
+
+  const serviceNames =
+    (await step(pluginId, failures, 'services', () => unregisterPluginServices(pluginId))) ?? [];
 
   const workflowKinds =
     (await step(pluginId, failures, 'workflow-kinds', () => unregisterPluginKinds(pluginId))) ?? [];
 
-  const prefix = `${pluginId}:`;
-  const harnessIds = listHarnesses()
-    .map((h) => h.id)
-    .filter((id) => id.startsWith(prefix));
-  for (const id of harnessIds) {
+  for (const id of registered.harnessIds) {
     await step(pluginId, failures, `harness:${id}`, () => unregisterHarness(id));
   }
 
-  const providerKinds = listProviders()
-    .map((p) => p.kind)
-    .filter((kind) => kind.startsWith(prefix));
-  for (const kind of providerKinds) {
+  for (const kind of registered.computeKinds) {
+    await step(pluginId, failures, `compute:${kind}`, () => unregisterCompute(kind));
+  }
+
+  for (const kind of registered.surfaceKinds) {
+    await step(pluginId, failures, `surface:${kind}`, () => unregisterSurface(kind));
+  }
+
+  for (const kind of registered.providerKinds) {
     await step(pluginId, failures, `provider:${kind}`, () => unregisterProvider(kind));
   }
 
@@ -151,11 +199,17 @@ export async function unmountPlugin(pluginId: string, ctx: PluginContext): Promi
   }
 
   const released: UnmountReleased = {
-    routes: routeCount,
-    uiContributions: uiCount,
+    routes: registered.routes.length,
+    uiContributions: registered.uiSlots.length,
+    uiActions: registered.uiActionIds.length,
+    policyHooks,
     workflowKinds,
-    harnessIds,
-    providerKinds,
+    harnessIds: registered.harnessIds,
+    computeKinds: registered.computeKinds,
+    surfaceKinds: registered.surfaceKinds,
+    providerKinds: registered.providerKinds,
+    recordStores,
+    serviceNames,
     effects: effectFailures.length,
   };
 

@@ -7,3 +7,4 @@ coverage
 bun.lock
 .worktrees
 .superpowers
+.octomux/artifact.md

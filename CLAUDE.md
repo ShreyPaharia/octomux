@@ -78,9 +78,11 @@ root with `OCTOMUX_DATA_DIR` (the Electron app sets this to an app-private path)
   they can't drift from server-side validation; everything else is one file per subcommand in
   `cli/src/commands/` (close-task, resume-task, add-agent, send-message, stop-agent, init,
   emit, loop-start, loop-start-group, learn/recall/unlearn, post-review, task-updates,
-  task-ref-add/rm, list-skills/get-skill, files, plugins, doctor, …). `task-move`/`task-note`/
-  `task-summary` were retired with the `/note` and `/summary` routes — narrative now lives in
-  the task's `.octomux/artifact.md`, no CLI write surface for it.
+  task-ref-add/rm, list-skills/get-skill, files, plugins, doctor, …). `task-move`/`task-note`
+  were retired with the `/note` route — narrative now lives in the task's
+  `.octomux/artifact.md`, no CLI write surface for `task-move`/`task-note`. `task-summary` is
+  back as the generated `task summary` capability command (alias `task-summary`), writing the
+  artifact's Summary section.
 - `packages/` — bun workspaces: `types`, `diff-engine`, `api-client`, `test-fixtures`, plus
   the prebuilt `tmux-{darwin,linux}-{arm64,x64}` binaries
 - `electron/` — macOS desktop app wrapper (`build:electron` / `dist:electron`)
@@ -140,6 +142,53 @@ branch `agents/<id>`. Each **worker** = tmux window within the session.
 
 `startTask` logs a `duration_ms` per stage (`stage_timing: true`); `bun run
 bench:task-create` reports the breakdown. `git worktree add` dominates.
+
+## Compute providers
+
+**Where a task runs is a decision, not a call site.** `server/compute/` is the seam
+that decides where a task's git worktree lives and where its processes run. `local`
+(the server's own machine) is the default and is what every existing task uses.
+
+**This is NOT a pluggable isolation strategy.** A git worktree per run is octomux's
+guarantee, not a preference — the public docs say so. This seam decides _where that
+worktree lives_, nothing more. Don't reintroduce an isolation strategy behind it.
+
+- `ComputeProvider` = `{ kind, create(task, ctx), resume?(task, ctx) }`.
+  `ComputeSession` = `{ kind, taskId, repoPath, exec, tmux, spawn, files, dispose }`.
+  Both in `server/compute/types.ts`; registry in `registry.ts` mirrors
+  `harnesses/registry.ts` (`DEFAULT_COMPUTE_KIND = 'local'`, `CORE_COMPUTE_KINDS`
+  frozen before any plugin loads).
+- `sessionFor(task)` (`server/compute/index.ts`) is the single entry point — cached
+  per `task.id`, so any code already holding a `Task` gets a session in one `await`.
+  `localSession` is the task-free server machine; pass it **explicitly** at call
+  sites that legitimately read the server's own checkout (diff reads, comment
+  hashing, repo probes). An implicit local default is exactly the bug this seam
+  exists to remove, so there isn't one.
+- The migration rule, if you're touching the task engine: `execTmux(x)` →
+  `compute.tmux(x)`, `execFile('git', …)` → `compute.exec(['git', …])`, `fs.*Sync`
+  → `await compute.files.*`, pty attach → `compute.spawn({ command })`.
+  `task.repo_path` stays the repo's _identity_ (DB key, log field); `compute.repoPath`
+  is where it physically is.
+- Per-task selection: `tasks.compute TEXT` (NULL → `local`, no backfill needed),
+  `POST /api/tasks { compute }`, `octomux create-task --compute <kind>` (generated
+  from `taskCreateInputSchema`, no CLI file to edit), `settings.defaultComputeKind`
+  and `settings.compute[kind]`.
+- Credentials are brokered at the boundary: `computeConfigFor(kind)`
+  (`server/compute/config.ts`) splits `settings.compute[kind]` into `config` and a
+  `secrets` sub-object, expanding `${env:VAR}` in both, and hands the result to
+  `provider.create()` **only**. The agent's environment, its launched command, and
+  its worktree never see a broker secret.
+- A plugin registers one with `ctx.compute.register({ kind, create })` and gets
+  `ctx.host` (`exec`/`spawnPty` on the server) plus `ctx.execBackedFiles(exec)` — the
+  only runtime capabilities handed across the types-only `@octomux/plugin-api`
+  boundary, and enough to write a remote provider with no host imports and no new
+  dependencies. Worked example: `docs/plugins/examples/ssh-compute/`.
+- **Known gaps — do not describe as working:** `resume()` is called but the host
+  cannot yet tell "reattach after restart" from "first create", so it falls back to
+  `create` (see the comment in `sessionFor`); `hop-agent` refuses to move an agent
+  between tasks on different compute kinds rather than silently launching fresh;
+  `server/chats.ts` and `server/orchestrator/**` are deliberately outside the seam
+  (no `Task` — chats and conductor conversations are task-free) and always run local.
 
 ## Per-task model override
 
@@ -206,6 +255,63 @@ in the UI; `server/routes/schedules.ts` (`GET/POST /api/schedules`, `PATCH`/`DEL
 `GET /api/schedules/:id/export`, `POST /api/schedules/import`, `GET /api/schedules/kinds`)
 and `server/routes/kinds.ts` (`GET /api/kinds`, `PUT`/`DELETE /api/kinds/:kind`, home tier only).
 
+## Secrets
+
+**A named store, never a config column.** `secrets` table: `value_enc` is AES-256-GCM
+(`server/secrets/crypto.ts`), keyed by `<octomuxRoot()>/secret.key` (32 random bytes,
+mode 0600, created on first use; `OCTOMUX_SECRET_KEY` — base64, exactly 32 bytes —
+overrides it). Not envelope encryption, not a KMS: it stops a copied `tasks.db` or a
+backup from being a credential dump, nothing more.
+
+**No read API returns a value. Ever.** `GET /api/secrets` is metadata only
+(name/description/timestamps); there is no `GET /api/secrets/:name`. Writes are
+`PUT /api/secrets/:name` and `DELETE /api/secrets/:name`, plus
+`octomux secrets list|set|rm` (`set --stdin` keeps the token out of shell history).
+Manual replace is the whole v1 rotation story. `listSecrets()` doesn't even SELECT
+`value_enc`; `getSecretValue()` is the single decrypt path and is not exported over
+HTTP or onto `ctx`.
+
+**Reference by name, resolve at egress.** A config value holds the literal
+`${secret:NAME}` — same shape as the older `${env:VAR}` (`integrations/resolve-env.ts`),
+resolved by `resolveSecrets()` (`server/secrets/store.ts`). An unknown name **throws**
+where `${env:}` degrades to `''`: an empty credential is a 401 three layers away.
+Wired at exactly two core egress points — `hook-dispatcher.ts` (integration config,
+which now fails closed and skips the send rather than posting a literal placeholder as
+a credential) and `compute/config.ts` (the `secrets` sub-object only; `config` stays
+env-only, because `config` is the half that can reach the agent).
+
+**Deliberately NOT resolved** in `prompt-interpolate.ts` or `executeScheduleRun`'s
+`resolveWorkflowConfig`. Schedule config feeds the agent's prompt through
+`{{configKey}}`, so resolving there hands the credential straight to the agent — the
+exact failure this exists to prevent. A workflow that needs the value calls
+`resolveSecrets()` itself at the call that uses it.
+
+**Redaction is one choke point per egress.** `server/secrets/redact.ts` (zero imports —
+`logger.ts` imports it, and going through `store.ts` would cycle via `db.ts`) holds the
+set of values seen this process, populated on every write and every decrypt.
+`logger.ts` wraps its destination streams with `withRedaction()`, so every `logger.*`
+line in the codebase is scrubbed without call sites knowing; `finishRun()` scrubs
+`result_json` the same way. Values under `REDACT_MIN_LENGTH` (8) are not redacted —
+scrubbing every occurrence of a 4-char string would wreck the logs.
+
+**Plugins:** `ctx.secrets.list()` returns NAMES and is ungated (matching `facts.read` /
+`catalog.list`); `ctx.secrets.resolve(value)` returns VALUES and is gated on
+`secrets.read`. There is no plugin write path — a secret is written by a human. Nothing
+is registered, so nothing deregisters on unmount; `clearPluginGrants` already covers it.
+
+**Marking a config field as a reference:** a `config` JSON Schema property carries
+`secretRef: true` and `SchemaConfigForm.tsx` renders a picker of secret names instead of
+a text input, storing the wrapped `${secret:NAME}` form. Distinct from `secret: true`
+(`integrations/mask.ts`), which means "this field holds a literal secret" — do not
+conflate them.
+
+**Known gaps — do not describe as working:** the key sits next to the DB, so an attacker
+with the filesystem has both; there is no per-user scoping, no rotation automation, and
+no audit log of resolutions. A plugin runs in-process and can read the `secrets` table
+and the key file directly — `secrets.read` governs `ctx`, not the process. There is no
+Settings UI for creating a secret; the picker is populated by whatever the CLI or API
+wrote.
+
 ## Skills and agent roles
 
 Both ship in the bundled plugin (`plugin/skills/`, `plugin/agents/`) and reach launched
@@ -239,11 +345,29 @@ task-backed schedule prompts.
 octomux is a metaharness: a third-party npm package listed in `~/.octomux/octomux.yml`
 (`server/plugins/manifest.ts`, YAML pinned to `JSON_SCHEMA` — no anchors/aliases, no custom
 tags) gets `import()`ed at boot and its `apply(ctx)` called once. `ctx` (built by
-`createPluginContext()` in `server/plugins/context.ts`) exposes six registrars —
+`createPluginContext()` in `server/plugins/context.ts`) exposes ten registrars —
 `ctx.workflows.register()`, `ctx.integrations.register()`, `ctx.harnesses.register()`,
-`ctx.http.route()`, `ctx.facts` (`define`/`put`/`read`/`watch`) and `ctx.ui.panel()` — plus
-`ctx.effect(fn)` for teardown, `ctx.logger`, `ctx.settings` (async get/update, scoped to
-`settings.plugins[id]`), and `ctx.kv`.
+`ctx.compute.register()` (see "Compute providers" above), `ctx.surfaces.register()` (below),
+`ctx.http.route()`, `ctx.records` (`define`/`put`/`read`/`query`/`watch`, plus a
+`begin`/`end`/`interrupted` checkpoint trio — see below),
+`ctx.services` (`provide()`/`require()`, below), `ctx.ui.panel()`,
+and `ctx.policy.intercept()` — plus non-registrar methods `ctx.agents.run()`,
+`ctx.fanout.run()`, `ctx.attention.ask()`, and the read-only `ctx.catalog.list()`.
+`ctx.artifacts` is deliberately **a method on ctx, not a registrar**: nobody needs a different
+artifact implementation, they need to write one. `write(taskId, {name, mime, body})` drops a file
+at `<worktree>/.octomux/artifacts/<pluginId>/<name>` (metadata in a sibling `index.json`, since
+`mime` isn't recoverable from the filesystem) and `list(taskId)` reads back every plugin's
+artifacts on that task, unscoped, exactly like `records.read`. `server/services/run-detail.ts`
+surfaces them on `GET /api/runs/:id`, so a plugin's output reaches the run detail view with no
+further core change. Files land in the task's git worktree — they diff, and they outlive both
+the plugin and a DB wipe.
+`ctx.agents` is likewise a method, not a registrar: `run({ input, outputSchema, model?,
+timeoutMs? })` launches a headless, git-free agent session (default harness, pty substrate —
+the same `runAgentSession()` primitive `session-vertical-service.ts` uses for scheduled kinds)
+and resolves with the structured result submitted via `submit_result`. It defaults to a fresh
+ephemeral scratch dir — no worktree, no tmux, no CLAUDE.md/repo bleed — pass `workspaceDir` for
+a real checkout; `timeoutMs` (default 5 min) bounds the wait. There's no host concurrency cap
+and no `runs` row; a fan-out plugin owns its own limiter.
 Types are pinned in `@octomux/plugin-api` (`packages/plugin-api/src/index.ts`) — **types only**,
 nothing runtime crosses that package boundary, because under `bun build --compile` a plugin has
 no host `node_modules` tree to import a runtime value from even by accident.
@@ -251,7 +375,7 @@ no host `node_modules` tree to import a runtime value from even by accident.
 - **Boot order is the correctness property.** `await loadPlugins(...)` runs in `server/index.ts`
   between `acquireInstanceLock()` and the synchronous `createApp()` — `createApp()` snapshots
   the workflow/capability registries, so a workflow or capability registered after it is a
-  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.facts` and `ctx.ui` are lookup
+  silent no-op. That snapshot is exactly why `ctx.http`, `ctx.records` and `ctx.ui` are lookup
   tables rather than express mounts: those three CAN be registered and unregistered at any
   time, which is what makes hot reload possible at all. Core
   harnesses/integrations register and freeze (`freezeCoreHarnesses()` etc.) before any plugin
@@ -265,6 +389,94 @@ no host `node_modules` tree to import a runtime value from even by accident.
   `logger.warn`, persisted to `~/.octomux/plugin-load-report.json` for `octomux doctor` to read
   without a running server. `octomux start --safe-mode` (`OCTOMUX_SAFE_MODE=1`) skips every
   plugin row; core harnesses/integrations still register.
+- **Capability grants.** A manifest row declares the `ctx` surface its plugin uses:
+  `grants: [policy.intercept, records.write]`. Names match the `ctx` path they gate — all 17,
+  from `PLUGIN_CAPABILITIES` (`server/plugins/grants.ts`): `workflows.register`,
+  `integrations.register`, `harnesses.register`, `compute.register`, `http.route`,
+  `records.define`, `records.write`, `services.provide`, `ui.panel`, `ui.action`,
+  `artifacts.write`, `policy.intercept`, `agents.run`, `fanout.run`, `surfaces.register`,
+  `attention.ask`, `secrets.read`. Reads and self-owned members (`ctx.records.read`/`query`/
+  `watch`/`interrupted`, `ctx.catalog.list`, `ctx.secrets.list`, `ctx.artifacts.list`,
+  `ctx.services.require`, `ctx.settings`, `ctx.logger`, `ctx.effect`) are ungated. A row with no
+  `grants` key gets nothing — the registrar throws, and the row lands in the load report
+  as a `phase: 'apply'` failure naming the plugin and the capability. Widening an existing
+  row's grants is withheld until acknowledged: the granted set is tracked per row in
+  `plugin-grants.json` next to the manifest (first sight of a row grants everything it
+  declares; narrowing is free; adding a grant sits pending until `octomux plugins approve
+<id>`). `LoadReport.grants`/`pendingGrants` (per plugin id) is what `octomux doctor` prints.
+- **`ctx.records`** — the one store for plugin data (SHR-282), replacing the prior
+  three-table split (a task-scoped fact log, a durable keyed collection, and a
+  plugin-private kv blob store) with one `plugin_records` table
+  and one `RecordStoreDefinition` shape: `define({ name, scope, mode, key?, schema? })`.
+  `scope: 'task'` dies with the task (the old facts lifetime); `scope: 'durable'` outlives
+  unmount (the old collections/kv lifetime). `mode: 'append'` adds a row (facts); `mode:
+'upsert'` replaces the row sharing `key` (collections/kv) — `mode:'append'` with a `key`,
+  or `mode:'upsert'` without one, are both rejected at `define()` time. Omit `schema` for an
+  opaque store (recovers the old kv blob use case). Names qualify to `<pluginId>:<name>`.
+  `put(name, record, opts?)` takes a BARE name (cross-plugin writes are out of scope and
+  rejected) and validates scope against `opts.taskId` before the payload against schema;
+  `read(name, opts)` is task-scoped and requires `opts.taskId`; `query(name, q?)` takes bare
+  OR qualified and is unscoped. `QuerySpec` is deliberately tiny: exact-match `where`,
+  `orderBy`/`order`, `limit`/`offset`, no operator language. Unmount drops a store's
+  _definition_ only when its rows die too (`task` scope) — a `durable` store's definition
+  survives, since its rows do. The checkpoint trio (`begin(name, key, value)`/`end(name,
+key)`/`interrupted(name?)`, recovered from the old kv blob store) stamps/clears/reads an in-flight marker
+  per `(store, key)`, scoped by `name` since one plugin can own several stores; checkpoint
+  state is not a registration, so unmount never touches it — deleting it is only ever
+  explicit, via an ordinary `put()` on the same key. Gate: `records.define` on `define()`,
+  `records.write` on `put()`/`begin()`/`end()`; `read`/`query`/`watch`/`interrupted` are
+  ungated. This is what unstranded `ctx.ui`: `UiPanelBinding` binds to a `record` (bare local
+  store name), so a panel can render something that outlives a task. Records reach the SPA via
+  `GET /api/tasks/:id/records` (task-scoped) and `GET /api/plugin-records/:qualifiedName`
+  (unscoped, replacing the old `/api/plugin-collections/:qualifiedName`).
+- **`ctx.services`** — dependency by CAPABILITY, not by package name (SHR-260). A plugin
+  provides a name (`ctx.services.provide('chat.send', impl)`); another requires it
+  (`ctx.services.require('chat.send')`) and gets back `{ name, get() }` that resolves live on
+  every call. The one unqualified name in the whole API — `chat.send` has to be the same
+  string on both sides, so it isn't prefixed `<pluginId>:` like everything else. **First
+  provider wins**: if two plugins provide the same name, the one earlier in `octomux.yml` is
+  live and the other queues behind it, promoted only if the first unmounts — there's no
+  `prefer:` key, reordering the two rows is the whole mechanism. Resolution happens once, in
+  `loader.ts`, after the whole manifest has applied (a fixpoint pass, since unmounting one
+  unmet plugin can strand another) — so a consumer may be listed before its provider. An unmet
+  `require()` fails only that plugin (and anything transitively depending on it) as a
+  `phase: 'apply'` load-report entry, never the boot. Providers show up in `ctx.catalog.list()`
+  as `service:<name>`. Requires `services.provide`; `require` is ungated.
+- **`ctx.fanout`** — run a step **per item**, not per schedule fire. `run({ name, source, each })`
+  maps a handler over an item source: `{ items }` (a plain array), `{ collection, query }` (a
+  `ctx.records` query source — the resolver is injected via `setCollectionResolver()`, and
+  until it lands a collection source throws a message saying so), or `{ resume: runId }` (redrive).
+  Per-item status persists in `fanout_runs` / `fanout_items`, so a partial run is legible
+  (`GET /api/fanout/runs[/:id]`) and resumable. Retries are bounded exponential backoff
+  (`maxAttempts` 3, `backoffMs` 1000 by default); an item that exhausts them is **dead-lettered**
+  and the rest of the run continues. **The concurrency cap is host-enforced and GLOBAL** — one
+  semaphore across every plugin's fan-out runs, `settings.fanout.maxConcurrency` (default 4). A
+  per-run `concurrency` is clamped down to it, never up. That placement is deliberate and
+  cross-ticket: `ctx.agents.run()` (SHR-272) stays a thin accessor, and fan-out is where scheduling
+  policy belongs, because fan-out is the runaway case. Unmount aborts in-flight runs without
+  awaiting their handlers (a handler may be a multi-minute agent session); interrupted items go
+  back to `pending` for a later resume. Deliberately not a DAG — chain by writing to a record store
+  and querying it from the next step. No HTTP redrive route: a redrive needs the plugin's live
+  `each` closure, which cannot be persisted.
+- **`ctx.policy.intercept(point, hook)`** — the one registrar that can refuse, not just add.
+  Four points: `task.launch`, `harness.resume`, `review.publish`, `integration.send`. A hook
+  returns `{ deny: reason }`, `{ patch: {...} }` (merged into `intent.data`, visible to later
+  hooks), or nothing. Hooks for a point run in registration order; first deny short-circuits.
+  A hook that throws or exceeds `POLICY_HOOK_TIMEOUT_MS` (5s) is logged and treated as no
+  opinion — **fails open**, so a crashing plugin can't wedge every launch. A deny or patch on
+  a task-scoped intent is recorded twice: a `core:policy.decision` record and a `task_updates`
+  row of kind `policy` (shows in the task's Activity panel). There is deliberately no
+  `task.merge` point — core never merges a PR (`server/poller/merged-pr.ts` only observes
+  merges that already happened on GitHub), so there's no call site to gate.
+- **`ctx.surfaces.register()`** — a place octomux presents itself to a human, beyond the
+  four compiled in (`web`, `cli`, `slack`, `telegram`; `CORE_SURFACE_KINDS`, frozen before
+  any plugin loads, same as compute). Works only because `ctx.ui` panels are declarative
+  bindings, not components: a panel written before the surface existed still renders on it.
+  A surface declares the renderer names it draws; the host resolves `panel.as` →
+  `panel.renderer` before calling `render` — the declared renderer when supported, otherwise
+  the surface's `fallback` (default `json`). Degraded, never dropped, never blank. `prompt`
+  is optional; without it the surface is read-only and asking it throws. Requires
+  `surfaces.register`.
 - `octomux plugins list|disable|enable` edit `octomux.yml` directly, no server required.
   `octomux plugins reload <id>` is different — it goes over the API and needs a running server,
   because it re-imports and re-runs the plugin's `apply()` in the live process. A plugin that
@@ -272,18 +484,29 @@ no host `node_modules` tree to import a runtime value from even by accident.
   express 5 cannot unmount a Router. In dev only, local-path manifest rows are watched and
   reloaded on save. There is no `plugins add`/install command — getting a package onto disk
   (`npm install --prefix ~/.octomux <pkg>`) is on the user today.
-- **Known gaps — do not describe as working:** `ctx.kv` throws on every call (`plugin_kv`
-  storage hasn't landed); `PluginRow.integrity` is parsed and typechecked but never verified
+- **Known gaps — do not describe as working:** `PluginRow.integrity` is parsed and typechecked but never verified
   against the resolved tarball; harness command builders still return a shell **string**, not
   argv (the injection-safety burden the plan assigns to argv conversion hasn't landed); a
   plugin integration provider's `handler` receives the **resolved** secret in cleartext
   (`server/hook-dispatcher.ts` calls `resolveEnvVars` before invoking it — there's no broker
-  yet). Trust model: a plugin runs in-process with the DB handle, every credential, and
+  yet); `ctx.services`' unmet-requirement check is boot-only — `octomux plugins reload <id>`
+  does not re-run it, so a hot-reloaded plugin with an unmet requirement mounts anyway and
+  throws at its first `handle.get()` instead of failing at load time. Trust model: a plugin
+  runs in-process with the DB handle, every credential, and
   `process.env` — no sandbox, none planned. State that plainly wherever plugins are documented.
+  Capability grants (above) and `ctx.policy` denies do not change this: grants govern only the
+  `ctx` surface, a plugin can do everything core can do without ever calling `ctx`, and a
+  `policy` deny is not containment — it's a coordination/audit mechanism, nothing stops a
+  plugin from bypassing its own hook. `octomux plugins approve` (the grant-widening ack) is
+  the operator confirming intent, not a security check on the code.
   Two things the plugin runtime added to that blast radius, neither a new class of exposure but
   both worth knowing: a `ctx.http.route()` handler receives the raw request headers, including
   the remote-mode auth token of whoever called it; and `POST /api/plugins/:id/reload` re-imports
   and re-executes on-disk plugin code on request. Both sit behind `remoteAuthMiddleware`.
+  All four core surfaces (`web`, `cli`, `slack`, `telegram`) are read-only — octomux's only
+  human-question path is still the card-based approval gate (`server/orchestrator/gate.ts`),
+  DB-backed and untouched by `ctx.surfaces`. The registrar records the prompt capability so a
+  plugin surface can implement one; no core surface does.
 - Plan + status: `plans/2026-08-16-plugin-ecosystem.md` (design, "Trust model" section has the
   full threat writeup) and `plans/2026-08-16-plugin-ecosystem-tasks.md` (execution log — STEP-0
   through STEP-2 shipped on `next`; WAVE-3's integration outbound broker, WAVE-4's harness leaks,

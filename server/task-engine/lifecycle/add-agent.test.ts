@@ -22,6 +22,7 @@ const { default: path } = await import('path');
 const { createTestDb, insertTask, DEFAULTS } = await import('../../test-helpers.js');
 
 const { validateAndResolveAddAgentOpts } = await import('./add-agent.js');
+const { localSession } = await import('../../compute/index.js');
 
 let db: Database;
 let worktreePath: string;
@@ -42,17 +43,17 @@ afterEach(() => {
 });
 
 describe('validateAndResolveAddAgentOpts', () => {
-  it('defaults label to Agent N based on active agent count', () => {
+  it('defaults label to Agent N based on active agent count', async () => {
     const task = { ...DEFAULTS.runningTask, worktree: worktreePath } as Task;
-    const resolved = validateAndResolveAddAgentOpts(task);
+    const resolved = await validateAndResolveAddAgentOpts(localSession, task);
     expect(resolved.label).toBe('Agent 1');
   });
 
-  it('merges skeleton content with prompt', () => {
+  it('merges skeleton content with prompt', async () => {
     const skeletonPath = path.join(worktreePath, '.octomux', 'agents', 'researcher.md');
     fs.writeFileSync(skeletonPath, '# Researcher role');
     const task = { ...DEFAULTS.runningTask, worktree: worktreePath } as Task;
-    const resolved = validateAndResolveAddAgentOpts(task, {
+    const resolved = await validateAndResolveAddAgentOpts(localSession, task, {
       skeleton: 'researcher',
       prompt: 'Find bugs',
     });
@@ -60,10 +61,10 @@ describe('validateAndResolveAddAgentOpts', () => {
     expect(resolved.resolvedPrompt).toContain('Find bugs');
   });
 
-  it('throws when skeleton file is missing', () => {
+  it('throws when skeleton file is missing', async () => {
     const task = { ...DEFAULTS.runningTask, worktree: worktreePath } as Task;
-    expect(() => validateAndResolveAddAgentOpts(task, { skeleton: 'missing' })).toThrow(
-      /skeleton not found/,
-    );
+    await expect(
+      validateAndResolveAddAgentOpts(localSession, task, { skeleton: 'missing' }),
+    ).rejects.toThrow(/skeleton not found/);
   });
 });

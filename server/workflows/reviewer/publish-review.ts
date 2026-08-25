@@ -8,13 +8,16 @@ import { recordPublishedReview } from '../../repositories/published-reviews.js';
 import { postPullRequestReview } from '../../github-client.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
-import { putCoreFact } from '../../plugins/facts.js';
+import { publishCoreRecord } from '../../plugins/records.js';
+import { enforcePolicy } from '../../plugins/policy.js';
 import { getTask, inTransaction } from '../../repositories/index.js';
 import type { PublishedReviewVerdict } from '../../types.js';
 import type { InlineCommentRow } from '../../repositories/inline-comments.js';
 import type { PullRequestReviewComment } from '../../github-client.js';
 
 const logger = childLogger('publish-review');
+
+const VALID_VERDICTS: PublishedReviewVerdict[] = ['COMMENT', 'APPROVE', 'REQUEST_CHANGES'];
 
 export interface PublishReviewResult {
   published_review_id: string;
@@ -41,6 +44,22 @@ export async function publishReview(
   verdict: PublishedReviewVerdict,
   reviewBody: string,
 ): Promise<PublishReviewResult> {
+  const decided = await enforcePolicy('review.publish', {
+    taskId,
+    data: { verdict, bodyLength: reviewBody.length },
+  });
+  if (
+    typeof decided.verdict === 'string' &&
+    VALID_VERDICTS.includes(decided.verdict as PublishedReviewVerdict)
+  ) {
+    verdict = decided.verdict as PublishedReviewVerdict;
+  } else if (decided.verdict !== undefined && decided.verdict !== verdict) {
+    logger.warn(
+      { task_id: taskId, patched_verdict: decided.verdict },
+      'publishReview: ignoring invalid patched verdict from policy hook',
+    );
+  }
+
   const task = getTask(taskId);
 
   if (!task) throw new Error(`Task not found: ${taskId}`);
@@ -140,17 +159,17 @@ export async function publishReview(
     payload: { taskId, github_review_url: publishedReview.github_review_url },
   });
 
-  // The one real `core:` fact producer today (SHR-255's "Done when": a
-  // plugin subscribes to a core fact and fires on it). Same payload shape as
-  // the broadcast above. A facts-log failure must not undo a review that's
-  // already posted to GitHub and persisted — log and move on, never throw.
+  // The one real `core:` record producer today (SHR-255's "Done when": a
+  // plugin subscribes to a core record and fires on it). Same payload shape
+  // as the broadcast above. A records-log failure must not undo a review
+  // that's already posted to GitHub and persisted — log and move on, never throw.
   try {
-    await putCoreFact(taskId, 'core:review.published', {
+    publishCoreRecord('core:review.published', taskId, {
       taskId,
       github_review_url: publishedReview.github_review_url,
     });
   } catch (err) {
-    logger.warn({ task_id: taskId, err }, 'failed to publish core:review.published fact');
+    logger.warn({ task_id: taskId, err }, 'failed to publish core:review.published record');
   }
 
   logger.info(

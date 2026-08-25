@@ -16,7 +16,9 @@ vi.mock('child_process', () => ({
 
 vi.mock('./task-engine/index.js', () => ({
   closeTask: vi.fn(),
-  deleteTask: vi.fn(async () => undefined),
+  // SHR-278: deleteTask now returns a TeardownReport so the caller can tell a
+  // real teardown from a silent no-op.
+  deleteTask: vi.fn(async () => ({ worktreeRemoved: true, branchDeleted: true, errors: [] })),
   softDeleteTask: vi.fn(async () => undefined),
   startTask: vi.fn(async () => undefined),
   resumeTask: vi.fn(async () => undefined),
@@ -345,7 +347,11 @@ describe('pollStatuses', () => {
 
     await pollStatuses();
 
+    // sendMessageToAgent now takes the notified task's own ComputeSession as
+    // its first arg (SHR-261/266 compute seam) — assert on the local
+    // session's identity rather than its full shape.
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', taskId: 'lead-task-01' }),
       'octomux-agent-lead-01',
       1,
       expect.stringContaining('worker-task-01'),
@@ -851,6 +857,14 @@ describe('pollReviewerRequests', () => {
           requestedReviewer: { __typename: 'User', login: rr.login },
         })),
       },
+      timelineItems: {
+        nodes: (
+          (pr.reviewRequestEvents as Array<{ login: string; createdAt: string }> | undefined) ?? []
+        ).map((ev) => ({
+          createdAt: ev.createdAt,
+          requestedReviewer: { login: ev.login },
+        })),
+      },
     }));
     const graphqlBody = JSON.stringify({ data: { search: { nodes: searchNodes } } });
 
@@ -1048,7 +1062,9 @@ describe('pollReviewerRequests', () => {
     await pollReviewerRequests();
 
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
-    const [session, windowIdx, message] = vi.mocked(sendMessageToAgent).mock.calls[0];
+    // sendMessageToAgent(compute, session, windowIndex, message) — compute
+    // session is now the leading argument (SHR-261/266 compute split).
+    const [, session, windowIdx, message] = vi.mocked(sendMessageToAgent).mock.calls[0];
     expect(session).toBe('octomux-agent-running-review');
     expect(windowIdx).toBe(0);
     expect(message).toContain('Re-review requested');
@@ -1131,7 +1147,7 @@ describe('pollReviewerRequests', () => {
     const [task, opts] = vi.mocked(resumeTask).mock.calls[0] as [Task, { prompt?: string }];
     expect(task.id).toBe('closed-review');
     expect(opts.prompt).toContain('/review-artifact');
-    expect(opts.prompt).toContain('sha-new');
+    expect(opts.prompt).toContain('Head advanced to sha-new');
     expect(opts.prompt).toContain('octomux close-task closed-review');
     // Prompt refresh must not happen — the resumed conversation gets the nudge.
     expect(getTask(db, 'closed-review')!.pr_head_sha).toBe('sha-new');
@@ -1139,6 +1155,190 @@ describe('pollReviewerRequests', () => {
       type: 'task:updated',
       payload: { taskId: 'closed-review' },
     });
+  });
+
+  it('resumes a closed review session when review is re-requested without a push', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    db.prepare(
+      `UPDATE tasks SET pr_review_requested_at = '2026-08-19T10:00:00Z' WHERE id = 'closed-review'`,
+    ).run();
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    // Same head SHA, but a newer REVIEW_REQUESTED_EVENT for the owner.
+    mockPrList([
+      makePR({
+        headRefOid: 'sha-aaa',
+        reviewRequestEvents: [{ login: OWNER, createdAt: '2026-08-19T12:00:00Z' }],
+      }),
+    ]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).toHaveBeenCalledOnce();
+    const [task, opts] = vi.mocked(resumeTask).mock.calls[0] as [Task, { prompt?: string }];
+    expect(task.id).toBe('closed-review');
+    expect(opts.prompt).toContain('/review-artifact');
+    expect(opts.prompt).toContain('Head unchanged');
+    const row = db
+      .prepare(`SELECT pr_review_requested_at FROM tasks WHERE id = 'closed-review'`)
+      .get() as { pr_review_requested_at: string };
+    expect(row.pr_review_requested_at).toBe('2026-08-19T12:00:00Z');
+  });
+
+  it('backfills the re-request baseline without resuming when none was recorded', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    // Pre-migration row: pr_review_requested_at is NULL, so an event can't be
+    // told apart from the original request — record it, don't trigger.
+    mockPrList([
+      makePR({
+        headRefOid: 'sha-aaa',
+        reviewRequestEvents: [{ login: OWNER, createdAt: '2026-08-19T12:00:00Z' }],
+      }),
+    ]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).not.toHaveBeenCalled();
+    const row = db
+      .prepare(`SELECT pr_review_requested_at FROM tasks WHERE id = 'closed-review'`)
+      .get() as { pr_review_requested_at: string };
+    expect(row.pr_review_requested_at).toBe('2026-08-19T12:00:00Z');
+  });
+
+  it('nudges a running review when review is re-requested without a push', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'running-review',
+      repo_path: REPO,
+      runtime_state: 'running',
+      tmux_session: 'octomux-agent-running-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    db.prepare(
+      `UPDATE tasks SET pr_review_requested_at = '2026-08-19T10:00:00Z' WHERE id = 'running-review'`,
+    ).run();
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'running-review',
+      window_index: 0,
+      status: 'running',
+    });
+    mockPrList([
+      makePR({
+        headRefOid: 'sha-aaa',
+        reviewRequestEvents: [{ login: OWNER, createdAt: '2026-08-19T12:00:00Z' }],
+      }),
+    ]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledOnce();
+    const message = vi.mocked(sendMessageToAgent).mock.calls[0][3] as string;
+    expect(message).toContain('Head unchanged');
+    expect(message).toContain('/review-artifact');
+    const row = db
+      .prepare(`SELECT pr_review_requested_at FROM tasks WHERE id = 'running-review'`)
+      .get() as { pr_review_requested_at: string };
+    expect(row.pr_review_requested_at).toBe('2026-08-19T12:00:00Z');
+  });
+
+  it('does not retrigger on a review-request event older than the baseline', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    db.prepare(
+      `UPDATE tasks SET pr_review_requested_at = '2026-08-19T12:00:00Z' WHERE id = 'closed-review'`,
+    ).run();
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrList([
+      makePR({
+        headRefOid: 'sha-aaa',
+        reviewRequestEvents: [{ login: OWNER, createdAt: '2026-08-19T10:00:00Z' }],
+      }),
+    ]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).not.toHaveBeenCalled();
+    // Baseline must not be rewritten backward.
+    const row = db
+      .prepare(`SELECT pr_review_requested_at FROM tasks WHERE id = 'closed-review'`)
+      .get() as { pr_review_requested_at: string };
+    expect(row.pr_review_requested_at).toBe('2026-08-19T12:00:00Z');
+  });
+
+  it('ignores re-request events for other reviewers', async () => {
+    insertTask(db, { id: 'seed', repo_path: REPO });
+    insertTask(db, {
+      id: 'closed-review',
+      repo_path: REPO,
+      runtime_state: 'idle',
+      tmux_session: 'octomux-agent-closed-review',
+      pr_number: 42,
+      pr_head_sha: 'sha-aaa',
+      source: 'auto_review',
+    });
+    db.prepare(
+      `UPDATE tasks SET pr_review_requested_at = '2026-08-19T10:00:00Z' WHERE id = 'closed-review'`,
+    ).run();
+    insertAgent(db, {
+      id: 'agent-a',
+      task_id: 'closed-review',
+      window_index: 0,
+      status: 'stopped',
+    });
+    mockPrList([
+      makePR({
+        headRefOid: 'sha-aaa',
+        reviewRequestEvents: [{ login: 'someone-else', createdAt: '2026-08-19T12:00:00Z' }],
+      }),
+    ]);
+
+    await pollReviewerRequests();
+
+    expect(vi.mocked(resumeTask)).not.toHaveBeenCalled();
   });
 
   it('does not resume a closed review session when head SHA is unchanged', async () => {
@@ -1497,7 +1697,11 @@ describe('sweepStuckReviewRuns', () => {
 describe('pollSoftDeletes', () => {
   beforeEach(() => {
     vi.mocked(getSettings).mockResolvedValue({ deleteGraceHours: 6 } as any);
-    vi.mocked(deleteTask).mockResolvedValue(undefined);
+    vi.mocked(deleteTask).mockResolvedValue({
+      worktreeRemoved: true,
+      branchDeleted: true,
+      errors: [],
+    });
   });
 
   it('purges tasks past grace window, leaves recent ones alone', async () => {
@@ -1636,7 +1840,10 @@ describe('pollAgentWindows', () => {
 
     await pollStatuses();
 
+    // sendMessageToAgent's first arg is now the notify TARGET's own
+    // ComputeSession (orch-task-01), not the finishing worker's.
     expect(vi.mocked(sendMessageToAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'local', taskId: 'orch-task-01' }),
       'octomux-agent-orch-task-01',
       1,
       expect.stringContaining('worker-agent-01'),

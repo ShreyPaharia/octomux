@@ -8,14 +8,49 @@ vi.mock('fs', (importOriginal) => {
   const actual = importOriginal<typeof import('fs')>();
   const mocked = {
     ...actual,
-    existsSync: vi.fn(() => true),
+    existsSync: vi.fn((_p?: string) => true),
     mkdirSync: vi.fn(),
     copyFileSync: vi.fn(),
     writeFileSync: vi.fn(),
     readFileSync: vi.fn(),
     unlinkSync: vi.fn(),
   };
-  return { ...mocked, default: mocked };
+  // `server/compute/local.ts`'s `localFiles` (what every task-engine call now
+  // goes through via `ComputeSession.files`) uses `fs.promises`, not the sync
+  // surface above. Shim the async methods it actually calls onto the sync
+  // mocks so existing assertions (and existsSync/writeFileSync/readFileSync
+  // per-test overrides) keep working, and so tests stop hitting the REAL
+  // filesystem (which was silently creating/deleting real dirs under
+  // /tmp/test-repo on every run).
+  const enoent = (p: string) => {
+    const err = new Error(`ENOENT: no such file or directory, '${p}'`) as NodeJS.ErrnoException;
+    err.code = 'ENOENT';
+    return err;
+  };
+  const promises = {
+    access: vi.fn(async (p: string) => {
+      if (!mocked.existsSync(p)) throw enoent(String(p));
+    }),
+    mkdir: vi.fn(async (p: string, opts?: object) => {
+      mocked.mkdirSync(p, opts);
+    }),
+    readFile: vi.fn(async (p: string, enc?: string) => {
+      const result = mocked.readFileSync(p, enc);
+      if (result === undefined) throw enoent(String(p));
+      return result;
+    }),
+    writeFile: vi.fn(async (p: string, content: string, opts?: object) => {
+      mocked.writeFileSync(p, content, opts);
+    }),
+    chmod: vi.fn(async () => {}),
+    cp: vi.fn(async (src: string, dst: string) => {
+      mocked.copyFileSync(src, dst);
+    }),
+    rm: vi.fn(async (p: string) => {
+      mocked.unlinkSync(p);
+    }),
+  };
+  return { ...mocked, promises, default: { ...mocked, promises } };
 });
 
 let nextWindowIndex = 0;
@@ -119,6 +154,7 @@ const {
   hopAgent,
   buildAgentStartupCommand,
 } = await import('./task-engine/index.js');
+const { localSession } = await import('./compute/index.js');
 const { execFile } = await import('child_process');
 const fs = await import('fs');
 const { setLogger, getLogger } = await import('./logger.js');
@@ -165,8 +201,24 @@ describe('slugifyTitle', () => {
 describe('buildAgentStartupCommand', () => {
   const shell = process.env.SHELL || '/bin/sh';
 
-  it('runs the harness command under an interactive shell and keeps the pane alive', () => {
-    const cmd = buildAgentStartupCommand({ baseCmd: 'claude --session-id abc --model opus' });
+  // This file mocks `fs`'s SYNC surface; the prompt file now goes through
+  // `ComputeSession.files.write` (fs.promises under `local`), which that mock
+  // doesn't intercept. Stub the session instead — it also states plainly what
+  // this suite is pinning: the shape of the command string, and the fact that
+  // the prompt is handed over as a file rather than on the command line.
+  function stubSession() {
+    const write = vi.fn(async () => {});
+    return {
+      session: { files: { write, rm: vi.fn(async () => {}) } } as never,
+      write,
+    };
+  }
+
+  it('runs the harness command under an interactive shell and keeps the pane alive', async () => {
+    const { session } = stubSession();
+    const cmd = await buildAgentStartupCommand(session, {
+      baseCmd: 'claude --session-id abc --model opus',
+    });
     // Interactive shell so it inherits the user's env (PATH/nvm/etc.).
     expect(cmd.startsWith(`${shell} -ic `)).toBe(true);
     expect(cmd).toContain('claude --session-id abc --model opus');
@@ -176,8 +228,9 @@ describe('buildAgentStartupCommand', () => {
     expect(cmd).not.toContain('$(cat ');
   });
 
-  it('embeds the prompt via $(cat <file>) and writes the prompt file', () => {
-    const cmd = buildAgentStartupCommand({
+  it('embeds the prompt via $(cat <file>) and writes the prompt file', async () => {
+    const { session, write } = stubSession();
+    const cmd = await buildAgentStartupCommand(session, {
       baseCmd: 'claude --session-id abc',
       prompt: 'Do the thing',
       worktreePath: '/wt',
@@ -188,19 +241,17 @@ describe('buildAgentStartupCommand', () => {
     // `--` must precede the positional prompt so a trailing variadic flag
     // (e.g. --mcp-config for managed tasks) can't swallow it.
     expect(cmd).toContain('-- "$(cat ');
-    expect(vi.mocked(fs.writeFileSync)).toHaveBeenCalledWith(
+    expect(write).toHaveBeenCalledWith(
       expect.stringContaining('.claude-prompt-agent123'),
       expect.stringContaining('Do the thing'),
       { mode: 0o600 },
     );
   });
 
-  it('does not write a prompt file when prompt is absent', () => {
-    buildAgentStartupCommand({ baseCmd: 'claude --session-id abc' });
-    const promptFileCall = vi
-      .mocked(fs.writeFileSync)
-      .mock.calls.find((c) => String(c[0]).includes('.claude-prompt-'));
-    expect(promptFileCall).toBeUndefined();
+  it('does not write a prompt file when prompt is absent', async () => {
+    const { session, write } = stubSession();
+    await buildAgentStartupCommand(session, { baseCmd: 'claude --session-id abc' });
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
@@ -1348,7 +1399,12 @@ describe('closeTask', () => {
 
   it('handles task with no agents gracefully', async () => {
     insertTask(db, { ...DEFAULTS.runningTask });
-    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toBeUndefined();
+    // SHR-278: closeTask reports what it actually did instead of returning
+    // void, so a caller can tell a real close from a no-op.
+    await expect(closeTask({ ...DEFAULTS.runningTask } as Task)).resolves.toEqual({
+      alreadyIdle: false,
+      tmuxKilled: true,
+    });
   });
 
   it('logs tmux "session not found" at debug, not warn', async () => {
@@ -2242,7 +2298,7 @@ describe('cleanupLinkedSessions', () => {
       }
     }) as any);
 
-    await cleanupLinkedSessions(session);
+    await cleanupLinkedSessions(localSession, session);
 
     // Should kill exactly the two linked sessions
     expect(
@@ -2278,7 +2334,7 @@ describe('cleanupLinkedSessions', () => {
       }
     }) as any);
 
-    await cleanupLinkedSessions(session);
+    await cleanupLinkedSessions(localSession, session);
 
     expect(
       countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),
@@ -2296,7 +2352,7 @@ describe('cleanupLinkedSessions', () => {
       cb(new Error('no server running'), null);
     }) as any);
 
-    await expect(cleanupLinkedSessions('any-session')).resolves.toBeUndefined();
+    await expect(cleanupLinkedSessions(localSession, 'any-session')).resolves.toBeUndefined();
   });
 });
 
@@ -2327,7 +2383,7 @@ describe('cleanupOrphanedViewerSessions', () => {
       }
     }) as any);
 
-    await cleanupOrphanedViewerSessions();
+    await cleanupOrphanedViewerSessions(localSession);
 
     // Should kill 2 orphaned sessions (not the one with alive parent)
     expect(
@@ -2369,7 +2425,7 @@ describe('cleanupOrphanedViewerSessions', () => {
       }
     }) as any);
 
-    await cleanupOrphanedViewerSessions();
+    await cleanupOrphanedViewerSessions(localSession);
 
     expect(
       countExecCalls(vi.mocked(execFile), { cmd: 'tmux', argsInclude: ['kill-session'] }),

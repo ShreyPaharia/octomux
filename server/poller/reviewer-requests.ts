@@ -16,11 +16,13 @@ import {
   hardDeleteTask,
   updateTaskPromptAndSha,
   setPrHeadSha,
+  setPrReviewRequestedAt,
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
 import { countAgentsForTask, findFirstActiveAgent } from '../repositories/workers.js';
 import { resumeTask, softDeleteTask } from '../task-engine/index.js';
 import { checkoutRef, fetchOriginQuiet } from '../task-engine/git.js';
+import { sessionFor } from '../compute/index.js';
 import { repoNameWithOwner } from './github-repo.js';
 import type { Task } from '../types.js';
 
@@ -40,6 +42,8 @@ interface OpenReviewPR {
   headRefName: string;
   baseRefName: string;
   reviewRequests: ReviewRequestEntity[];
+  /** REVIEW_REQUESTED_EVENT timeline entries — powers re-review on re-request. */
+  reviewRequestEvents: Array<{ login: string; createdAt: string }>;
 }
 
 function listTrackedRepos(): string[] {
@@ -61,6 +65,12 @@ interface RawSearchNode {
       requestedReviewer: { __typename?: string; login?: string } | null;
     }>;
   };
+  timelineItems?: {
+    nodes: Array<{
+      createdAt?: string;
+      requestedReviewer?: { login?: string } | null;
+    } | null>;
+  };
 }
 
 const REVIEW_REQUESTED_GRAPHQL_QUERY = `query {
@@ -80,6 +90,14 @@ const REVIEW_REQUESTED_GRAPHQL_QUERY = `query {
             requestedReviewer {
               __typename
               ... on User { login }
+            }
+          }
+        }
+        timelineItems(last: 50, itemTypes: [REVIEW_REQUESTED_EVENT]) {
+          nodes {
+            ... on ReviewRequestedEvent {
+              createdAt
+              requestedReviewer { ... on User { login } }
             }
           }
         }
@@ -114,6 +132,15 @@ async function fetchAllReviewRequestedPRs(): Promise<Map<string, OpenReviewPR[]>
         reviewRequests: (node.reviewRequests?.nodes ?? [])
           .map((rr) => ({ login: rr.requestedReviewer?.login }))
           .filter((rr): rr is { login: string } => typeof rr.login === 'string'),
+        reviewRequestEvents: (node.timelineItems?.nodes ?? [])
+          .map((ev) => ({
+            login: ev?.requestedReviewer?.login,
+            createdAt: ev?.createdAt,
+          }))
+          .filter(
+            (ev): ev is { login: string; createdAt: string } =>
+              typeof ev.login === 'string' && typeof ev.createdAt === 'string',
+          ),
       };
       const key = node.repository.nameWithOwner.toLowerCase();
       const list = byRepo.get(key);
@@ -137,6 +164,20 @@ function isOwnerStillRequested(pr: OpenReviewPR, ownerLogin: string): boolean {
   );
 }
 
+/**
+ * Latest review-request timestamp for the owner (ISO strings compare
+ * lexicographically). Direct user requests only — team re-requests carry no
+ * `login` and are dropped, matching isOwnerStillRequested's scope.
+ */
+function latestReviewRequestAt(pr: OpenReviewPR, ownerLogin: string): string | null {
+  let latest: string | null = null;
+  for (const ev of pr.reviewRequestEvents) {
+    if (ev.login.toLowerCase() !== ownerLogin.toLowerCase()) continue;
+    if (!latest || ev.createdAt > latest) latest = ev.createdAt;
+  }
+  return latest;
+}
+
 function buildReviewPrompt(pr: OpenReviewPR, requestedAt: string, reviewTaskId: string): string {
   return buildPrReviewPrompt({
     reviewTaskId,
@@ -153,10 +194,14 @@ function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): 
   return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
 }
 
-function buildReReviewNudge(pr: OpenReviewPR, taskId: string): string {
+function buildReReviewNudge(pr: OpenReviewPR, taskId: string, headChanged: boolean): string {
+  const reason = headChanged
+    ? `Head advanced to ${pr.headRefOid}.`
+    : `Head unchanged at ${pr.headRefOid} — review was explicitly re-requested, so run the ` +
+      `re-review anyway (re-verify the open findings; discussion may have moved without a push).`;
   return (
     `Re-review requested for PR #${pr.number} (${pr.url}). ` +
-    `Head advanced to ${pr.headRefOid}. ` +
+    `${reason} ` +
     `Run the /review-artifact re-review flow — redeploy to the same artifact URL with a delta ` +
     `section, send the Slack ping as before, then close this task again with ` +
     `\`octomux close-task ${taskId}\`.`
@@ -164,32 +209,40 @@ function buildReReviewNudge(pr: OpenReviewPR, taskId: string): string {
 }
 
 async function nudgeAgentForReReview(
-  taskId: string,
+  task: Task,
   tmuxSession: string,
   pr: OpenReviewPR,
+  headChanged: boolean,
 ): Promise<boolean> {
-  const agent = findFirstActiveAgent(taskId);
+  const agent = findFirstActiveAgent(task.id);
   if (!agent) return false;
   try {
-    await sendMessageToAgent(tmuxSession, agent.window_index, buildReReviewNudge(pr, taskId));
+    const compute = await sessionFor(task);
+    await sendMessageToAgent(
+      compute,
+      tmuxSession,
+      agent.window_index,
+      buildReReviewNudge(pr, task.id, headChanged),
+    );
     return true;
   } catch (err) {
     logger.warn(
-      { task_id: taskId, err: (err as Error).message },
+      { task_id: task.id, err: (err as Error).message },
       'failed to nudge agent for re-review (session may be gone)',
     );
     return false;
   }
 }
 
-async function checkoutNewHead(taskId: string, worktreePath: string | null, headRefOid: string) {
+async function checkoutNewHead(task: Task, worktreePath: string | null, headRefOid: string) {
   if (!worktreePath) return;
   try {
-    await fetchOriginQuiet(worktreePath);
-    await checkoutRef(worktreePath, headRefOid);
+    const compute = await sessionFor(task);
+    await fetchOriginQuiet(compute, worktreePath);
+    await checkoutRef(compute, worktreePath, headRefOid);
   } catch (err) {
     logger.warn(
-      { task_id: taskId, err: (err as Error).message },
+      { task_id: task.id, err: (err as Error).message },
       'failed to fetch/checkout new head; proceeding — the agent can fetch for itself',
     );
   }
@@ -198,12 +251,36 @@ async function checkoutNewHead(taskId: string, worktreePath: string | null, head
 async function upsertReviewTask(
   repoPath: string,
   pr: OpenReviewPR,
+  ownerLogin: string,
 ): Promise<{ action: 'created' | 'updated' | 'nudged' | 'resumed' | 'skipped'; taskId?: string }> {
   const existing = findExistingPrTask(repoPath, pr.number);
+  const requestedAt = latestReviewRequestAt(pr, ownerLogin);
 
   if (existing) {
     if (existing.source !== 'auto_review') return { action: 'skipped' };
-    if (existing.pr_head_sha === pr.headRefOid) return { action: 'skipped' };
+
+    const headChanged = existing.pr_head_sha !== pr.headRefOid;
+    // A review-request event newer than the one we last acted on = the author
+    // re-requested review without pushing. Rows from before this column existed
+    // (NULL baseline) can't distinguish old from new requests — backfill the
+    // baseline and only trigger on the next event.
+    const reRequested =
+      requestedAt !== null &&
+      existing.pr_review_requested_at !== null &&
+      requestedAt > existing.pr_review_requested_at;
+    if (!headChanged && !reRequested) {
+      if (requestedAt && !existing.pr_review_requested_at) {
+        setPrReviewRequestedAt(existing.id, requestedAt);
+      }
+      return { action: 'skipped' };
+    }
+
+    // Written only after the trigger actually lands — a failed nudge/resume
+    // must leave the baseline behind so the next poll cycle retries.
+    const markTriggered = () => {
+      setPrHeadSha(existing.id, pr.headRefOid);
+      if (requestedAt) setPrReviewRequestedAt(existing.id, requestedAt);
+    };
 
     if (existing.runtime_state === 'idle') {
       if (countAgentsForTask(existing.id) > 0) {
@@ -211,29 +288,36 @@ async function upsertReviewTask(
         // (harness session id) and hand it the re-review prompt.
         const task = getTask(existing.id) as Task | undefined;
         if (!task) return { action: 'skipped' };
-        await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
-        await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id) });
+        if (headChanged) await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
+        await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id, headChanged) });
+        markTriggered();
         setPrHeadSha(existing.id, pr.headRefOid);
         return { action: 'resumed', taskId: existing.id };
       }
 
       // Never-started draft: refresh the prompt + sha; startTask delivers it.
-      const updatedPrompt = buildShaUpdateNote(
-        existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString(), existing.id),
-        pr.headRefOid,
-        new Date().toISOString(),
-      );
-      updateTaskPromptAndSha(existing.id, pr.headRefOid, updatedPrompt);
-      return { action: 'updated', taskId: existing.id };
+      // A bare re-request needs no prompt churn — the draft hasn't run yet.
+      if (headChanged) {
+        const updatedPrompt = buildShaUpdateNote(
+          existing.initial_prompt ?? buildReviewPrompt(pr, new Date().toISOString(), existing.id),
+          pr.headRefOid,
+          new Date().toISOString(),
+        );
+        updateTaskPromptAndSha(existing.id, pr.headRefOid, updatedPrompt);
+      }
+      if (requestedAt) setPrReviewRequestedAt(existing.id, requestedAt);
+      return headChanged ? { action: 'updated', taskId: existing.id } : { action: 'skipped' };
     }
 
     if (existing.runtime_state === 'running' || existing.runtime_state === 'setting_up') {
       if (!existing.tmux_session) return { action: 'skipped' };
 
-      await checkoutNewHead(existing.id, existing.worktree_path, pr.headRefOid);
-      const delivered = await nudgeAgentForReReview(existing.id, existing.tmux_session, pr);
+      const task = getTask(existing.id) as Task | undefined;
+      if (!task) return { action: 'skipped' };
+      if (headChanged) await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
+      const delivered = await nudgeAgentForReReview(task, existing.tmux_session, pr, headChanged);
       if (!delivered) return { action: 'skipped' };
-      setPrHeadSha(existing.id, pr.headRefOid);
+      markTriggered();
       return { action: 'nudged', taskId: existing.id };
     }
 
@@ -264,6 +348,8 @@ async function upsertReviewTask(
   if (!created || created.source !== 'auto_review') {
     return { action: 'skipped' };
   }
+  // Baseline for re-request detection on later cycles.
+  if (requestedAt) setPrReviewRequestedAt(created.id, requestedAt);
   return { action: 'created', taskId: created.id };
 }
 
@@ -378,7 +464,7 @@ export async function pollReviewerRequests(): Promise<void> {
       if (!isOwnerStillRequested(pr, ownerLogin)) continue;
       activePrNumbers.add(pr.number);
 
-      const result = await upsertReviewTask(repoPath, pr);
+      const result = await upsertReviewTask(repoPath, pr, ownerLogin);
       if (result.action === 'created') {
         logger.info(
           { task_id: result.taskId, pr_number: pr.number, repo_path: repoPath },

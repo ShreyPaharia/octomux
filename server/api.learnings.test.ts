@@ -1,11 +1,29 @@
 import { describe, it, expect, beforeEach, vi } from './bun-test.js';
 import type { Task } from './types.js';
 
-vi.mock('fs', () => ({
-  default: {
-    existsSync: vi.fn(() => true),
-  },
-}));
+vi.mock('fs', () => {
+  // The compute seam's `sessionFor(task)` calls `getSettings()`
+  // (server/settings.ts) on every route that touches a task's git worktree
+  // (e.g. learning.add's revParseHead), and `getSettings()` reads
+  // `fs.promises.readFile` — not the sync surface this file used to mock
+  // alone. Reject ENOENT so `getSettings()` falls back to its documented
+  // default settings, same as a real machine with no settings.json.
+  const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  return {
+    default: {
+      existsSync: vi.fn(() => true),
+      promises: {
+        // Pass the rejection directly to vi.fn(impl) — chaining
+        // .mockRejectedValue() after a bare vi.fn() doesn't survive this
+        // suite's beforeEach vi.restoreAllMocks() (see server/bun-test.ts's
+        // `initialImpls` doc comment: restoreAllMocks() puts back exactly
+        // the impl vi.fn() was constructed with, wiping anything chained on
+        // afterward).
+        readFile: vi.fn(() => Promise.reject(enoent)),
+      },
+    },
+  };
+});
 
 vi.mock('child_process', () => ({
   execFile: vi.fn(),

@@ -20,7 +20,18 @@ export async function pollSoftDeletes(): Promise<void> {
 
   for (const task of rows) {
     try {
-      await deleteTask(task);
+      const report = await deleteTask(task);
+      if (report.errors.length > 0) {
+        // The row is about to be hard-deleted — this is the only surviving
+        // record that the teardown left something behind (a leaked worktree
+        // or branch), so log it as an error before that happens.
+        logger.error(
+          { task_id: task.id, operation: 'pollSoftDeletes', report },
+          'deleteTask left the worktree/branch behind; hard-deleting the row anyway',
+        );
+      }
+      // Still hard-delete even on a teardown failure — a permanently
+      // unremovable worktree must not wedge the trash queue forever.
       hardDeleteTask(task.id);
       broadcast({ type: 'task:deleted', payload: { taskId: task.id } });
       logger.info({ task_id: task.id, operation: 'pollSoftDeletes' }, 'purged soft-deleted task');

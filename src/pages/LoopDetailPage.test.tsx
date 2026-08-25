@@ -64,6 +64,7 @@ function makeRun(overrides: Partial<NonNullable<RunDetail['loop']>> = {}): RunDe
       ...overrides,
     },
     loopGroup: null,
+    artifacts: [],
   };
 }
 

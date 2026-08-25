@@ -7,7 +7,7 @@ import { broadcast } from './events.js';
 import { fireHook } from './hook-dispatcher.js';
 import { childLogger } from './logger.js';
 import { summarizeAgentProgress } from './summarize.js';
-import { setTaskSummary } from './artifact-task.js';
+import { setArtifactActivity } from './artifact.js';
 import { handleLoopIterationBoundary } from './task-engine/loop/engine.js';
 import {
   upsertManagedTask,
@@ -94,7 +94,7 @@ export function findAgentByTokenAndSession(
   return nullSessionRow;
 }
 
-const SUMMARY_FIELD_PRIORITY = [
+const ACTIVITY_FIELD_PRIORITY = [
   'command', // Bash (Claude) / run_terminal_cmd (Cursor)
   'file_path', // Read / Write / Edit / NotebookEdit (Claude) / synthesized afterFileEdit
   'target_file', // edit_file / read_file (Cursor)
@@ -107,16 +107,19 @@ const SUMMARY_FIELD_PRIORITY = [
   'path',
 ];
 
-const SUMMARY_MAX_LEN = 100;
+const ACTIVITY_MAX_LEN = 100;
 
-export function deriveSummaryFromToolUse(toolName: unknown, toolInput: unknown): string | null {
+/** Derive a one-line "what just happened" breadcrumb from a tool-use hook
+ *  payload. Machine-derived, not authored — feeds Activity, never Summary
+ *  (see setArtifactActivity's doc for the distinction). */
+export function deriveActivityFromToolUse(toolName: unknown, toolInput: unknown): string | null {
   if (typeof toolName !== 'string' || !toolName.trim()) return null;
   const name = toolName.trim();
 
   let detail = '';
   if (toolInput && typeof toolInput === 'object' && !Array.isArray(toolInput)) {
     const obj = toolInput as Record<string, unknown>;
-    for (const key of SUMMARY_FIELD_PRIORITY) {
+    for (const key of ACTIVITY_FIELD_PRIORITY) {
       const v = obj[key];
       if (typeof v === 'string' && v.trim()) {
         detail = v.replace(/\s+/g, ' ').trim();
@@ -126,7 +129,7 @@ export function deriveSummaryFromToolUse(toolName: unknown, toolInput: unknown):
   }
 
   if (!detail) return name;
-  const room = SUMMARY_MAX_LEN - name.length - 2;
+  const room = ACTIVITY_MAX_LEN - name.length - 2;
   if (room <= 1) return name;
   const truncated = detail.length > room ? detail.slice(0, room - 1) + '…' : detail;
   return `${name}: ${truncated}`;
@@ -289,7 +292,7 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
     return;
   }
 
-  const summary = deriveSummaryFromToolUse(tool_name, tool_input);
+  const activity = deriveActivityFromToolUse(tool_name, tool_input);
 
   inTransaction(() => {
     // Resolve oldest pending prompt (FIFO)
@@ -300,9 +303,25 @@ router.post('/post-tool-use', requireHookToken, (req, res) => {
   });
 
   // Filesystem write (artifact file), not a DB row — kept outside the sqlite
-  // transaction above.
-  if (summary) {
-    setTaskSummary(agent.task_id, summary);
+  // transaction above. Writes to Activity, never Summary: this fires on
+  // EVERY tool use, and Summary is authored content (agent/human/Stop
+  // summarizer) that must not get clobbered by machine breadcrumbs — see
+  // setArtifactActivity's doc in server/artifact.ts.
+  //
+  // ponytail: this task-id-resolving wrapper belongs next to setTaskSummary
+  // in server/artifact-task.ts (setActivityTask or similar), matching that
+  // file's fire-and-forget contract. Duplicated inline here instead of
+  // adding it there because another agent owns artifact-task.ts right now —
+  // move it once that file is free.
+  if (activity) {
+    try {
+      const found = getWorktreePathForTask(agent.task_id);
+      if (found?.worktree) {
+        setArtifactActivity(found.worktree, activity);
+      }
+    } catch (err) {
+      logger.warn({ task_id: agent.task_id, err }, 'setArtifactActivity failed to write artifact');
+    }
   }
 
   broadcast({ type: 'task:updated', payload: { taskId: agent.task_id } });

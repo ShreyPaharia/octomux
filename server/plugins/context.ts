@@ -7,38 +7,89 @@
  * state across plugins except the underlying registries, which already
  * namespace by qualified id.
  */
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { nanoid } from 'nanoid';
 import { childLogger } from '../logger.js';
 import { getPluginSettings, updatePluginSettings } from '../settings.js';
 import { qualify } from './qualify.js';
 import { registerPluginWorkflow } from '../workflows/registry.js';
 import { registerProvider } from '../integrations/registry.js';
-import { registerHarness } from '../harnesses/registry.js';
+import { registerHarness, getHarness } from '../harnesses/registry.js';
+import { registerCompute } from '../compute/registry.js';
+import { registerSurface } from '../surfaces/index.js';
 import { registerPluginRoute } from './http-registry.js';
-import { defineFactType, putFact, readFacts, watchFacts } from './facts.js';
-import { registerPluginUiPanel } from './ui-registry.js';
+import {
+  defineStore,
+  putRecord as putStoreRecord,
+  readStore,
+  queryStore,
+  watchStore,
+  beginCheckpoint,
+  endCheckpoint,
+  interruptedFor,
+} from './records.js';
+import { registerService, requireService, getService } from './services.js';
+import { listSecrets, resolveSecrets } from '../secrets/store.js';
+import { registerPluginUiPanel, registerPluginUiAction } from './ui-registry.js';
+import { listCatalog } from './catalog.js';
+import { writeTaskArtifact, listTaskArtifacts, toArtifactEntry } from '../artifact-task.js';
+import { setPluginGrants, clearPluginGrants, assertGranted } from './grants.js';
+import { registerPolicyHook } from './policy.js';
+import { runAgentSession } from '../agent-session/session.js';
+import { ptySubstrate } from '../agent-session/substrate-pty.js';
+import { createFanOutApi, abortPluginFanOuts } from './fanout.js';
+import { askHumans } from '../attention/index.js';
 import type {
   PluginContext,
+  AttentionApi,
+  AttentionAsk,
   PluginSettingsScope,
-  PluginKv,
   WorkflowRegistrar,
   IntegrationRegistrar,
   HarnessRegistrar,
+  ComputeRegistrar,
+  SurfaceRegistrar,
   HttpRegistrar,
-  FactsRegistrar,
+  RecordsRegistrar,
+  RecordStoreDefinition,
+  RecordEnvelope,
+  QuerySpec,
+  ServicesRegistrar,
+  ServiceHandle,
+  ArtifactsApi,
+  SecretsApi,
+  AgentRunner,
+  AgentRunOptions,
   UiRegistrar,
+  PolicyRegistrar,
+  FanOutApi,
+  FanOutSpec,
+  PluginCapability,
   PluginWorkflow,
   PluginIntegrationProvider,
   PluginHarness,
-  Fact,
-  FactQuery,
-  FactTypeDefinition,
+  PluginCompute,
+  SurfaceDefinition,
   HttpMethod,
   PluginRouteHandler,
   UiPanelBinding,
+  UiActionDefinition,
+  PolicyPoint,
+  PolicyHook,
 } from '@octomux/plugin-api';
 import type { WorkflowType } from '../workflows/types.js';
 import type { IntegrationProvider } from '../integrations/types.js';
 import type { Harness } from '../harnesses/types.js';
+import type { ComputeProvider } from '../compute/types.js';
+
+const POLICY_POINTS: readonly PolicyPoint[] = [
+  'task.launch',
+  'harness.resume',
+  'review.publish',
+  'integration.send',
+];
 
 /**
  * Pulls a registrar's declared local id off the plugin-supplied payload and
@@ -123,22 +174,6 @@ const HARNESS_REQUIRED_FN_FIELDS = [
   'validateSettings',
 ] as const;
 
-/** Builds the `ctx.kv` stub. Every method throws — W1-D (plugin storage) hasn't landed. */
-function createKv(id: string): PluginKv {
-  const notAvailable = (method: string): never => {
-    throw new Error(
-      `ctx.kv.${method}() is not available for plugin "${id}" — ` +
-        'the plugin storage task has not landed yet',
-    );
-  };
-  return {
-    get: () => notAvailable('get'),
-    set: () => notAvailable('set'),
-    del: () => notAvailable('del'),
-    list: () => notAvailable('list'),
-  };
-}
-
 /**
  * Maps a live `PluginContext` to the closure that revokes it. Keyed by the
  * context object itself (not the plugin id) so a caller can't revoke a
@@ -159,8 +194,26 @@ const revokers = new WeakMap<PluginContext, () => void>();
  */
 const effectStacks = new WeakMap<PluginContext, Array<() => void | Promise<void>>>();
 
-export function createPluginContext(id: string): PluginContext {
+export function createPluginContext(
+  id: string,
+  grants?: readonly PluginCapability[],
+): PluginContext {
+  // The loader records grants before calling this; a direct caller (tests,
+  // other call sites) may pass them inline instead. Omitting the param
+  // leaves whatever was already recorded for `id` untouched — a plugin with
+  // nothing recorded is denied everything gated, by default.
+  if (grants !== undefined) {
+    setPluginGrants(id, grants);
+  }
+
   const logger = childLogger(`plugin:${id}`);
+
+  // Identifies THIS mount for the `ctx.records` crash-recovery marks (begin/
+  // end/interrupted). One per `createPluginContext()` call — a fresh mount
+  // after a crash or a hot reload gets a fresh id, so `interrupted()`
+  // correctly sees whatever the PREVIOUS mount left stamped and never sees
+  // its own.
+  const recordsMountId = nanoid(12);
 
   // Flipped by `revokePluginContext()` when the loader's apply() timeout
   // fires. `apply()` itself is never cancelled (see revokePluginContext's
@@ -186,6 +239,7 @@ export function createPluginContext(id: string): PluginContext {
   const workflows: WorkflowRegistrar = {
     register(wf: PluginWorkflow) {
       assertLive('workflows.register');
+      assertGranted(id, 'workflows.register');
       const localKind = requireLocalId(wf, 'kind', 'workflows.register');
       requireOptionalFunctionField(wf, 'apiRouter', 'workflows.register');
       requireOptionalFunctionField(wf, 'run', 'workflows.register');
@@ -196,6 +250,7 @@ export function createPluginContext(id: string): PluginContext {
   const integrations: IntegrationRegistrar = {
     register(p: PluginIntegrationProvider) {
       assertLive('integrations.register');
+      assertGranted(id, 'integrations.register');
       const localKind = requireLocalId(p, 'kind', 'integrations.register');
       requireFunctionField(p, 'validate', 'integrations.register');
       requireFunctionField(p, 'handler', 'integrations.register');
@@ -211,6 +266,7 @@ export function createPluginContext(id: string): PluginContext {
   const harnesses: HarnessRegistrar = {
     register(h: PluginHarness) {
       assertLive('harnesses.register');
+      assertGranted(id, 'harnesses.register');
       const localId = requireLocalId(h, 'id', 'harnesses.register');
       for (const field of HARNESS_REQUIRED_FN_FIELDS) {
         requireFunctionField(h, field, 'harnesses.register');
@@ -222,9 +278,49 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
+  const compute: ComputeRegistrar = {
+    register(p: PluginCompute) {
+      assertLive('compute.register');
+      assertGranted(id, 'compute.register');
+      const localKind = requireLocalId(p, 'kind', 'compute.register');
+      // `create` is guarded because `sessionFor()` dereferences it
+      // unconditionally on every task launch — same reasoning as the harness
+      // required-fn fields above. `resume` is optional: the host falls back
+      // to `create()` when it's absent.
+      requireFunctionField(p, 'create', 'compute.register');
+      requireOptionalFunctionField(p, 'resume', 'compute.register');
+      registerCompute({
+        ...(p as unknown as ComputeProvider),
+        kind: qualify(id, localKind),
+      });
+    },
+  };
+
+  const surfaces: SurfaceRegistrar = {
+    register(s: SurfaceDefinition) {
+      assertLive('surfaces.register');
+      assertGranted(id, 'surfaces.register');
+      const payload = s as unknown as Record<string, unknown>;
+      const localKind = requireLocalId(payload, 'kind', 'surfaces.register');
+      requireArrayField(payload, 'renderers', 'surfaces.register');
+      // `render` is REQUIRED here even though `SurfaceDefinition.render` is
+      // typed optional — core's `web` omits it because the browser owns
+      // rendering and reads the binding table straight off the API, but a
+      // plugin surface has no client of ours to delegate to. A plugin
+      // surface with no `render` is a bug, not a mode, so it fails loudly
+      // here rather than silently rendering nothing forever.
+      requireFunctionField(payload, 'render', 'surfaces.register');
+      // Absent `prompt` means read-only — same convention as `compute`'s
+      // optional `resume`.
+      requireOptionalFunctionField(payload, 'prompt', 'surfaces.register');
+      registerSurface({ ...s, kind: qualify(id, localKind) });
+    },
+  };
+
   const http: HttpRegistrar = {
     route(method: HttpMethod, path: string, handler: PluginRouteHandler) {
       assertLive('http.route');
+      assertGranted(id, 'http.route');
       if (typeof handler !== 'function') {
         throw new Error('plugin registrar: "http.route" requires a function handler');
       }
@@ -232,63 +328,307 @@ export function createPluginContext(id: string): PluginContext {
     },
   };
 
-  // Declared before the registrars that push onto it (facts.watch) — see the
+  // Declared before the registrars that push onto it (records.watch) — see the
   // auto-dispose note there.
   const effects: Array<() => void | Promise<void>> = [];
 
-  const facts: FactsRegistrar = {
-    define(def: FactTypeDefinition) {
-      assertLive('facts.define');
-      requireLocalId(def as unknown as Record<string, unknown>, 'type', 'facts.define');
-      defineFactType(id, def);
+  // `ctx.records` — the single store for plugin data (SHR-282, collapsing the
+  // old facts/collections/kv split into one). See `./records.js`'s module doc
+  // for the full shape; this registrar is just the grant/revoke wiring
+  // around it.
+  const records: RecordsRegistrar = {
+    define(def: RecordStoreDefinition) {
+      assertLive('records.define');
+      assertGranted(id, 'records.define');
+      requireLocalId(def as unknown as Record<string, unknown>, 'name', 'records.define');
+      defineStore(id, def);
     },
-    put(taskId: string, localType: string, payload: unknown) {
-      // Deliberately NOT gated on `assertLive`: `put` is a write a plugin makes
-      // during normal operation, long after apply() returned. The revoke guard
-      // exists to stop a timed-out apply() from mutating the REGISTRIES, not to
-      // stop a healthy plugin from logging a fact.
-      return putFact(id, taskId, localType, payload);
+    // Deliberately NOT `assertLive`: the revoke guard stops a timed-out apply()
+    // from mutating the REGISTRIES, not a healthy plugin from writing data
+    // long after apply() returned. Grant-checked regardless.
+    //
+    // `async`, so a synchronous `assertGranted` throw surfaces as a rejected
+    // promise, matching `RecordsRegistrar.put`'s `Promise<void>` signature —
+    // same reasoning as `ctx.attention.ask`'s doc comment below.
+    async put(name: string, record: unknown, opts?: { taskId?: string }) {
+      assertGranted(id, 'records.write');
+      return putStoreRecord(id, name, record, opts?.taskId);
     },
-    read(taskId: string, opts?: FactQuery) {
-      return readFacts(taskId, opts);
+    // Ungated and unscoped — any
+    // plugin may read any store, its own or a sibling's. `async` for the
+    // same reason `put` above is — a missing `opts.taskId` should reject the
+    // returned promise, not throw synchronously.
+    async read(name: string, opts?: { taskId: string }) {
+      if (!opts?.taskId) {
+        throw new Error(`plugin "${id}": ctx.records.read() requires opts.taskId`);
+      }
+      return readStore(id, name, opts.taskId);
     },
-    watch(qualifiedType: string, onFact: (fact: Fact) => void) {
-      assertLive('facts.watch');
-      const unsubscribe = watchFacts(qualifiedType, onFact);
-      // Auto-disposed on unmount, as the plugin-api doc promises. This is the
-      // ONLY thing that unsubscribes a watcher on a type the plugin does not
-      // own: `unregisterPluginFacts(pluginId)` can only reach watchers on types
-      // that plugin DEFINED, so a plugin watching `core:diff` or a sibling
-      // plugin's type would otherwise keep firing forever after it unmounts.
-      // Idempotent — a plugin that also calls the returned unsubscribe itself
-      // is fine, `watchFacts` tolerates a double unsubscribe.
+    query(name: string, q?: QuerySpec) {
+      return queryStore(id, name, q);
+    },
+    watch(qualifiedName: string, onRecord: (rec: RecordEnvelope) => void) {
+      assertLive('records.watch');
+      const unsubscribe = watchStore(id, qualifiedName, onRecord);
+      // Auto-disposed on unmount
+      // — a watcher on a sibling's store would otherwise keep firing forever
+      // after this plugin unmounts.
       effects.push(unsubscribe);
       return unsubscribe;
+    },
+    // Checkpoints. Grant-checked like every other
+    // write above; reads (`interrupted`) stay ungated below.
+    begin(name: string, key: string, value: unknown) {
+      assertGranted(id, 'records.write');
+      beginCheckpoint(id, name, key, value, recordsMountId);
+    },
+    end(name: string, key: string) {
+      assertGranted(id, 'records.write');
+      endCheckpoint(id, name, key);
+    },
+    interrupted(name?: string) {
+      return interruptedFor(id, recordsMountId, name);
+    },
+  };
+
+  // `ctx.services` — dependency by CAPABILITY, not by package name (see
+  // services.ts's header comment for the full design). `provide` puts an
+  // implementation into a namespace every other plugin can read, so it's
+  // gated like any other registration; `require` only records that THIS
+  // plugin needs a name — a statement about itself, not a reach into
+  // anyone else's — so it's ungated, same call as records.read/catalog.list.
+  // Unregistration on unmount happens in `lifecycle.ts` (calling
+  // `unregisterPluginServices`), same as every other registry here — not
+  // via `ctx.effect`, because that's plugin-owned teardown, not core's.
+  const services: ServicesRegistrar = {
+    provide(name: string, impl: unknown) {
+      assertLive('services.provide');
+      assertGranted(id, 'services.provide');
+      registerService(id, name, impl);
+    },
+    require<T = unknown>(name: string): ServiceHandle<T> {
+      assertLive('services.require');
+      requireService(id, name);
+      // Resolved live on every get(), never captured here: the provider may
+      // not have mounted yet when apply() runs (the loader checks
+      // requirements once the whole manifest is applied), and a provider
+      // that hot-reloads must be picked up without the consumer knowing.
+      return {
+        name,
+        get: () => {
+          const impl = getService(name);
+          if (impl === undefined) {
+            throw new Error(`plugin "${id}": no plugin provides service "${name}"`);
+          }
+          return impl as T;
+        },
+      };
+    },
+  };
+
+  // Not a registrar, same as artifacts/agents — nobody needs a different
+  // secret store, they need to read one. There is no write path here: a
+  // secret is written by a human (UI/CLI/API), never by a plugin, so nothing
+  // is registered and there is nothing for unmount to deregister — grants
+  // already clear via `clearPluginGrants` on dispose, same as every other
+  // capability.
+  const secrets: SecretsApi = {
+    async list() {
+      assertLive('secrets.list');
+      return listSecrets().map((s) => s.name);
+    },
+    async resolve<T>(value: T): Promise<T> {
+      assertLive('secrets.resolve');
+      assertGranted(id, 'secrets.read');
+      return resolveSecrets(value);
+    },
+  };
+
+  // Not a registrar — a method on ctx, same as records.put/records.read. Nobody
+  // needs a different artifact implementation; they need to write one. There
+  // is no `artifacts.register()` and there will not be.
+  const artifacts: ArtifactsApi = {
+    // `pluginId` is always this closure's `id`, never anything the caller
+    // could pass in `input` — a plugin can write only into its own artifact
+    // namespace, same discipline as `records.put`'s `id` argument to `putRecord`.
+    // Deliberately NOT gated on `assertLive`, for the same reason
+    // `records.put`/`records.read` aren't (see the comment there): the revoke
+    // guard exists to stop a timed-out `apply()` from mutating the live
+    // REGISTRIES, not to stop a healthy plugin from writing output long after
+    // `apply()` returned. No teardown either — an artifact is a file in the
+    // worktree that outlives the plugin, so nothing here pushes onto
+    // `effects`.
+    async write(taskId, input) {
+      // Granted, but deliberately NOT `assertLive` — see the block comment
+      // above. Different questions: a revoked context may still flush output
+      // it already earned; an ungranted plugin should never have been writing.
+      assertGranted(id, 'artifacts.write');
+      return toArtifactEntry(taskId, writeTaskArtifact(taskId, id, input));
+    },
+    // Unscoped, like records.read: every plugin's artifacts on the task, not
+    // just this plugin's own.
+    async list(taskId) {
+      return listTaskArtifacts(taskId).map((r) => toArtifactEntry(taskId, r));
+    },
+  };
+
+  // `ctx.agents` — a headless, structured-output agent run. Same primitive
+  // as `services/session-vertical-service.ts`, minus the schedule bookkeeping:
+  // this deliberately passes no `run:` option to `runAgentSession`, so the
+  // call stays DB-free — a plugin's agent run is not a schedule run and does
+  // not get a `runs` row.
+  const agents: AgentRunner = {
+    async run<T = unknown>(opts: AgentRunOptions): Promise<T> {
+      // Gated on `assertLive`, unlike `records.put`/`artifacts.write` above:
+      // those flush output the plugin already earned, but this SPAWNS A NEW
+      // SUBPROCESS. A context is revoked both when `apply()` overruns its
+      // timeout and — via `disposePluginContext`, which revokes last — on
+      // unmount, so this one guard covers "no new agent runs after the
+      // plugin is gone" with no extra bookkeeping.
+      assertLive('agents.run');
+      assertGranted(id, 'agents.run');
+      const ephemeral = opts.workspaceDir === undefined;
+      const workspaceDir =
+        opts.workspaceDir ??
+        (await fs.promises.mkdtemp(path.join(os.tmpdir(), `octomux-plugin-${id}-`)));
+      try {
+        const { result } = await runAgentSession<T>({
+          workspaceDir,
+          harness: getHarness(null),
+          substrate: ptySubstrate,
+          input: opts.input,
+          outputSchema: opts.outputSchema,
+          model: opts.model ?? null,
+          timeoutMs: opts.timeoutMs,
+        });
+        return result;
+      } finally {
+        // Disposal does not strand an in-flight session and does not block on
+        // one either: an in-flight run() keeps going after unmount and
+        // settles on its own — `runAgentSession` disposes the process handle
+        // and the capture in its own `finally`, and its `timeoutMs` (default
+        // 300s) bounds the wait, so nothing leaks and this promise always
+        // settles. Unmount only stops NEW runs (via assertLive above); no
+        // effect is pushed here, and nothing awaits an in-flight session.
+        //
+        // Only a dir WE made gets removed; a caller-supplied workspaceDir is
+        // the caller's to clean up.
+        if (ephemeral) {
+          await fs.promises.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
+        }
+      }
+    },
+  };
+
+  // `ctx.attention` — ask a human a question and wait for an answer. Not a
+  // registrar, same as `agents`/`artifacts`: nobody needs a different
+  // attention implementation, they need to ask one question. Gated on
+  // `assertLive`, like `agents.run` and UNLIKE `records.put`/`artifacts.write`:
+  // `ask` interrupts a HUMAN, so a plugin that has already been unmounted
+  // must not be able to start a new one. Nothing is pushed onto `effects`
+  // here: `ask` doesn't REGISTER anything, so there's nothing to deregister
+  // on unmount — an in-flight ask settles on its own, bounded by its own
+  // timeout, the same precedent `agents.run` documents above for an
+  // in-flight agent session.
+  const attention: AttentionApi = {
+    // `async` (rather than returning `askHumans(ask)` directly, like the
+    // synchronous registrars above) so a synchronous `assertLive`/
+    // `assertGranted` throw surfaces as a rejected promise, matching
+    // `AttentionApi.ask`'s `Promise<AttentionAnswer>` signature and
+    // `ctx.secrets.list`/`resolve`'s equivalent guard pattern above.
+    async ask(ask: AttentionAsk) {
+      assertLive('attention.ask');
+      assertGranted(id, 'attention.ask');
+      return askHumans(ask);
     },
   };
 
   const ui: UiRegistrar = {
     panel(binding: UiPanelBinding) {
       assertLive('ui.panel');
+      assertGranted(id, 'ui.panel');
       const payload = binding as unknown as Record<string, unknown>;
       requireLocalId(payload, 'slot', 'ui.panel');
-      requireLocalId(payload, 'fact', 'ui.panel');
       requireLocalId(payload, 'as', 'ui.panel');
+      // `fact` is no longer unconditionally required (SHR-275): a binding
+      // names EITHER a task-scoped fact type or a durable collection.
+      // Deliberately not re-checked here — `registerPluginUiPanel` owns the
+      // exactly-one rule so there is one place that decides it, and it has
+      // the slot/renderer validation next to it already.
       registerPluginUiPanel(id, binding);
     },
+    action(def: UiActionDefinition) {
+      assertLive('ui.action');
+      assertGranted(id, 'ui.action');
+      const payload = def as unknown as Record<string, unknown>;
+      requireLocalId(payload, 'id', 'ui.action');
+      registerPluginUiAction(id, def);
+    },
+  };
+
+  // Deliberately NOT gated on `assertLive` — same reasoning as `records.put`
+  // above: this is a read, not a registration. A revoked context still has a
+  // perfectly good view of what's installed; the revoke guard exists to stop
+  // a timed-out apply() from mutating the live registries, not to blind a
+  // plugin to them afterward.
+  const catalog = { list: () => listCatalog() };
+  const policy: PolicyRegistrar = {
+    intercept(point: PolicyPoint, hook: PolicyHook) {
+      assertLive('policy.intercept');
+      assertGranted(id, 'policy.intercept');
+      if (!POLICY_POINTS.includes(point)) {
+        throw new Error(
+          `plugin registrar: "policy.intercept" got unknown point ${JSON.stringify(point)} ` +
+            `(valid: ${POLICY_POINTS.join(', ')})`,
+        );
+      }
+      if (typeof hook !== 'function') {
+        throw new Error('plugin registrar: "policy.intercept" requires a function hook');
+      }
+      registerPolicyHook(id, point, hook);
+    },
+  };
+
+  // Not a registrar, same as `artifacts` — nobody needs a different fan-out
+  // implementation, they need to run one. `run` is grant-gated here rather
+  // than inside the engine so every capability check in the plugin runtime
+  // lives in one file; `status`/`list` are ungated reads, matching
+  // `records.read` and `artifacts.list`.
+  //
+  // Deliberately NOT `assertLive`: a fan-out is work a healthy plugin starts
+  // long after `apply()` returned. The revoke guard exists to stop a
+  // timed-out `apply()` from mutating the REGISTRIES — same reasoning as
+  // `records.put` above.
+  const fanoutApi = createFanOutApi(id);
+  const fanout: FanOutApi = {
+    run<T = unknown, R = unknown>(spec: FanOutSpec<T, R>) {
+      assertGranted(id, 'fanout.run');
+      return fanoutApi.run<T, R>(spec);
+    },
+    status: (runId: string) => fanoutApi.status(runId),
+    list: (name?: string) => fanoutApi.list(name),
   };
 
   const ctx: PluginContext = {
     id,
     logger,
     settings,
-    kv: createKv(id),
     workflows,
     integrations,
     harnesses,
+    compute,
+    surfaces,
     http,
-    facts,
+    records,
+    services,
+    artifacts,
+    secrets,
+    agents,
+    attention,
     ui,
+    catalog,
+    policy,
+    fanout,
     effect(dispose: () => void | Promise<void>) {
       assertLive('effect');
       if (typeof dispose !== 'function') {
@@ -299,6 +639,22 @@ export function createPluginContext(id: string): PluginContext {
   };
   revokers.set(ctx, () => {
     live = false;
+  });
+  // Pushed onto the effect stack rather than handled as a third WeakMap: it
+  // runs LAST (effects run in reverse registration order, and this is the
+  // very first thing registered), which is fine — nothing else in teardown
+  // depends on the grant record still being present.
+  effects.push(() => {
+    clearPluginGrants(id);
+  });
+  // Everything registered through `ctx` is undone on unmount; a fan-out is
+  // the one thing that is still *running* at that point. Abort stops the
+  // scheduler handing out new items and marks the run `canceled` — it does
+  // NOT await in-flight handlers, because a handler may be a multi-minute
+  // agent session and unmount must not block on it. The items it was mid-way
+  // through go back to `pending`, so a later `{ resume: runId }` picks them up.
+  effects.push(() => {
+    abortPluginFanOuts(id);
   });
   effectStacks.set(ctx, effects);
   return ctx;

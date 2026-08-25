@@ -39,6 +39,7 @@ import {
   sendMessageToAgent,
 } from '../task-engine/index.js';
 import { childLogger } from '../logger.js';
+import { sessionFor } from '../compute/index.js';
 import { WORKFLOW_STATUSES } from '../types.js';
 import { getTask, setWorkflowStatus, listActiveAgents } from '../repositories/index.js';
 import { createTask } from '../services/task-service.js';
@@ -548,7 +549,8 @@ export async function runSendMessage(taskId: string, message: string): Promise<v
     'runSendMessage: delivering turn to worker',
   );
 
-  await sendMessageToAgent(task.tmux_session, agent.window_index, message);
+  const compute = await sessionFor(task);
+  await sendMessageToAgent(compute, task.tmux_session, agent.window_index, message);
 
   logger.info(
     { task_id: taskId, agent_id: agent.id, operation: 'runSendMessage' },

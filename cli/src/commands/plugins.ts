@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import yaml from 'js-yaml';
 import { parseManifest, readManifest } from '../../../server/plugins/manifest.js';
 import { manifestPath as defaultManifestPath } from '../../../server/plugins/paths.js';
+import { acknowledgeGrants, readGrantLedger } from '../../../server/plugins/grants.js';
 import { getContext } from '../action.js';
 import { errorMessage, outputJson, printTable, success } from '../format.js';
 import type { PluginManifest, PluginRow } from '@octomux/plugin-api';
@@ -123,6 +124,46 @@ function setDisabled(id: string, disabled: boolean): void {
   success(`${disabled ? 'Disabled' : 'Enabled'} plugin "${id}" in ${file}`);
 }
 
+/**
+ * `octomux plugins approve <id>` (SHR-259). An operator confirming they've
+ * seen a plugin's declared `grants:` and are OK with it — not a security
+ * check on the plugin's code. A plugin runs in-process with the DB handle,
+ * every credential, and `process.env`; approving a grant does not sandbox or
+ * restrict anything, it only unblocks the coordination/audit path
+ * (`server/plugins/grants.ts`'s ledger) so the declared capability actually
+ * takes effect on the next boot instead of being silently withheld.
+ *
+ * Writes `plugin-grants.json` (the ledger, co-located with the manifest),
+ * NOT `octomux.yml` — there is nothing to round-trip through
+ * `writeManifestFile` here, `acknowledgeGrants` already writes atomically.
+ */
+function approveGrants(id: string): void {
+  const file = defaultManifestPath();
+  const manifest = readManifestOrExit(file);
+
+  const row = manifest.plugins.find((p) => p.id === id);
+  if (!row) {
+    errorMessage(`No plugin with id "${id}" in ${file}`);
+    process.exit(1);
+  }
+
+  const declared = row.grants ?? [];
+  // Read the previously-acknowledged set BEFORE writing, so the user sees
+  // exactly what they're approving the delta from.
+  const previouslyAcknowledged = readGrantLedger(file)[id] ?? [];
+  acknowledgeGrants(file, id, declared);
+
+  if (declared.length === 0) {
+    success(`Plugin "${id}" declares no grants in ${file} — nothing to approve.`);
+    return;
+  }
+
+  const from = previouslyAcknowledged.length > 0 ? previouslyAcknowledged.join(', ') : 'none';
+  success(
+    `Acknowledged grants for plugin "${id}": ${declared.join(', ')} (previously acknowledged: ${from})`,
+  );
+}
+
 export function registerPlugins(program: Command): void {
   const plugins = program
     .command('plugins')
@@ -151,7 +192,16 @@ export function registerPlugins(program: Command): void {
           { header: 'ID', width: 20, get: (p) => p.id },
           { header: 'NAME', width: 30, get: (p) => p.name },
           { header: 'VERSION', width: 12, get: (p) => p.version ?? '—' },
-          { header: 'STATUS', get: (p) => (p.disabled ? 'disabled' : 'enabled') },
+          { header: 'STATUS', width: 10, get: (p) => (p.disabled ? 'disabled' : 'enabled') },
+          // Declared grants (octomux.yml), not what's effectively acknowledged —
+          // an operator installing a plugin should see `policy.intercept` here
+          // without opening the YAML. `octomux doctor` is where the acknowledged/
+          // pending distinction (the ledger) is reported, since that needs a
+          // boot to have happened.
+          {
+            header: 'GRANTS',
+            get: (p) => (p.grants && p.grants.length > 0 ? p.grants.join(', ') : '—'),
+          },
         ],
         manifest.plugins,
       );
@@ -166,6 +216,14 @@ export function registerPlugins(program: Command): void {
     .command('enable <id>')
     .description('Enable a plugin by id')
     .action((id: string) => setDisabled(id, false));
+
+  plugins
+    .command('approve <id>')
+    .description(
+      "Acknowledge a plugin row's declared grants (octomux.yml) so they take effect on the " +
+        'next boot — an operator confirming intent, not a security check',
+    )
+    .action((id: string) => approveGrants(id));
 
   plugins
     .command('reload <id>')

@@ -20,6 +20,19 @@ vi.mock('@/lib/hooks', () => ({
   }),
 }));
 
+// `command: true` plugin actions folded into ACTIONS — see the
+// `pluginActionsRef` cases below. Empty by default so the existing
+// task/move-action tests are unaffected.
+const pluginActionsRef = { current: [] as Record<string, unknown>[] };
+const invokePluginActionMock = vi.fn();
+vi.mock('@/lib/plugin-ui', () => ({
+  usePluginUiActions: () => ({ actions: pluginActionsRef.current, loading: false, error: null }),
+  invokePluginAction: invokePluginActionMock,
+}));
+
+const showToastMock = vi.fn();
+vi.mock('@/components/CustomToast', () => ({ showToast: showToastMock, CustomToast: vi.fn() }));
+
 const { mockNavigate, routerMockFactory } = await vi.hoisted(async () =>
   (await import('../test-helpers')).setupRouterNavigateMock(),
 );
@@ -48,8 +61,10 @@ beforeEach(() => {
   mockNavigate.mockReset();
   mockRefresh.mockReset();
   mockTasksRef.current = [];
+  pluginActionsRef.current = [];
   apiMock.listTasks.mockResolvedValue([]);
   apiMock.moveTask.mockResolvedValue(undefined);
+  invokePluginActionMock.mockResolvedValue({ ok: true, message: 'Done' });
 });
 
 describe('CommandPalette (inline search)', () => {
@@ -203,5 +218,83 @@ describe('CommandPalette — move-task actions', () => {
     expect(
       screen.queryByTestId('command-palette-action-move-task-ty-planned'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('CommandPalette — plugin `command: true` actions', () => {
+  it('shows a matching plugin action and invokes it directly on Enter (no schema/confirm)', async () => {
+    const user = userEvent.setup();
+    pluginActionsRef.current = [
+      {
+        pluginId: 'p1',
+        actionId: 'p1:sweep',
+        id: 'sweep',
+        label: 'Sweep stale branches',
+        command: true,
+      },
+    ];
+    renderPalette([]);
+
+    await user.type(screen.getByTestId('command-palette-input'), 'sweep');
+    expect(screen.getByTestId('command-palette-action-plugin-action-p1:sweep')).toBeInTheDocument();
+
+    await user.keyboard('{ArrowDown}');
+    await user.keyboard('{Enter}');
+
+    await vi.waitFor(() => {
+      expect(invokePluginActionMock).toHaveBeenCalledWith('p1:sweep', {});
+    });
+    await vi.waitFor(() => {
+      expect(showToastMock).toHaveBeenCalledWith('success', 'Sweep stale branches', 'Done');
+    });
+  });
+
+  it('a plugin action with a slot but no command flag does not appear in the palette', async () => {
+    const user = userEvent.setup();
+    pluginActionsRef.current = [
+      {
+        pluginId: 'p1',
+        actionId: 'p1:panelOnly',
+        id: 'panelOnly',
+        label: 'Panel only',
+        slot: 'task.panel',
+      },
+    ];
+    renderPalette([]);
+
+    await user.type(screen.getByTestId('command-palette-input'), 'panel only');
+    expect(
+      screen.queryByTestId('command-palette-action-plugin-action-p1:panelOnly'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('a plugin action with a confirm prompt opens the shared dialog instead of invoking immediately', async () => {
+    const user = userEvent.setup();
+    pluginActionsRef.current = [
+      {
+        pluginId: 'p1',
+        actionId: 'p1:purge',
+        id: 'purge',
+        label: 'Purge cache',
+        command: true,
+        confirm: 'This deletes everything cached.',
+      },
+    ];
+    renderPalette([]);
+
+    await user.type(screen.getByTestId('command-palette-input'), 'purge');
+    const action = screen.getByTestId('command-palette-action-plugin-action-p1:purge');
+    await user.pointer([{ keys: '[MouseLeft>]', target: action }, { keys: '[/MouseLeft]' }]);
+
+    expect(screen.getByText('This deletes everything cached.')).toBeInTheDocument();
+    expect(invokePluginActionMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('plugin-action-dialog-submit'));
+    await vi.waitFor(() => {
+      expect(invokePluginActionMock).toHaveBeenCalledWith('p1:purge', {
+        taskId: undefined,
+        input: undefined,
+      });
+    });
   });
 });
