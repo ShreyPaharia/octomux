@@ -163,12 +163,12 @@ describe('TerminalView', () => {
     expect(MockWebSocket.instances[0].url).toMatch(/\/ws\/terminal\/task-A\/0(\?|$)/);
   });
 
-  it('advertises deflate support in the ws URL', async () => {
+  it('advertises streaming deflate support in the ws URL', async () => {
     // bun's runtime has DecompressionStream, so the component opts in — the
     // server only compresses for clients that set this flag.
     const TerminalView = await importTerminalView();
     render(<TerminalView taskId="task-A" windowIndex={0} />);
-    expect(MockWebSocket.instances[0].url).toMatch(/\?deflate=1$/);
+    expect(MockWebSocket.instances[0].url).toMatch(/\?deflate=2$/);
   });
 
   it('reconnects to the new endpoint when windowIndex changes', async () => {

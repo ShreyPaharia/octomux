@@ -7,7 +7,7 @@ import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalWheelCoalesce } from '@/lib/terminal-wheel-coalesce';
-import { supportsDeflate, makeFrameWriter } from '@/lib/terminal-frames';
+import { supportsDeflate, makeStreamFrameWriter } from '@/lib/terminal-frames';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import { CloudOffIcon } from './icons';
@@ -55,6 +55,7 @@ export function TerminalView({
   const isMobile = useMediaQuery('(max-width: 767px)');
   const visibleRef = useRef(visible);
   const lastMessageAt = useRef(Date.now());
+  const frameWriter = useRef<{ dispose(): void } | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
   // True while the WebSocket is opening (initial connect or a reconnect) and no
@@ -68,7 +69,7 @@ export function TerminalView({
 
   const getWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const deflate = supportsDeflate ? '?deflate=1' : '';
+    const deflate = supportsDeflate ? '?deflate=2' : '';
     return wsUrlProp
       ? `${protocol}//${window.location.host}${wsUrlProp}${deflate}`
       : `${protocol}//${window.location.host}/ws/terminal/${taskId}/${windowIndex}${deflate}`;
@@ -117,7 +118,11 @@ export function TerminalView({
       setConnecting(true);
       const ws = new WebSocket(getWsUrl());
       ws.binaryType = 'arraybuffer';
-      const writeFrame = makeFrameWriter((data) => term.write(data));
+      // One inflate stream per socket — the server deflates with per-connection
+      // context takeover, so frames only decode against this socket's stream.
+      frameWriter.current?.dispose();
+      const frames = makeStreamFrameWriter((data) => term.write(data));
+      frameWriter.current = frames;
 
       ws.onopen = () => {
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
@@ -149,7 +154,7 @@ export function TerminalView({
         // First chunk means the terminal has real content — drop the placeholder.
         setConnecting(false);
         lastMessageAt.current = Date.now();
-        writeFrame(event.data);
+        frames.onFrame(event.data);
       };
 
       ws.onclose = (event) => {
@@ -424,6 +429,8 @@ export function TerminalView({
         clearInterval(countdownTimer.current);
       }
       wsRef.current?.close();
+      frameWriter.current?.dispose();
+      frameWriter.current = null;
       termRef.current?.dispose();
       viewportCleanup.current?.();
       viewportCleanup.current = null;
