@@ -18,8 +18,12 @@ export interface FrameWriter {
   dispose(): void;
 }
 
-export function makeStreamFrameWriter(write: (data: string | Uint8Array) => void): FrameWriter {
+export function makeStreamFrameWriter(
+  write: (data: string | Uint8Array) => void,
+  onStreamError?: () => void,
+): FrameWriter {
   let writer: WritableStreamDefaultWriter<BufferSource> | null = null;
+  let disposed = false;
 
   const ensureStream = (): WritableStreamDefaultWriter<BufferSource> => {
     if (writer) return writer;
@@ -35,14 +39,16 @@ export function makeStreamFrameWriter(write: (data: string | Uint8Array) => void
           if (value && value.length > 0) write(value);
         }
       } catch {
-        // Stream aborted (dispose) or corrupt input — a fresh socket brings a
-        // fresh stream, and the watchdog replaces a dead one.
+        // Corrupt input kills the stream permanently, and the liveness
+        // watchdog can't see it — raw ws frames still arrive, only decoding
+        // stopped. Surface it so the owner replaces the socket (a fresh
+        // socket brings a fresh deflate context on both ends).
+        if (!disposed) onStreamError?.();
       }
     })();
     return w;
   };
 
-  let disposed = false;
   return {
     onFrame(data) {
       if (disposed) return; // late frame for a replaced socket

@@ -68,6 +68,33 @@ describe('terminal-frames', () => {
     w.dispose();
   });
 
+  it('reports a corrupt stream so the owner can replace the socket', async () => {
+    const writes: string[] = [];
+    let errored = 0;
+    const w = makeStreamFrameWriter(
+      (d) => writes.push(decode(d)),
+      () => errored++,
+    );
+    w.onFrame(new Uint8Array([0xff, 0xff, 0xff, 0xff]).buffer); // invalid deflate
+    await waitFor(() => errored > 0);
+    expect(errored).toBe(1);
+    w.dispose();
+  });
+
+  it('does not report a stream error caused by dispose itself', async () => {
+    let errored = 0;
+    const w = makeStreamFrameWriter(
+      () => {},
+      () => errored++,
+    );
+    const frames = await makeFrames(['content']);
+    w.onFrame(frames[0]);
+    await new Promise((r) => setTimeout(r, 20));
+    w.dispose();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errored).toBe(0);
+  });
+
   it('stops writing after dispose', async () => {
     const writes: string[] = [];
     const w = makeStreamFrameWriter((d) => writes.push(decode(d)));

@@ -120,8 +120,17 @@ export function TerminalView({
       ws.binaryType = 'arraybuffer';
       // One inflate stream per socket — the server deflates with per-connection
       // context takeover, so frames only decode against this socket's stream.
+      // A stream decode error is invisible to the watchdog (raw frames keep
+      // arriving, only decoding stopped), so it forces its own reconnect.
       frameWriter.current?.dispose();
-      const frames = makeStreamFrameWriter((data) => term.write(data));
+      const frames = makeStreamFrameWriter(
+        (data) => term.write(data),
+        () => {
+          if (unmounted.current || wsRef.current !== ws) return;
+          ws.close();
+          connectWs(term);
+        },
+      );
       frameWriter.current = frames;
 
       ws.onopen = () => {
