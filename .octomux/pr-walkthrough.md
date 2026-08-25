@@ -19,7 +19,18 @@ page refresh. Two root causes, both fixed here:
    the client stays wedged until refresh.
 
 Also removes the "give it a readable name" nudge that was appended to every
-agent's initial prompt (separate commit, requested alongside).
+agent's initial prompt (separate commit, requested alongside), and fixes the
+start-time installers: `installSkills()` still read `assetRoot()/skills` after
+the bundler moved to shipping `plugin/`, so the compiled binary installed zero
+skills and copy-if-absent left old ones stale forever. Skills now install from
+`plugin/skills`, version-stamped (matching stamp -> no-op, otherwise octomux's
+own skill dirs are replaced; user-authored skills untouched), and the
+standalone binary links itself as `~/.local/bin/octomux` when nothing on PATH
+provides octomux.
+
+The branch was rebased onto the compute-session migration that landed on
+`next` mid-flight; the deflate/watchdog deltas were re-applied over
+`compute.spawn`/`compute.tmux` with all suites re-verified after the rebase.
 
 ## Change tour
 
