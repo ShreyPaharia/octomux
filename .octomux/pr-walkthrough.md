@@ -58,7 +58,7 @@ The branch was rebased onto the compute-session migration that landed on
   sends `{"type":"ping"}`; if nothing arrives within 5s the socket is half-open
   and gets silently replaced (no overlay; the reconnect repaints from the tmux
   snapshot). On tab return, an OPEN socket is probed immediately instead of
-  trusted — post-sleep sockets often only *look* OPEN.
+  trusted — post-sleep sockets often only _look_ OPEN.
 - `server/terminal.ts` — replies to `{"type":"ping"}` with an empty frame.
   Empty writes are a no-op for xterm, so the client needs no filtering; paused
   (hidden-tab) connections still answer because `paused` only gates pty output,
