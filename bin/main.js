@@ -8,14 +8,16 @@
  * launcher, because this file imports TypeScript sources directly.
  */
 
+import { which } from 'bun';
 import { exec as execCb } from 'child_process';
-import { existsSync, mkdirSync, readdirSync, cpSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, cpSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import path from 'path';
 import os from 'os';
 import pkg from '../package.json';
-import { assetRoot } from '../server/assets.ts';
+import { assetRoot, isCompiled } from '../server/assets.ts';
+import { installSkills, installCliShim } from './installers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -82,10 +84,34 @@ async function runStart(startArgs) {
   // Welcome banner
   console.log(`\n\uD83D\uDC19 octomux v${version}\n`);
 
-  // Install bundled skills and configs
-  installSkills();
+  // Install bundled skills and configs. Skills are version-gated: a stamp
+  // matching this version means nothing to install or update.
+  if (
+    installSkills({
+      source: path.join(assetRoot(), 'plugin', 'skills'),
+      target: path.join(os.homedir(), '.claude', 'skills'),
+      version,
+    })
+  ) {
+    console.log('Installed octomux skills for Claude Code');
+  }
   installWorkflows();
   installLazygitConfig();
+  // npm installs own their bin shim; only the standalone compiled binary needs
+  // to put itself on PATH — and only when nothing else already provides octomux.
+  if (isCompiled) {
+    const link = installCliShim({
+      execPath: process.execPath,
+      onPath: Boolean(which('octomux')),
+    });
+    if (link) {
+      console.log(`Linked ${link} -> ${process.execPath}`);
+      const onPathDirs = (process.env.PATH || '').split(path.delimiter);
+      if (!onPathDirs.includes(path.dirname(link))) {
+        console.log(`Note: add ${path.dirname(link)} to PATH so agents can run the octomux CLI.`);
+      }
+    }
+  }
 
   // Preflight: warn about missing tools (install from dashboard Setup — no blocking exit)
   const { warnBinary, checkNeovimVersion } = await import('../server/startup.ts');
@@ -173,40 +199,6 @@ function installLazygitConfig() {
   mkdirSync(configDir, { recursive: true });
   cpSync(source, target);
   console.log('Installed lazygit config');
-}
-
-function installSkills() {
-  const skillsSource = path.join(assetRoot(), 'skills');
-  const skillsTarget = path.join(os.homedir(), '.claude', 'skills');
-
-  if (!existsSync(skillsSource)) return;
-
-  // Remove old-named skills that have been renamed
-  const deprecated = [
-    'octomux-create-pr',
-    'octomux-create-task',
-    'octomux-create-commit',
-    'octomux-executing-plans',
-  ];
-  for (const name of deprecated) {
-    const old = path.join(skillsTarget, name);
-    if (existsSync(old)) {
-      rmSync(old, { recursive: true });
-    }
-  }
-
-  let installed = false;
-  for (const skill of readdirSync(skillsSource)) {
-    const target = path.join(skillsTarget, skill);
-    if (!existsSync(target)) {
-      mkdirSync(target, { recursive: true });
-      cpSync(path.join(skillsSource, skill), target, { recursive: true });
-      installed = true;
-    }
-  }
-  if (installed) {
-    console.log('Installed octomux skills for Claude Code');
-  }
 }
 
 function installWorkflows() {
