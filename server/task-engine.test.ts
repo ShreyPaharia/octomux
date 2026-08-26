@@ -166,6 +166,9 @@ let db: Database;
 beforeEach(() => {
   db = createTestDb();
   vi.clearAllMocks();
+  // mockReset, not clearAllMocks: a leftover mockReturnValueOnce queue survives
+  // clearAllMocks and leaks a stale `false` into the next test's existsSync.
+  vi.mocked(fs.existsSync).mockReset();
   vi.mocked(fs.existsSync).mockReturnValue(true);
   nextWindowIndex = 0;
 });
