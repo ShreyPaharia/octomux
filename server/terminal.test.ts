@@ -1,6 +1,6 @@
 import type { Server } from 'http';
 import { WebSocket } from 'ws';
-import { inflateRawSync } from 'zlib';
+import { inflateRawSync, createInflateRaw } from 'zlib';
 import Database from './sqlite.js';
 import { describe, it, expect, vi, beforeEach, afterEach } from './bun-test.js';
 
@@ -450,6 +450,55 @@ describe('terminal WebSocket', () => {
     expect(inflateRawSync(frames[0].data).toString()).toBe(
       '\x1b[?1049h\x1b[H\x1b[J' + 'w'.repeat(4096) + '\r\n',
     );
+    ws.close();
+  });
+
+  it('streams all frames through one deflate context when the client opts into ?deflate=2', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+    capturePaneOutput = ''; // no snapshot frame — keep the stream to pty output only
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0?deflate=2`);
+    await waitForSetup();
+
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+    onDataCb('first repaint');
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('second repaint almost identical');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toHaveLength(2);
+    expect(frames.every((f) => f.isBinary)).toBe(true);
+    // Frames share one deflate context: inflating them as one continuous
+    // stream must reproduce the concatenated text.
+    const inflate = createInflateRaw();
+    const out: Buffer[] = [];
+    inflate.on('data', (c: Buffer) => out.push(c));
+    for (const f of frames) inflate.write(f.data);
+    await new Promise<void>((r) => inflate.flush(() => r()));
+    expect(Buffer.concat(out).toString()).toBe('first repaintsecond repaint almost identical');
+
+    ws.close();
+  });
+
+  it('deflates even small frames in streaming mode', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0?deflate=2`);
+    await waitForSetup();
+
+    const frames: { data: Buffer; isBinary: boolean }[] = [];
+    ws.on('message', (data, isBinary) => frames.push({ data: data as Buffer, isBinary }));
+
+    mockPty.onData.mock.calls[0][0]('x');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(frames).toHaveLength(1);
+    expect(frames[0].isBinary).toBe(true);
     ws.close();
   });
 

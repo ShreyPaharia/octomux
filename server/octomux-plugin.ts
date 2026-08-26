@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { assetRoot } from './assets.js';
 import { octomuxRoot } from './octomux-root.js';
 import { shellQuoteSingle } from './shell-quote.js';
 
@@ -12,18 +12,15 @@ export function octomuxSkillRef(skillName: string): string {
   return `/${OCTOMUX_PLUGIN_NAME}:${skillName}`;
 }
 
-/** Locate the bundled octomux plugin directory shipped with the package. */
+/**
+ * Locate the bundled octomux plugin directory shipped with the package.
+ * Goes through assetRoot() — inside the compiled binary the plugin tree only
+ * exists in the extracted runtime dir, never next to import.meta.url ($bunfs).
+ */
 export function bundledOctomuxPluginDir(): string {
-  const startDir = path.dirname(fileURLToPath(import.meta.url));
-  let dir = startDir;
-  for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, 'plugin');
-    if (fs.existsSync(path.join(candidate, '.claude-plugin', 'plugin.json'))) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error(`Cannot locate bundled octomux plugin from ${startDir} (walked up 6 levels)`);
+  const candidate = path.join(assetRoot(), 'plugin');
+  if (fs.existsSync(path.join(candidate, '.claude-plugin', 'plugin.json'))) return candidate;
+  throw new Error(`Cannot locate bundled octomux plugin at ${candidate}`);
 }
 
 export interface OctomuxPluginFlagOpts {
