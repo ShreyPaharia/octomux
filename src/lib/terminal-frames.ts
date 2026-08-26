@@ -2,46 +2,69 @@
  * Frame decoding for the terminal WebSocket.
  *
  * Bun's ws shim never negotiates permessage-deflate (the option is a silent
- * no-op server-side), so the server deflates large frames itself and sends
- * them as binary; small frames stay plain text. The client advertises support
- * with `?deflate=1` when DecompressionStream is available.
+ * no-op server-side), so compression is app-level: the client advertises
+ * `?deflate=2` when DecompressionStream is available, and the server then
+ * sends every output frame as binary, deflated through one per-connection
+ * zlib context with takeover (consecutive TUI repaints are near-identical, so
+ * each frame costs a percent or two of its raw size). Binary frames are fed
+ * into a single DecompressionStream in arrival order; the only text frames a
+ * deflating server sends are empty liveness pongs, and a non-deflating server
+ * sends only text — so the two paths never interleave and ordering holds.
  */
 export const supportsDeflate = typeof DecompressionStream === 'function';
 
-export async function inflateFrame(buf: ArrayBuffer | Blob): Promise<Uint8Array> {
-  const blob = buf instanceof Blob ? buf : new Blob([buf]);
-  const stream = blob.stream().pipeThrough(new DecompressionStream('deflate-raw'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+export interface FrameWriter {
+  onFrame(data: string | ArrayBuffer): void;
+  dispose(): void;
 }
 
-/**
- * Returns a handler that writes incoming frames to the terminal in arrival
- * order. Inflation is async, so a promise chain preserves ordering; text
- * frames bypass the chain when nothing is pending, so keystroke echo never
- * waits on a repaint that is still inflating.
- */
-export function makeFrameWriter(
+export function makeStreamFrameWriter(
   write: (data: string | Uint8Array) => void,
-): (data: string | ArrayBuffer | Blob) => void {
-  let chain: Promise<unknown> = Promise.resolve();
-  let pending = 0;
-  const enqueue = (fn: () => unknown) => {
-    pending++;
-    // Each link swallows its own error, so `chain` is always resolved and a
-    // corrupt frame can't wedge every frame after it.
-    chain = chain
-      .then(fn)
-      .catch(() => {})
-      .finally(() => {
-        pending--;
-      });
+  onStreamError?: () => void,
+): FrameWriter {
+  let writer: WritableStreamDefaultWriter<BufferSource> | null = null;
+  let disposed = false;
+
+  const ensureStream = (): WritableStreamDefaultWriter<BufferSource> => {
+    if (writer) return writer;
+    const ds = new DecompressionStream('deflate-raw');
+    const w: WritableStreamDefaultWriter<BufferSource> = ds.writable.getWriter();
+    writer = w;
+    void (async () => {
+      const reader = ds.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) write(value);
+        }
+      } catch {
+        // Corrupt input kills the stream permanently, and the liveness
+        // watchdog can't see it — raw ws frames still arrive, only decoding
+        // stopped. Surface it so the owner replaces the socket (a fresh
+        // socket brings a fresh deflate context on both ends).
+        if (!disposed) onStreamError?.();
+      }
+    })();
+    return w;
   };
-  return (data) => {
-    if (typeof data === 'string') {
-      if (pending === 0) write(data);
-      else enqueue(() => write(data));
-      return;
-    }
-    enqueue(async () => write(await inflateFrame(data)));
+
+  return {
+    onFrame(data) {
+      if (disposed) return; // late frame for a replaced socket
+      if (typeof data === 'string') {
+        if (data) write(data);
+        return;
+      }
+      // write() promises resolve in call order, so frames stay FIFO.
+      void ensureStream()
+        .write(new Uint8Array(data))
+        .catch(() => {});
+    },
+    dispose() {
+      disposed = true;
+      void writer?.close().catch(() => {});
+      writer = null;
+    },
   };
 }

@@ -1,5 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
-import { deflateRawSync } from 'zlib';
+import { createDeflateRaw, constants as zlibConstants, deflateRawSync } from 'zlib';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { nanoid } from 'nanoid';
@@ -22,35 +22,86 @@ let wss: WebSocketServer;
 export function setupTerminalWebSocket(): void {
   // No perMessageDeflate here: Bun's ws shim accepts the option but never
   // negotiates the extension (explicit TODO in the shim), so it was a silent
-  // no-op. Compression is app-level instead — see sendFrame().
+  // no-op. Compression is app-level instead — see makeFrameSender().
   wss = new WebSocketServer({ noServer: true });
   installHeartbeat(wss);
 }
 
-// App-layer replacement for permessage-deflate: TUI redraws are highly
-// repetitive ANSI, so deflating them cuts remote-viewing bandwidth ~10x.
-// Frames at or above the threshold go out deflated as binary; below it plain
-// text, so keystroke echo never pays the zlib round-trip. Only for clients
-// that advertised DecompressionStream support via `?deflate=1`.
+// App-layer replacement for permessage-deflate (a silent no-op under Bun's ws
+// shim). Two negotiated modes, picked by the client's `?deflate=` param:
+//
+//   2 — one deflate context per connection with context takeover. Consecutive
+//       TUI repaints are near-identical, so each frame deflates against the
+//       previous one: measured ~62x on a repaint vs ~2.8x compressing the same
+//       frame standalone. Every output frame rides the stream as binary; the
+//       client feeds them into a single DecompressionStream in arrival order.
+//   1 — legacy per-message mode kept for tabs still running the previous
+//       bundle: frames >= 1KB are deflated standalone, smaller stay text.
+//
+// The empty pong reply bypasses compression in both modes — any traffic
+// proves the link, and an empty text frame is a no-op for xterm.
 const DEFLATE_THRESHOLD = 1024;
 
-function sendFrame(ws: WebSocket, text: string, deflateOk: boolean): void {
-  if (deflateOk && text.length >= DEFLATE_THRESHOLD) {
-    ws.send(deflateRawSync(Buffer.from(text)));
-  } else {
-    ws.send(text);
+interface FrameSender {
+  send(text: string): void;
+  close(): void;
+}
+
+function makeFrameSender(ws: WebSocket, mode: number): FrameSender {
+  if (mode !== 2) {
+    return {
+      send(text) {
+        if (mode === 1 && text.length >= DEFLATE_THRESHOLD) {
+          ws.send(deflateRawSync(Buffer.from(text)));
+        } else {
+          ws.send(text);
+        }
+      },
+      close() {},
+    };
   }
+
+  const deflate = createDeflateRaw();
+  let chunks: Buffer[] = [];
+  deflate.on('data', (c: Buffer) => chunks.push(c));
+  // write+flush is async; the chain keeps frames FIFO so the client's inflate
+  // stream always sees bytes in generation order.
+  let chain = Promise.resolve();
+  let closed = false;
+  return {
+    send(text) {
+      chain = chain.then(
+        () =>
+          new Promise<void>((resolve) => {
+            if (closed) return resolve();
+            deflate.write(Buffer.from(text));
+            deflate.flush(zlibConstants.Z_SYNC_FLUSH, () => {
+              if (!closed && ws.readyState === WebSocket.OPEN && chunks.length > 0) {
+                ws.send(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
+              }
+              chunks = [];
+              resolve();
+            });
+          }),
+      );
+    },
+    close() {
+      closed = true;
+      deflate.close();
+    },
+  };
 }
 
 export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
   const [path = '', query = ''] = (req.url ?? '').split('?');
-  const deflateOk = new URLSearchParams(query).get('deflate') === '1';
+  const deflateParam = new URLSearchParams(query).get('deflate');
+  const deflateMode = deflateParam === '2' ? 2 : deflateParam === '1' ? 1 : 0;
 
   // Match /ws/terminal/chat/:id (standalone agent tmux session)
   const chatMatch = path.match(/^\/ws\/terminal\/chat\/([^/]+)$/);
   if (chatMatch) {
     wss.handleUpgrade(req, socket, head, (ws) => {
-      handleChatConnection(ws, chatMatch[1], deflateOk);
+      handleChatConnection(ws, chatMatch[1], deflateMode);
     });
     return true;
   }
@@ -62,7 +113,7 @@ export function handleTerminalUpgrade(req: IncomingMessage, socket: Duplex, head
   wss.handleUpgrade(req, socket, head, (ws) => {
     const taskId = match[1];
     const windowIndex = parseInt(match[2], 10);
-    handleConnection(ws, taskId, windowIndex, deflateOk);
+    handleConnection(ws, taskId, windowIndex, deflateMode);
   });
   return true;
 }
@@ -73,7 +124,7 @@ async function attachToTmuxSession(
   tmuxTarget: string,
   connKey: string,
   closeReason: string,
-  deflateOk: boolean,
+  sender: FrameSender,
   linkedSession?: string,
   pendingMessages?: (Buffer | string)[],
 ): Promise<void> {
@@ -148,7 +199,7 @@ async function attachToTmuxSession(
       retryTimer = setTimeout(flushOutput, BACKPRESSURE_RETRY_MS);
       return;
     }
-    sendFrame(ws, pendingOutput, deflateOk);
+    sender.send(pendingOutput);
     pendingOutput = '';
     outputScheduled = false;
   };
@@ -253,7 +304,7 @@ async function handleConnection(
   ws: WebSocket,
   taskId: string,
   windowIndex: number,
-  deflateOk: boolean,
+  deflateMode: number,
 ): Promise<void> {
   // Buffer messages that arrive while we set up the tmux session.
   // Without this, the client's initial resize message (sent on WS open) would be
@@ -272,6 +323,11 @@ async function handleConnection(
   }
 
   const compute = await sessionFor(task);
+
+  // Created before the snapshot so the first frame already rides the deflate
+  // context; closed on socket close (mode 2 holds a zlib stream).
+  const sender = makeFrameSender(ws, deflateMode);
+  ws.on('close', () => sender.close());
 
   // Create a grouped session so each viewer has independent window selection.
   // Without this, all clients attached to the same session share the active window,
@@ -322,7 +378,7 @@ async function handleConnection(
   compute.tmux(['set-option', '-t', linkedSession, 'aggressive-resize', 'on']).catch(() => {});
 
   if (pane && ws.readyState === WebSocket.OPEN) {
-    sendFrame(ws, `\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`, deflateOk);
+    sender.send(`\x1b[?1049h\x1b[H\x1b[J${pane.replace(/\n/g, '\r\n')}`);
   }
 
   const connKey = `${taskId}:${windowIndex}`;
@@ -332,18 +388,20 @@ async function handleConnection(
     linkedSession,
     connKey,
     'Failed to attach to tmux session',
-    deflateOk,
+    sender,
     linkedSession,
     pendingMessages,
   );
 }
 
-function handleChatConnection(ws: WebSocket, chatId: string, deflateOk: boolean): void {
+function handleChatConnection(ws: WebSocket, chatId: string, deflateMode: number): void {
   const row = getChatAgentTmuxSession(chatId);
   if (!row || !row.tmux_session) {
     ws.close(4004, 'Chat not found');
     return;
   }
+  const sender = makeFrameSender(ws, deflateMode);
+  ws.on('close', () => sender.close());
   // Chats have no Task by design (they're not task-backed sessions), so this
   // always stays on the local machine's own compute — never `sessionFor`.
   attachToTmuxSession(
@@ -352,7 +410,7 @@ function handleChatConnection(ws: WebSocket, chatId: string, deflateOk: boolean)
     row.tmux_session,
     `chat:${chatId}`,
     `Failed to attach to chat session`,
-    deflateOk,
+    sender,
   );
 }
 
