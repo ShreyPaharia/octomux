@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { assetRoot } from '../assets.js';
 import type { Harness, HarnessLaunchOpts, HarnessResumeOpts } from './types.js';
 import { validateAgentName, validateFlagString } from './types.js';
 import {
@@ -66,22 +66,14 @@ function hooksJsonObject(bridgeDest: string) {
 }
 
 /**
- * Locate the bridge script. The source layout is `<root>/bin/octomux-hook-bridge.js`
- * but `import.meta.url` differs between dev (`<root>/server/harnesses/cursor.ts`
- * under tsx) and bundled production (`<root>/dist-server/harnesses-*.js`). Walk up
- * from the running module looking for the bin/ sibling.
+ * Locate the bridge script at `<assetRoot()>/bin/octomux-hook-bridge.js` — the
+ * compiled binary only has it in the extracted runtime dir, never next to
+ * `import.meta.url` ($bunfs).
  */
 function resolveBridgeSource(): string {
-  const startDir = path.dirname(fileURLToPath(import.meta.url));
-  let dir = startDir;
-  for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, 'bin', 'octomux-hook-bridge.js');
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error(`Cannot locate bin/octomux-hook-bridge.js from ${startDir} (walked up 6 levels)`);
+  const candidate = path.join(assetRoot(), 'bin', 'octomux-hook-bridge.js');
+  if (fs.existsSync(candidate)) return candidate;
+  throw new Error(`Cannot locate octomux-hook-bridge.js at ${candidate}`);
 }
 
 export const cursorHarness: Harness = {

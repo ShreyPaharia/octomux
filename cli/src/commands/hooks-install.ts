@@ -1,24 +1,15 @@
 import { Command } from 'commander';
-import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import chalk from 'chalk';
+import { assetRoot } from '../../../server/assets.js';
 import { success, errorMessage } from '../format.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
+// assetRoot(), not import.meta.url: inside the compiled binary the templates
+// only exist in the extracted runtime dir.
 function resolveTemplateDir(): string {
-  const candidates = [
-    path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'hooks'),
-    path.resolve(__dirname, '..', '..', '..', 'templates', 'hooks'),
-    path.resolve(__dirname, '..', '..', 'templates', 'hooks'),
-    path.resolve(__dirname, '..', 'templates', 'hooks'),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return candidates[0];
+  return path.join(assetRoot(), 'templates', 'hooks');
 }
 
 interface TemplateManifest {

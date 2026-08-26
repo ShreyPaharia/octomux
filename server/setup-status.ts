@@ -1,15 +1,12 @@
-import path from 'path';
 import { execFile as execFileCb, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import { fileURLToPath } from 'url';
+import { assetRoot } from './assets.js';
 import { probeBinary, brewInstall, hasBrew } from './binary-check.js';
 import type { BinaryDep } from './startup.js';
 import { getSettings, type OctomuxSettings, type EditorChoice } from './settings.js';
 import { ensureGithubLogin } from './github-login.js';
 import { syncLazyVimPlugins } from './startup.js';
 const execFile = promisify(execFileCb);
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export type SetupItemStatus = 'ok' | 'missing' | 'outdated' | 'unconfigured' | 'optional_missing';
 
@@ -100,10 +97,6 @@ const EDITOR_DEPS: Record<EditorChoice, BinaryDep & { displayName: string }> = {
     installUrl: 'https://code.visualstudio.com/',
   },
 };
-
-function packageRoot(): string {
-  return path.resolve(__dirname, '..');
-}
 
 /**
  * Pick an install action for a missing binary dep: prefer Homebrew on macOS, then a
@@ -305,7 +298,9 @@ export async function runSetupInstall(id: string): Promise<{ ok: boolean; messag
   }
 
   if (id === 'lazyvim-sync') {
-    syncLazyVimPlugins(packageRoot());
+    // assetRoot(), not __dirname: in the compiled binary the .config tree only
+    // exists in the extracted runtime dir (and /$bunfs is read-only anyway).
+    syncLazyVimPlugins(assetRoot());
     return { ok: true, message: 'LazyVim plugin sync finished (or was already up to date)' };
   }
 

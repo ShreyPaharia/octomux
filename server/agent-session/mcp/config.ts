@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
+import { isCompiled } from '../../assets.js';
 
 // ─── Invocation resolver ─────────────────────────────────────────────────────
 
@@ -27,6 +28,12 @@ import fs from 'fs';
  * Returns null if neither candidate exists.
  */
 export function submitResultServerInvocation(): { command: string; args: string[] } | null {
+  // Compiled binary: no dist-server on disk and no tsx — the binary dispatches
+  // its own `__submit-result-mcp` argv to main() (see bin/main.js).
+  if (isCompiled) {
+    return { command: process.execPath, args: ['__submit-result-mcp'] };
+  }
+
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
 

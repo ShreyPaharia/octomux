@@ -441,9 +441,11 @@ function registerWorkerTools(server: McpServer): void {
 
 /**
  * Main entrypoint: create the server and connect to stdio transport.
- * Only runs when invoked directly (not when imported as a module).
+ * Only runs when invoked directly (not when imported as a module). Exported so
+ * the compiled binary can dispatch here via its `__octomux-mcp` argv
+ * (isMainModule() never matches inside $bunfs).
  */
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   logger.info({ operation: 'startup' }, 'octomux MCP server starting (stdio)');
 
   const server = createOctomuxMcpServer();
