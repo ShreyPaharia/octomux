@@ -1,7 +1,8 @@
+import diagnosticsChannel from 'node:diagnostics_channel';
 import { describe, it, expect, vi } from '../bun-test.js';
 import { SocketModeClient } from '@slack/socket-mode';
 import type { WebClient } from '@slack/web-api';
-import { buildSlack, createSlackAdapter } from './slack.js';
+import { buildSlack, createSlackAdapter, ensureUndiciPing } from './slack.js';
 import type { InboundMessage } from './adapter.js';
 
 /** Fake WebClient: records postMessage calls, never touches the network. */
@@ -131,5 +132,82 @@ describe('slack adapter', () => {
 
     expect(ack).toHaveBeenCalledTimes(1);
     expect(onMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('ensureUndiciPing', () => {
+  /** A stand-in for bun's WebSocket: ping() plus DOM ping/pong listeners. */
+  function fakeBunSocket() {
+    const listeners: Record<string, ((e: { data: Buffer }) => void)[]> = {};
+    return {
+      ping: vi.fn(),
+      addEventListener(type: string, cb: (e: { data: Buffer }) => void) {
+        (listeners[type] ??= []).push(cb);
+      },
+      fire(type: string, data: Buffer) {
+        for (const cb of listeners[type] ?? []) cb({ data });
+      },
+    };
+  }
+
+  /** socket-mode does its own require('undici') — same cached namespace object. */
+  function undiciPing() {
+    ensureUndiciPing();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const undici = require('undici') as {
+      ping: (ws: unknown, data?: unknown) => void;
+    };
+    expect(typeof undici.ping).toBe('function');
+    return undici.ping;
+  }
+
+  it("drives bun's WebSocket.ping with the payload socket-mode passes", () => {
+    const ws = fakeBunSocket();
+    const payload = Buffer.from('Ping from client (1)');
+    undiciPing()(ws, payload);
+    expect(ws.ping).toHaveBeenCalledWith(payload);
+  });
+
+  it('republishes bun ping/pong events onto the diagnostics channels', () => {
+    const ws = fakeBunSocket();
+    const seen: { channel: string; payload: Buffer }[] = [];
+    const subs = (['ping', 'pong'] as const).map((name) => {
+      const cb = (m: unknown) => {
+        seen.push({ channel: name, payload: (m as { payload: Buffer }).payload });
+      };
+      diagnosticsChannel.channel(`undici:websocket:${name}`).subscribe(cb);
+      return { name, cb };
+    });
+
+    undiciPing()(ws, Buffer.from('ping'));
+    ws.fire('ping', Buffer.from('from-server'));
+    ws.fire('pong', Buffer.from('Ping from client (1)'));
+
+    for (const { name, cb } of subs) {
+      diagnosticsChannel.channel(`undici:websocket:${name}`).unsubscribe(cb);
+    }
+
+    // Without this, socket-mode never sees a pong and disconnects every ~5s.
+    expect(seen.map((s) => s.channel)).toEqual(['ping', 'pong']);
+    expect(seen[1].payload.toString()).toBe('Ping from client (1)');
+  });
+
+  it('attaches the event bridge once, however many pings are sent', () => {
+    const ws = fakeBunSocket();
+    const ping = undiciPing();
+    ping(ws, Buffer.from('a'));
+    ping(ws, Buffer.from('b'));
+    ping(ws, Buffer.from('c'));
+
+    let pongs = 0;
+    const cb = () => {
+      pongs += 1;
+    };
+    diagnosticsChannel.channel('undici:websocket:pong').subscribe(cb);
+    ws.fire('pong', Buffer.from('x'));
+    diagnosticsChannel.channel('undici:websocket:pong').unsubscribe(cb);
+
+    expect(ws.ping).toHaveBeenCalledTimes(3);
+    expect(pongs).toBe(1);
   });
 });

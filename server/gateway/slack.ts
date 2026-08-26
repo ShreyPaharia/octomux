@@ -1,9 +1,60 @@
+import diagnosticsChannel from 'node:diagnostics_channel';
 import { SocketModeClient } from '@slack/socket-mode';
 import { WebClient } from '@slack/web-api';
 import { childLogger } from '../logger.js';
 import type { ChannelAdapter, InboundMessage } from './adapter.js';
 
 const logger = childLogger('gateway-slack');
+
+/** The bits of bun's WebSocket the undici ping shim below leans on. */
+interface BunWebSocket {
+  ping(data?: unknown): void;
+  addEventListener(type: 'ping' | 'pong', cb: (e: { data: Buffer }) => void): void;
+}
+
+/**
+ * Make `@slack/socket-mode`'s ping/pong heartbeat work under bun.
+ *
+ * Bun ships its own `undici` builtin that shadows the npm package, and it
+ * diverges from real undici in two ways socket-mode depends on:
+ *
+ *   1. no `ping` export — socket-mode calls `undici.ping(ws, data)` every 5s
+ *      and `disconnect()`s when it throws.
+ *   2. no `undici:websocket:{ping,pong}` diagnostics channels — socket-mode
+ *      only learns a pong came back by subscribing to those, so without them
+ *      it decides Slack went quiet and `disconnect()`s anyway.
+ *
+ * Either one alone puts the gateway in a connect/drop loop. Bun does expose
+ * the same information by other names — `WebSocket.prototype.ping()` and DOM
+ * `ping`/`pong` events carrying a Buffer payload — so this shim is a rename
+ * plus a rebroadcast, not a reimplementation of the protocol.
+ *
+ * The module namespace is a shared cached object, so mutating it here is what
+ * socket-mode's own `require('undici')` sees. Node has the real export and the
+ * guard leaves it alone.
+ */
+export function ensureUndiciPing(): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const undici = require('undici') as { ping?: (ws: BunWebSocket, data?: unknown) => void };
+  if (typeof undici.ping === 'function') return;
+
+  const pingChannel = diagnosticsChannel.channel('undici:websocket:ping');
+  const pongChannel = diagnosticsChannel.channel('undici:websocket:pong');
+  const bridged = new WeakSet<BunWebSocket>();
+
+  undici.ping = (ws, data) => {
+    if (!bridged.has(ws)) {
+      bridged.add(ws);
+      // socket-mode's isPingPongMessage() wants exactly { websocket, payload:Buffer };
+      // bun delivers the frame payload as a Buffer on MessageEvent.data.
+      ws.addEventListener('ping', (e) => pingChannel.publish({ websocket: ws, payload: e.data }));
+      ws.addEventListener('pong', (e) => pongChannel.publish({ websocket: ws, payload: e.data }));
+    }
+    ws.ping(data);
+  };
+}
+
+ensureUndiciPing();
 
 /** The inner Slack event delivered for the 'message' subscription. */
 interface SlackMessageEvent {
