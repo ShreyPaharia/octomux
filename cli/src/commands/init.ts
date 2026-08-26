@@ -4,7 +4,7 @@ import os from 'os';
 import readline from 'readline';
 import chalk from 'chalk';
 import { Command } from 'commander';
-import { fileURLToPath } from 'url';
+import { assetRoot } from '../../../server/assets.js';
 import { errorMessage, success } from '../format.js';
 
 interface InitOptions {
@@ -63,20 +63,14 @@ function normalizeProjectKey(raw: string): string {
 }
 
 /**
- * Locate the packaged `workflows/` dir by walking up from this module, mirroring
- * `bundledOctomuxPluginDir()` in the server. Returns null when not found (e.g. a
- * partial install) so init never hard-fails on an optional asset.
+ * Locate the packaged `workflows/` dir via assetRoot() — in the compiled binary
+ * it only exists in the extracted runtime dir, never next to import.meta.url.
+ * Returns null when not found (e.g. a partial install) so init never hard-fails
+ * on an optional asset.
  */
 function bundledWorkflowsDir(): string | null {
-  let dir = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 6; i++) {
-    const candidate = path.join(dir, 'workflows');
-    if (fs.existsSync(path.join(candidate, 'review-deep.js'))) return candidate;
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return null;
+  const candidate = path.join(assetRoot(), 'workflows');
+  return fs.existsSync(path.join(candidate, 'review-deep.js')) ? candidate : null;
 }
 
 /**

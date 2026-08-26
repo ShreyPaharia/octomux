@@ -34,6 +34,15 @@ if (command === 'start') {
   await runStart(args.slice(1));
 } else if (command === 'review') {
   await runReview(args.slice(1));
+} else if (command === '__submit-result-mcp') {
+  // Hidden: stdio MCP subprocess spawned by the compiled binary itself
+  // (submitResultServerInvocation in server/agent-session/mcp/config.ts).
+  const { main } = await import('../server/agent-session/mcp/submit-result-server.ts');
+  await main();
+} else if (command === '__octomux-mcp') {
+  // Hidden: stdio MCP subprocess (mcpServerInvocation in server/orchestrator/runner.ts).
+  const { main } = await import('../server/orchestrator/mcp/server.ts');
+  await main();
 } else {
   // Delegate to CLI (commander-based) for all other commands
   await import('../cli/src/index.ts');

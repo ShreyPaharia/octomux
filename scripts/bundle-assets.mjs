@@ -22,7 +22,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // plugin/skills and plugin/agents, and builtInSkillsDir() resolves
 // `<assetRoot()>/plugin/skills`. Naming the leaf dirs here silently bundled
 // neither — the compiled binary shipped zero skills until this was fixed.
-const TREES = ['plugin', 'kinds', 'templates', 'workflows', 'dist'];
+const TREES = ['plugin', 'kinds', 'templates', 'workflows', 'dist', '.config'];
+// Single runtime-needed files outside the trees: the cursor harness copies the
+// hook bridge into each workspace (resolveBridgeSource in harnesses/cursor.ts).
+const FILES = ['bin/octomux-hook-bridge.js'];
 const OUT = path.join(root, 'server', 'assets.generated.json');
 
 function walk(dir, base, out) {
@@ -50,6 +53,18 @@ for (const tree of TREES) {
     bytes += buf.length;
   }
   console.log(`  ${tree}: ${files.length} files`);
+}
+
+for (const rel of FILES) {
+  const abs = path.join(root, rel);
+  if (!existsSync(abs)) {
+    console.warn(`⚠  skipping missing asset file: ${rel}`);
+    continue;
+  }
+  const buf = readFileSync(abs);
+  bundle[rel] = buf.toString('base64');
+  bytes += buf.length;
+  console.log(`  ${rel}`);
 }
 
 writeFileSync(OUT, JSON.stringify(bundle));

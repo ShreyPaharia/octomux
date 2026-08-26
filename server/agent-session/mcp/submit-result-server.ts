@@ -152,7 +152,9 @@ function isMainModule(): boolean {
   }
 }
 
-async function main(): Promise<void> {
+// Exported so the compiled binary can dispatch here via its
+// `__submit-result-mcp` argv (isMainModule() never matches inside $bunfs).
+export async function main(): Promise<void> {
   // Resolve schema — prefer inline JSON, fall back to a file path
   const schemaInline = process.env.OCTOMUX_SUBMIT_RESULT_SCHEMA;
   const schemaPath = process.env.OCTOMUX_SUBMIT_RESULT_SCHEMA_PATH;

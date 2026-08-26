@@ -31,6 +31,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { isCompiled } from '../assets.js';
 import { execTmux } from '../tmux-bin.js';
 import { hookBaseUrl } from '../hook-base-url.js';
 import { octomuxRoot } from '../octomux-root.js';
@@ -209,6 +210,12 @@ function writeOrchestratorsettings(convId: string): string {
  * the worker mcp-config.json (SHR-160 — do NOT duplicate the logic there).
  */
 export function mcpServerInvocation(): { command: string; args: string[] } | null {
+  // Compiled binary: no dist-server on disk and no tsx — the binary dispatches
+  // its own `__octomux-mcp` argv to the server's main() (see bin/main.js).
+  if (isCompiled) {
+    return { command: process.execPath, args: ['__octomux-mcp'] };
+  }
+
   const here = fileURLToPath(import.meta.url);
   const dir = path.dirname(here);
 
