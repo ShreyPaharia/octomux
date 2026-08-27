@@ -263,5 +263,20 @@ export function ensureTmuxRuntimeDir(): void {
  * with "server exited unexpectedly".
  */
 export async function ensureTmuxServerRunning(): Promise<void> {
-  await execTmux(['start-server', ';', 'set-option', '-g', 'exit-empty', 'off']);
+  // escape-time 25: tmux defaults to waiting 500ms after ESC to disambiguate
+  // escape sequences — on this dedicated server that's pure added latency on
+  // every Esc reaching a TUI (vim, Claude Code's interrupt key).
+  await execTmux([
+    'start-server',
+    ';',
+    'set-option',
+    '-g',
+    'exit-empty',
+    'off',
+    ';',
+    'set-option',
+    '-s',
+    'escape-time',
+    '25',
+  ]);
 }
