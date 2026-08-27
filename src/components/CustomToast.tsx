@@ -21,7 +21,8 @@ export function CustomToast({ id, type, title, description, action }: CustomToas
   return (
     <div
       style={{
-        width: 360,
+        // A fixed 360 overflowed narrow phones; cap to viewport minus margin.
+        width: 'min(360px, calc(100vw - 32px))',
         background: '#0A0A0A',
         border: '1px solid #2f2f2f',
         padding: '14px 16px',
