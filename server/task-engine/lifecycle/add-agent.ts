@@ -96,6 +96,7 @@ export async function prepareAddAgentLaunch(
     prompt: resolved.resolvedPrompt,
     worktreePath: task.worktree!,
     agentId,
+    harness,
   });
 
   return { agentId, hookToken, sessionIdForDb, startupCmd, harness };

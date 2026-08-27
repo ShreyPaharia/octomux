@@ -170,6 +170,7 @@ async function prepareFirstAgentLaunch(
     prompt: task.initial_prompt,
     worktreePath: setup.worktreePath,
     agentId,
+    harness,
   });
 
   return { agentId, hookToken, sessionIdForDb, startupCmd };

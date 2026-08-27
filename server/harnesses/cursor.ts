@@ -80,6 +80,8 @@ export const cursorHarness: Harness = {
   id: 'cursor',
   displayName: 'Cursor',
   sessionIdMode: 'harness-issued',
+  binaryName: 'cursor-agent',
+  installHint: 'curl https://cursor.com/install -fsS | bash',
 
   newSessionId(): string {
     return crypto.randomUUID();

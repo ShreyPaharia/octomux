@@ -69,12 +69,22 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
     // window via editorIpcEnv), never on the task's compute — so this stays
     // plain execFile regardless of task.compute.
     const cmd = editor === 'vscode' ? 'code' : 'cursor';
+    const name = editor === 'vscode' ? 'VS Code' : 'Cursor';
     const env = await editorIpcEnv(cmd);
-    const res = await execFile(cmd, [task.worktree!], env ? { env } : {});
+    let res: { stdout?: string } | undefined;
+    try {
+      res = await execFile(cmd, [task.worktree!], env ? { env } : {});
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new Error(
+          `'${cmd}' CLI is not installed on the octomux server — install ${name} (or its CLI) there, or switch Editor in Settings`,
+        );
+      }
+      throw err;
+    }
     // The remote shim exits 0 even when it can't reach a window; surface that
     // instead of silently succeeding.
     if (/only available in/i.test(res?.stdout ?? '')) {
-      const name = editor === 'vscode' ? 'VS Code' : 'Cursor';
       throw new Error(
         `${cmd}: no ${name} window is connected to this machine — open ${name} over Remote-SSH to this host, then retry`,
       );
@@ -87,6 +97,16 @@ export async function createUserTerminal(task: Task): Promise<UserTerminalResult
   }
 
   const compute = await sessionFor(task);
+
+  // Probe via the same interactive shell the window runs, so PATH matches.
+  const shell = process.env.SHELL || '/bin/sh';
+  try {
+    await compute.exec([shell, '-ic', 'command -v nvim'], { timeoutMs: 15000 });
+  } catch {
+    throw new Error(
+      'nvim is not installed on this machine — install neovim (brew install neovim / apt install neovim) or switch Editor in Settings',
+    );
+  }
 
   const windowIndex = await tmuxWindowSubstrate.launchWindow(compute, {
     session: task.tmux_session!,

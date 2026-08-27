@@ -21,6 +21,41 @@ const PROMPT_FILE_CLEANUP_MS = 60000;
 
 export const DISABLED_PLUGINS_IN_WORKTREES = ['remember@claude-plugins-official'] as const;
 
+// Successful probes per `<compute kind>:<binary>` — presence rarely changes,
+// and the probe runs an interactive shell (rc files), so don't pay it per
+// launch. Failures are NOT cached: install → retry works immediately.
+const probedHarnessBinaries = new Set<string>();
+
+/**
+ * Fail a launch with a clear, actionable error when the harness CLI isn't
+ * installed on the machine the agent will run on — otherwise the tmux window
+ * just prints "command not found" and the worker dies invisibly. Probes via
+ * the same interactive shell the window uses, so PATH matches.
+ */
+export async function ensureHarnessBinary(c: ComputeSession, harness: Harness): Promise<void> {
+  const bin = harness.binaryName;
+  if (!bin) return;
+  const key = `${c.kind}:${bin}`;
+  if (probedHarnessBinaries.has(key)) return;
+  const shell = process.env.SHELL || '/bin/sh';
+  try {
+    await c.exec([shell, '-ic', `command -v ${bin}`], { timeoutMs: 15000 });
+  } catch {
+    const where = c.kind === 'local' ? 'this machine' : `compute '${c.kind}'`;
+    throw new Error(
+      `${harness.displayName} CLI ('${bin}') is not installed on ${where}` +
+        (harness.installHint ? ` — install it: ${harness.installHint}` : '') +
+        `, or switch the task's harness in Settings.`,
+    );
+  }
+  probedHarnessBinaries.add(key);
+}
+
+/** Reset the probe cache (for testing). */
+export function _resetHarnessBinaryProbes(): void {
+  probedHarnessBinaries.clear();
+}
+
 export async function writeAgentLocalSettings(
   c: ComputeSession,
   worktreePath: string,
@@ -60,8 +95,11 @@ export async function buildAgentStartupCommand(
     worktreePath?: string;
     agentId?: string;
     env?: Record<string, string>;
+    /** When set, probe the harness binary on `c` before building the command. */
+    harness?: Harness;
   },
 ): Promise<string> {
+  if (args.harness) await ensureHarnessBinary(c, args.harness);
   let inner = args.baseCmd;
   if (args.prompt && args.worktreePath && args.agentId) {
     const promptFile = path.join(args.worktreePath, `.claude-prompt-${args.agentId}`);
