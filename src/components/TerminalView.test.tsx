@@ -62,6 +62,9 @@ vi.mock('@xterm/addon-web-links', () => ({
 }));
 
 const { render, act } = await import('@testing-library/react');
+// Static-import safe: terminal-pool only type-imports xterm, so it resolves
+// before the mocks above without pulling in the real xterm.
+const { resetTerminalPool } = await import('@/lib/terminal-pool');
 
 // ─── Mock WebSocket ──────────────────────────────────────────────────────────
 // Records each instance; tests drive open/close manually so timing is deterministic.
@@ -121,6 +124,7 @@ let OriginalWebSocket: typeof WebSocket;
 let OriginalResizeObserver: typeof ResizeObserver;
 
 beforeEach(() => {
+  resetTerminalPool();
   useMediaQueryMock.mockReturnValue(false);
   terminalInstances.length = 0;
   MockWebSocket.instances = [];
@@ -143,6 +147,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Destroy parked entries before restoring globals so their TTL timers and
+  // sockets don't leak into the next test.
+  resetTerminalPool();
   globalThis.WebSocket = OriginalWebSocket;
   globalThis.ResizeObserver = OriginalResizeObserver;
   vi.useRealTimers();
@@ -454,5 +461,74 @@ describe('TerminalView', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     expect(MockWebSocket.instances).toHaveLength(1);
+  });
+
+  it('parks the terminal on unmount and adopts it on remount — same socket, no placeholder', async () => {
+    const TerminalView = await importTerminalView();
+    const { unmount } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
+
+    unmount();
+    // Parked, not torn down: the socket stays OPEN (server attachment warm)
+    // and the stream is paused so nothing streams to an invisible buffer.
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+    expect(ws.sent).toContain('{"type":"pause"}');
+    expect(terminalInstances[0].disposed).toBe(false);
+
+    const resizeCount = () => ws.sent.filter((m) => String(m).includes('"resize"')).length;
+    const resizesBefore = resizeCount();
+
+    const { queryByTestId } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    // Adopted: no new WebSocket, no "Connecting…" placeholder, stream resumed.
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(queryByTestId('terminal-connecting-placeholder')).toBeNull();
+    expect(ws.sent).toContain('{"type":"resume"}');
+
+    // Resize discipline: the layout didn't change, so adoption must not send
+    // a redundant resize (a redundant resize SIGWINCHes the pty → tmux redraw
+    // → the reflow flash this pool exists to eliminate).
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 60)); // flush rAF-deferred fits
+    });
+    expect(resizeCount()).toBe(resizesBefore);
+  });
+
+  it('destroys a parked terminal after the grace period', async () => {
+    vi.useFakeTimers();
+    const TerminalView = await importTerminalView();
+    const { unmount } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
+    unmount();
+    expect(ws.readyState).toBe(MockWebSocket.OPEN);
+
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    // TTL fired: socket closed, xterm disposed — nothing left to adopt.
+    expect(ws.readyState).toBe(MockWebSocket.CLOSING);
+    expect(terminalInstances[0].disposed).toBe(true);
+  });
+
+  it('does not park a terminal that never received data', async () => {
+    const TerminalView = await importTerminalView();
+    const { unmount } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    unmount();
+
+    // Nothing painted yet — no buffer worth keeping, so the socket is closed.
+    expect(ws.readyState).toBe(MockWebSocket.CLOSING);
+
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+    expect(MockWebSocket.instances).toHaveLength(2);
   });
 });
