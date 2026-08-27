@@ -1,6 +1,10 @@
 import { parseArgs } from 'node:util';
 import { getDb } from '../../server/db.js';
-import { createReviewRun, getCurrentRun } from '../../server/repositories/review-runs.js';
+import {
+  createReviewRun,
+  getCurrentRun,
+  getLastReviewedSha,
+} from '../../server/repositories/review-runs.js';
 import { getLatestPublishedReview } from '../../server/repositories/published-reviews.js';
 import { listForRead } from '../../server/repositories/agent-learnings.js';
 import { findInstructionFiles } from '../../server/instruction-files.js';
@@ -129,6 +133,7 @@ export async function runStart(argv: string[]): Promise<void> {
         base_branch: task.base_branch ?? null,
         pr_url: task.pr_url ?? null,
         worktree: task.worktree ?? null,
+        last_reviewed_sha: getLastReviewedSha(taskId, run.id),
         previous_review,
         learnings: learnings.map((l) => ({ id: l.id, why: l.lesson })),
         instruction_files,

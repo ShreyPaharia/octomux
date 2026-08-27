@@ -137,6 +137,21 @@ export function setWalkthrough(id: string, walkthroughJson: string): void {
 }
 
 /**
+ * Head sha of the latest completed run other than `excludeRunId` — the DB-sourced
+ * delta base for a re-review (null on first review).
+ */
+export function getLastReviewedSha(taskId: string, excludeRunId: string): string | null {
+  const row = getDb()
+    .prepare(
+      `SELECT pr_head_sha FROM review_runs
+        WHERE task_id = ? AND status = 'completed' AND id != ?
+        ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+    )
+    .get(taskId, excludeRunId) as { pr_head_sha: string } | undefined;
+  return row?.pr_head_sha ?? null;
+}
+
+/**
  * Fetch the pr_head_sha for a review_run (used by staleness checks).
  */
 export function getReviewRunHeadSha(id: string): string | undefined {

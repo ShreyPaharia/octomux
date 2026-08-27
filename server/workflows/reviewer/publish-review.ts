@@ -1,11 +1,20 @@
 import {
   listComments,
+  listResolvedByRun,
   markCommentsStaleByIds,
   markCommentsPublishedByIds,
+  resolveComment,
+  setGithubCommentId,
 } from '../../repositories/inline-comments.js';
 import { isAnchorOutdated } from '../../inline-comments-outdated.js';
 import { recordPublishedReview } from '../../repositories/published-reviews.js';
-import { postPullRequestReview } from '../../github-client.js';
+import { getCurrentRun } from '../../repositories/review-runs.js';
+import {
+  postPullRequestReview,
+  listReviewComments,
+  replyToReviewComment,
+  fetchPrReviewComments,
+} from '../../github-client.js';
 import { broadcast } from '../../events.js';
 import { childLogger } from '../../logger.js';
 import { publishCoreRecord } from '../../plugins/records.js';
@@ -37,6 +46,90 @@ function buildCommentBody(comment: InlineCommentRow): string {
     return `${comment.body}\n\n\`\`\`suggestion\n${comment.suggested_code}\n\`\`\``;
   }
   return comment.body;
+}
+
+type ParsedPr = { owner: string; repo: string; pull_number: number };
+
+/**
+ * Fetch the just-posted review's comments and stamp github_comment_id on the
+ * matching rows (the batch create response carries no per-comment ids). Matched
+ * by path + exact body — buildCommentBody is byte-for-byte what we sent.
+ */
+async function backfillGithubCommentIds(
+  parsed: ParsedPr,
+  reviewId: number,
+  freshComments: InlineCommentRow[],
+  taskId: string,
+): Promise<void> {
+  if (freshComments.length === 0) return;
+  try {
+    const posted = await listReviewComments({ ...parsed, review_id: reviewId });
+    const remaining = [...posted];
+    for (const c of freshComments) {
+      const idx = remaining.findIndex(
+        (p) => p.path === c.file_path && p.body === buildCommentBody(c),
+      );
+      if (idx === -1) continue;
+      setGithubCommentId(c.id, remaining[idx].id);
+      remaining.splice(idx, 1);
+    }
+  } catch (err) {
+    logger.warn(
+      { task_id: taskId, err: (err as Error).message },
+      'failed to backfill github_comment_id on published comments',
+    );
+  }
+}
+
+/**
+ * For prior published comments the current review run marked `resolved`
+ * (via check-previous), post an "Addressed in <sha>" reply on their GitHub
+ * thread and stamp resolved_at. Rows without a github_comment_id (published
+ * before backfill existed) fall back to matching the PR's review comments by
+ * path + body; unmatched ones are logged and skipped.
+ */
+async function replyToAddressedThreads(
+  taskId: string,
+  parsed: ParsedPr,
+  headSha: string,
+  repoPath: string | null,
+): Promise<void> {
+  const run = getCurrentRun(taskId);
+  if (!run) return;
+  const resolved = listResolvedByRun(taskId, run.id);
+  if (resolved.length === 0) return;
+
+  let prComments: Awaited<ReturnType<typeof fetchPrReviewComments>> | null = null;
+  for (const c of resolved) {
+    let ghId = c.github_comment_id;
+    if (ghId === null && repoPath) {
+      prComments ??= await fetchPrReviewComments(repoPath, parsed.pull_number);
+      const match = prComments.find(
+        (p) => p.path === c.file_path && p.body === buildCommentBody(c),
+      );
+      if (match) ghId = Number(match.id);
+    }
+    if (ghId === null) {
+      logger.warn(
+        { task_id: taskId, comment_id: c.id },
+        'resolved comment has no github_comment_id and no match on the PR — skipping thread reply',
+      );
+      continue;
+    }
+    try {
+      await replyToReviewComment({
+        ...parsed,
+        comment_id: ghId,
+        body: `Addressed in ${headSha}.`,
+      });
+      resolveComment(c.id);
+    } catch (err) {
+      logger.warn(
+        { task_id: taskId, comment_id: c.id, err: (err as Error).message },
+        'failed to reply on addressed review thread',
+      );
+    }
+  }
 }
 
 export async function publishReview(
@@ -153,6 +246,11 @@ export async function publishReview(
 
     return pr;
   });
+
+  // Post-publish GitHub thread work. The review is already posted and
+  // persisted — a failure here is logged, never thrown.
+  await backfillGithubCommentIds(parsed, reviewResult.id, freshComments, taskId);
+  await replyToAddressedThreads(taskId, parsed, task.pr_head_sha, task.repo_path ?? null);
 
   broadcast({
     type: 'review:published',

@@ -19,6 +19,7 @@ import {
   setPrReviewRequestedAt,
 } from '../repositories/tasks.js';
 import { deleteWorktree } from '../repositories/worktrees.js';
+import { getLatestRun as getLatestReviewRun } from '../repositories/review-runs.js';
 import { countAgentsForTask, findFirstActiveAgent } from '../repositories/workers.js';
 import { resumeTask, softDeleteTask } from '../task-engine/index.js';
 import { checkoutRef, fetchOriginQuiet } from '../task-engine/git.js';
@@ -194,18 +195,53 @@ function buildShaUpdateNote(prompt: string, newSha: string, timestamp: string): 
   return `${prompt}\n\nUpdated: head advanced to ${newSha} at ${timestamp}`;
 }
 
-function buildReReviewNudge(pr: OpenReviewPR, taskId: string, headChanged: boolean): string {
-  const reason = headChanged
+function reReviewReason(pr: OpenReviewPR, headChanged: boolean): string {
+  return headChanged
     ? `Head advanced to ${pr.headRefOid}.`
     : `Head unchanged at ${pr.headRefOid} — review was explicitly re-requested, so run the ` +
-      `re-review anyway (re-verify the open findings; discussion may have moved without a push).`;
+        `re-review anyway (re-verify the open findings; discussion may have moved without a push).`;
+}
+
+function buildReReviewNudge(pr: OpenReviewPR, taskId: string, headChanged: boolean): string {
   return (
     `Re-review requested for PR #${pr.number} (${pr.url}). ` +
-    `${reason} ` +
+    `${reReviewReason(pr, headChanged)} ` +
     `Run the /review-artifact re-review flow — redeploy to the same artifact URL with a delta ` +
     `section, send the Slack ping as before, then close this task again with ` +
     `\`octomux close-task ${taskId}\`.`
   );
+}
+
+/**
+ * Re-review nudge for tasks on the review pipeline (walkthrough → deep review →
+ * human-gated publish), i.e. tasks that already have a review_run. Drives the
+ * agent back through `octomux review start` — which resets the run, returns the
+ * previously published comments and the DB-sourced delta base — instead of the
+ * artifact flow.
+ */
+function buildPipelineReReviewNudge(
+  pr: OpenReviewPR,
+  taskId: string,
+  headChanged: boolean,
+): string {
+  return (
+    `Re-review requested for PR #${pr.number} (${pr.url}). ` +
+    `${reReviewReason(pr, headChanged)} ` +
+    `Run \`octomux review start --task ${taskId}\` — it returns previous_review (the published ` +
+    `comments to verify) and last_reviewed_sha (the delta base). Evaluate EVERY previously ` +
+    `published comment with \`octomux review check-previous\` ` +
+    `(resolved | still_applies | partial | unclear; pass --reflag-body for still_applies), ` +
+    `review only the delta since last_reviewed_sha, draft comments, then ` +
+    `\`octomux review complete --task ${taskId} --require-walkthrough\`. ` +
+    `Publishing stays human-gated — do NOT post anything to GitHub.`
+  );
+}
+
+/** Pipeline tasks (existing review_runs) re-review via the review CLI; artifact sessions keep theirs. */
+function reReviewNudgeFor(pr: OpenReviewPR, taskId: string, headChanged: boolean): string {
+  return getLatestReviewRun(taskId)
+    ? buildPipelineReReviewNudge(pr, taskId, headChanged)
+    : buildReReviewNudge(pr, taskId, headChanged);
 }
 
 async function nudgeAgentForReReview(
@@ -222,7 +258,7 @@ async function nudgeAgentForReReview(
       compute,
       tmuxSession,
       agent.window_index,
-      buildReReviewNudge(pr, task.id, headChanged),
+      reReviewNudgeFor(pr, task.id, headChanged),
     );
     return true;
   } catch (err) {
@@ -289,7 +325,7 @@ async function upsertReviewTask(
         const task = getTask(existing.id) as Task | undefined;
         if (!task) return { action: 'skipped' };
         if (headChanged) await checkoutNewHead(task, existing.worktree_path, pr.headRefOid);
-        await resumeTask(task, { prompt: buildReReviewNudge(pr, existing.id, headChanged) });
+        await resumeTask(task, { prompt: reReviewNudgeFor(pr, existing.id, headChanged) });
         markTriggered();
         setPrHeadSha(existing.id, pr.headRefOid);
         return { action: 'resumed', taskId: existing.id };
