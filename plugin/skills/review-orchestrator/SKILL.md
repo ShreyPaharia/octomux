@@ -26,6 +26,7 @@ Run `octomux review start --task <task_id>` first. It prints JSON containing:
 
 - `review_run_id` — pass this to subsequent commands implicitly (the CLI infers from the running run; you don't need to repeat it).
 - `pr_head_sha`, `base_sha`, `pr_url`, `worktree`.
+- `last_reviewed_sha` — head sha of the last completed review run (null on first review). This is the delta base for a re-review; never guess it from git.
 - `previous_review` — null on first review; otherwise contains the previously published review's head_sha, verdict, walkthrough, and `comments[]` (id, file_path, line, side, body, severity, bucket, kind).
 - `learnings` — array of `{ id, why }` strings the human has told you in the past. Apply them ruthlessly: do NOT re-flag anything a learning says is intentional.
 - `instruction_files` — array of `{ path, scope, size }`. Read these next.
@@ -47,6 +48,8 @@ git diff <base_sha>..<pr_head_sha>
 ```
 
 Read the diff in full. Read any files the diff touches that you need broader context on. Read tests adjacent to changed code to understand existing patterns.
+
+**Re-reviews** (`last_reviewed_sha` non-null): review only the new delta — `git diff <last_reviewed_sha>..<pr_head_sha>` — instead of re-reviewing the whole PR. Use the full PR diff for context only; new draft comments should come from the delta (plus check-previous re-flags from Phase 4).
 
 ## Phase 4 (re-reviews only): verify previous published comments
 

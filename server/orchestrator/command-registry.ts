@@ -36,6 +36,8 @@ import {
   runResumeTask,
   runDeleteTask,
 } from './exec.js';
+import { handleCreateSchedule } from '../routes/schedules.js';
+import { createLoopRun } from '../routes/runs.js';
 import type { WorkflowStatus } from '../types.js';
 
 // ─── OrchestratorAction ───────────────────────────────────────────────────────
@@ -50,12 +52,49 @@ export type OrchestratorAction =
   | 'set-status'
   | 'close-task'
   | 'resume-task'
-  | 'delete-task';
+  | 'delete-task'
+  | 'create-schedule'
+  | 'start-loop';
 
 // ─── Minimal schema for resume-task (no canonical schema in @octomux/capabilities/schemas.ts) ─
 
 const resumeTaskInputSchema = z.object({
   task_id: z.string().describe('The octomux task id'),
+});
+
+// ─── Advisor write schemas (SHR advisor) ─────────────────────────────────────
+//
+// Inline zod shapes for the MCP tool surface; the deep validation (cron,
+// timezone, ajv config schema, preset prompt rules) is the SAME code path as
+// `POST /api/schedules` / `POST /api/runs` — the handlers below delegate to
+// the exported route helpers, so MCP and REST can never drift.
+
+const createScheduleInputSchema = z.object({
+  kind: z.string().describe('Schedule kind (see list_schedule_kinds)'),
+  repo_path: z.string().describe('Absolute path to the git repo the schedule runs against'),
+  cron: z.string().describe("5-field cron expression, e.g. '0 9 * * 1-5'"),
+  name: z.string().optional().describe('Display name (required for promptRequired kinds)'),
+  timezone: z.string().optional().describe('IANA timezone (default UTC)'),
+  enabled: z.boolean().optional().describe('Default true'),
+  model: z.string().optional().describe('Model id override'),
+  timeout_ms: z.number().optional().describe('Session timeout in ms (session kinds only)'),
+  prompt: z
+    .string()
+    .optional()
+    .describe('Prompt override (required for kinds with promptRequired:true)'),
+  config: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("Kind-specific config, validated against the kind's config schema"),
+});
+
+const startLoopInputSchema = z.object({
+  task_id: z.string().describe('Existing octomux task id to loop (create_task first if needed)'),
+  prompt: z.string().describe('The loop prompt each fresh-context iteration starts from'),
+  verify: z.string().describe('Shell command that must exit 0 for the loop to be done'),
+  max_iterations: z.number().describe('Maximum number of iterations'),
+  budget_tokens: z.number().optional().describe('Optional token budget ceiling'),
+  stall_after: z.number().optional().describe('Stop after N consecutive no-progress iterations'),
 });
 
 // ─── Policy tier ──────────────────────────────────────────────────────────────
@@ -95,6 +134,15 @@ export interface CommandDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   /** PreToolUse gate tier for this command (octomux CLI subcommand + MCP write tool). */
   tier: PolicyTier;
   /**
+   * When set, the MCP write tool blocks on a human approval card FIRST — via
+   * the same `onGatedInvoke` gate the capability-registry tools use (this
+   * string is the card's capability id) — and only RPCs the action after
+   * approval. The legacy conductor writes (send_message, add_agent) are
+   * deliberately ungated (pre-gate behaviour); anything that can reach a
+   * shell or create standing automation must set this.
+   */
+  gateCapabilityId?: string;
+  /**
    * Execute the action. Receives the parsed input and the server-injected context.
    * Returns the result and optionally the activity receipt text.
    */
@@ -121,6 +169,9 @@ export const POLICY_ONLY_COMMANDS: PolicyOnlyCommand[] = [
   { mcpName: 'get_agent_output', tier: 'auto' },
   { mcpName: 'pull_linear_issue', tier: 'auto' },
   { mcpName: 'search_learnings', tier: 'auto' },
+  { mcpName: 'list_schedules', tier: 'auto' },
+  { mcpName: 'list_schedule_kinds', tier: 'auto' },
+  { mcpName: 'get_settings', tier: 'auto' },
   { cliSubcommand: 'recent-repos', tier: 'auto' },
   { cliSubcommand: 'default-branch', tier: 'auto' },
   { cliSubcommand: 'list-skills', tier: 'auto' },
@@ -260,6 +311,66 @@ export const COMMANDS: CommandDef[] = [
       await runDeleteTask(parsed.task_id);
       const result = { task_id: parsed.task_id };
       const activity = `deleted task \`${parsed.task_id}\``;
+      return { result, activity };
+    },
+  },
+
+  {
+    name: 'create_schedule',
+    action: 'create-schedule',
+    summary:
+      'Create a cron schedule (kind + cron + repo). Calling this raises an approval card the ' +
+      'user must confirm before the schedule is created. Use list_schedule_kinds to pick a ' +
+      'kind; kinds with promptRequired:true need an explicit prompt + name. Validated exactly ' +
+      'like POST /api/schedules. Returns the created schedule row.',
+    input: createScheduleInputSchema,
+    mcp: true,
+    tier: 'ask',
+    gateCapabilityId: 'schedule.create',
+    async handler(parsed, _ctx) {
+      const row = handleCreateSchedule({
+        kind: parsed.kind,
+        repoPath: parsed.repo_path,
+        cron: parsed.cron,
+        name: parsed.name,
+        timezone: parsed.timezone,
+        enabled: parsed.enabled,
+        model: parsed.model,
+        timeoutMs: parsed.timeout_ms,
+        prompt: parsed.prompt,
+        config: parsed.config,
+      });
+      const activity = `created schedule \`${row.id}\` (${row.kind}, \`${row.cron}\`) for ${row.repo_path}`;
+      return { result: row, activity };
+    },
+  },
+
+  {
+    name: 'start_loop',
+    action: 'start-loop',
+    summary:
+      'Start a fresh-context Ralph loop against an EXISTING running task: the agent is respawned ' +
+      'each iteration until the verify command exits 0 (or max_iterations / budget / stall). ' +
+      'verify runs as a shell command on the host, so calling this raises an approval card the ' +
+      'user must confirm before the loop starts. Returns the run id.',
+    input: startLoopInputSchema,
+    mcp: true,
+    tier: 'ask',
+    gateCapabilityId: 'loop.start',
+    async handler(parsed, _ctx) {
+      const runId = await createLoopRun({
+        workflowKind: 'loop',
+        taskId: parsed.task_id,
+        spec: {
+          prompt: parsed.prompt,
+          verify: parsed.verify,
+          maxIterations: parsed.max_iterations,
+          ...(parsed.budget_tokens != null ? { budget: { tokens: parsed.budget_tokens } } : {}),
+          ...(parsed.stall_after != null ? { noProgress: { afterIters: parsed.stall_after } } : {}),
+        },
+      });
+      const result = { run_id: runId, task_id: parsed.task_id };
+      const activity = `started loop run \`${runId}\` on task \`${parsed.task_id}\``;
       return { result, activity };
     },
   },

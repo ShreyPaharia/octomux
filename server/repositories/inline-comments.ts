@@ -369,6 +369,31 @@ export function markCommentsPublishedByIds(ids: string[], publishedReviewId: str
     .run(publishedReviewId, ...ids);
 }
 
+/** Backfill the GitHub comment id on a freshly published comment. */
+export function setGithubCommentId(id: string, githubCommentId: number): void {
+  getDb()
+    .prepare(`UPDATE inline_comments SET github_comment_id = ? WHERE id = ?`)
+    .run(githubCommentId, id);
+}
+
+/**
+ * Prior published comments the given review run marked `resolved`
+ * (check-previous) and that haven't had their GitHub thread answered yet.
+ * Used by publishReview to reply "addressed" on the re-review publish.
+ */
+export function listResolvedByRun(taskId: string, runId: string): InlineCommentRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM inline_comments
+        WHERE task_id = ?
+          AND status = 'published'
+          AND last_check_run_id = ?
+          AND last_check_status = 'resolved'
+          AND resolved_at IS NULL`,
+    )
+    .all(taskId, runId) as InlineCommentRow[];
+}
+
 export interface SeedInlineCommentInput {
   id: string;
   task_id: string;

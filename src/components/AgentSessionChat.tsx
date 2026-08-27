@@ -40,21 +40,32 @@ interface WsIncomingEvent {
 
 export interface AgentSessionChatProps {
   convId: string;
+  /** Optional first user turn, sent once when the socket first opens. */
+  initialMessage?: string;
 }
 
-export function AgentSessionChat({ convId }: AgentSessionChatProps) {
+export function AgentSessionChat({ convId, initialMessage }: AgentSessionChatProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [input, setInput] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const initialSentRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     orchestratorApi
       .listMessages(convId)
       .then((history) => {
-        if (!cancelled) setMessages(history.map(parseMessage));
+        if (cancelled) return;
+        // MERGE, don't replace: the WS may have already delivered messages
+        // (incl. the local echo of initialMessage) before this GET resolved —
+        // a replace would wipe them from view.
+        setMessages((prev) => {
+          const hist = history.map(parseMessage);
+          const seen = new Set(hist.map((m) => m.id));
+          return [...hist, ...prev.filter((m) => !seen.has(m.id))];
+        });
       })
       .catch(() => {
         // history is best-effort; the live socket carries new messages regardless
@@ -70,7 +81,15 @@ export function AgentSessionChat({ convId }: AgentSessionChatProps) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/orchestrator/${convId}`);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnection('open');
+    ws.onopen = () => {
+      setConnection('open');
+      if (initialMessage?.trim() && !initialSentRef.current) {
+        initialSentRef.current = true;
+        const text = initialMessage.trim();
+        ws.send(JSON.stringify({ type: 'user_turn', text }));
+        setMessages((prev) => [...prev, { id: `local-initial-${convId}`, role: 'user', text }]);
+      }
+    };
     ws.onclose = () => setConnection('closed');
     ws.onerror = () => setConnection('closed');
     ws.onmessage = (ev) => {
@@ -108,7 +127,7 @@ export function AgentSessionChat({ convId }: AgentSessionChatProps) {
       ws.close();
       wsRef.current = null;
     };
-  }, [convId]);
+  }, [convId, initialMessage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });

@@ -97,6 +97,24 @@ describe('octomux review start', () => {
     expect(out.previous_review.comments[0].id).toBe('c1');
   });
 
+  it('returns last_reviewed_sha from the latest completed run (null on first review)', async () => {
+    const db = createTestDb();
+    seedTask(db);
+    await runStart(['--task', 't1']);
+    expect(JSON.parse(stdoutBuf).last_reviewed_sha).toBeNull();
+
+    db.prepare(
+      `INSERT INTO review_runs (id, task_id, pr_head_sha, status, started_at, completed_at)
+       VALUES ('r-prev', 't1', 'sha-prev', 'completed', datetime('now', '-1 hour'), datetime('now', '-1 hour'))`,
+    ).run();
+    stdoutBuf = '';
+    await runStart(['--task', 't1']);
+    const out = JSON.parse(stdoutBuf);
+    // Delta base comes from review_runs, never the current run's own head.
+    expect(out.last_reviewed_sha).toBe('sha-prev');
+    expect(out.pr_head_sha).toBe('sha-head');
+  });
+
   it('exits 2 when --task is missing', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
       throw new Error(`exit ${code}`);

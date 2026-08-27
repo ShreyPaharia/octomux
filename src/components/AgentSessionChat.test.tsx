@@ -104,6 +104,52 @@ describe('AgentSessionChat', () => {
     });
   });
 
+  it('sends initialMessage as a user_turn once the socket opens', async () => {
+    renderWithRouter(<AgentSessionChat convId="conv-1" initialMessage="Review my setup" />);
+    await waitFor(() => expect(lastWs).not.toBeNull());
+
+    act(() => lastWs!.simulateOpen());
+
+    expect(lastWs!.sentMessages).toEqual([
+      JSON.stringify({ type: 'user_turn', text: 'Review my setup' }),
+    ]);
+    expect(screen.getByText('Review my setup')).toBeInTheDocument();
+  });
+
+  it('keeps the initialMessage echo when history resolves after the socket opened', async () => {
+    // History GET resolves only when we say so — after the WS has already
+    // delivered the local echo. A replace-style setMessages would wipe it.
+    let resolveHistory!: (v: Response) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((resolve) => (resolveHistory = resolve))),
+    );
+
+    renderWithRouter(<AgentSessionChat convId="conv-1" initialMessage="Review my setup" />);
+    await waitFor(() => expect(lastWs).not.toBeNull());
+    act(() => lastWs!.simulateOpen());
+    expect(screen.getByText('Review my setup')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveHistory({
+        ok: true,
+        status: 200,
+        json: async () => [
+          {
+            id: 'msg-1',
+            conversation_id: 'conv-1',
+            role: 'assistant',
+            content: JSON.stringify([{ type: 'text', text: 'earlier reply' }]),
+            created_at: '2026-01-01 00:00:00',
+          },
+        ],
+      } as Response);
+    });
+
+    await waitFor(() => expect(screen.getByText('earlier reply')).toBeInTheDocument());
+    expect(screen.getByText('Review my setup')).toBeInTheDocument();
+  });
+
   it('opens a websocket to /ws/orchestrator/:convId', async () => {
     renderWithRouter(<AgentSessionChat convId="conv-1" />);
     await waitFor(() => expect(lastWs).not.toBeNull());

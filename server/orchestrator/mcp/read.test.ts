@@ -32,7 +32,14 @@ const {
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
+  handleListSchedules,
+  handleListScheduleKinds,
+  handleGetSettings,
 } = await import('./read.js');
+const { createSchedule } = await import('../../repositories/schedules.js');
+// Side-effect import: registers the built-in workflow kinds + loads presets
+// (list_schedule_kinds reads the preset map, which boot normally populates).
+await import('../../workflows/index.js');
 const { upsertManagedTask } = await import('../../repositories/orchestrator.js');
 const { addLearning, SHARED_LANE } = await import('../../repositories/agent-learnings.js');
 const { POLICY_ONLY_COMMANDS } = await import('../command-registry.js');
@@ -483,6 +490,74 @@ describe('orchestrator mcp read tools', () => {
       const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'search_learnings');
       expect(entry).toBeDefined();
       expect(entry!.tier).toBe('auto');
+    });
+  });
+
+  describe('handleListSchedules', () => {
+    it('returns lean rows without config or prompt bodies', () => {
+      createSchedule({
+        kind: 'custom',
+        repoPath: '/tmp/repo-a',
+        cron: '0 9 * * 1',
+        name: 'Morning triage',
+        prompt: 'a very long prompt body',
+        config: { foo: 'bar' },
+      });
+
+      const result = handleListSchedules();
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        kind: 'custom',
+        name: 'Morning triage',
+        repo_path: '/tmp/repo-a',
+        cron: '0 9 * * 1',
+        enabled: true,
+      });
+      expect(result[0]).not.toHaveProperty('prompt');
+      expect(result[0]).not.toHaveProperty('config_json');
+    });
+
+    it('returns empty array with no schedules', () => {
+      expect(handleListSchedules()).toEqual([]);
+    });
+
+    it('is registered as an auto-approved (policy-only) tool', () => {
+      const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'list_schedules');
+      expect(entry?.tier).toBe('auto');
+    });
+  });
+
+  describe('handleListScheduleKinds', () => {
+    it('lists registered presets with promptRequired derived from the preset prompt', () => {
+      const kinds = handleListScheduleKinds();
+      const byKind = Object.fromEntries(kinds.map((k) => [k.kind, k]));
+      expect(byKind['custom']).toBeDefined();
+      expect(byKind['custom'].promptRequired).toBe(true);
+      for (const k of kinds) {
+        expect(k).not.toHaveProperty('prompt');
+        expect(typeof k.displayName).toBe('string');
+      }
+    });
+
+    it('is registered as an auto-approved (policy-only) tool', () => {
+      const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'list_schedule_kinds');
+      expect(entry?.tier).toBe('auto');
+    });
+  });
+
+  describe('handleGetSettings', () => {
+    it('returns a curated summary — ids only, never compute/harness config values', async () => {
+      const result = await handleGetSettings();
+      expect(typeof result.defaultHarnessId).toBe('string');
+      expect(typeof result.defaultComputeKind).toBe('string');
+      expect(Array.isArray(result.configuredHarnessIds)).toBe(true);
+      expect(result).not.toHaveProperty('compute');
+      expect(result).not.toHaveProperty('harnesses');
+    });
+
+    it('is registered as an auto-approved (policy-only) tool', () => {
+      const entry = POLICY_ONLY_COMMANDS.find((c) => c.mcpName === 'get_settings');
+      expect(entry?.tier).toBe('auto');
     });
   });
 });

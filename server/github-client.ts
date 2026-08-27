@@ -83,6 +83,62 @@ export async function postPullRequestReview(
   return { id: result.id, html_url: result.html_url };
 }
 
+export interface PostedReviewComment {
+  id: number;
+  path: string;
+  body: string;
+}
+
+/**
+ * Comments created by a specific review — used to backfill github_comment_id
+ * right after publishReview posts (the batch create response carries no
+ * per-comment ids).
+ */
+export async function listReviewComments(input: {
+  owner: string;
+  repo: string;
+  pull_number: number;
+  review_id: number;
+}): Promise<PostedReviewComment[]> {
+  const { stdout } = await execFile('gh', [
+    'api',
+    `/repos/${input.owner}/${input.repo}/pulls/${input.pull_number}/reviews/${input.review_id}/comments?per_page=100`,
+  ]);
+  const raw = JSON.parse(stdout.trim() || '[]') as Array<{
+    id: number;
+    path: string;
+    body: string;
+  }>;
+  return raw.map((c) => ({ id: c.id, path: c.path, body: c.body }));
+}
+
+/** Reply in an existing PR review-comment thread. */
+export async function replyToReviewComment(input: {
+  owner: string;
+  repo: string;
+  pull_number: number;
+  comment_id: number;
+  body: string;
+}): Promise<void> {
+  await execFile('gh', [
+    'api',
+    '--method',
+    'POST',
+    `/repos/${input.owner}/${input.repo}/pulls/${input.pull_number}/comments/${input.comment_id}/replies`,
+    '-f',
+    `body=${input.body}`,
+  ]);
+  logger.info(
+    {
+      owner: input.owner,
+      repo: input.repo,
+      pull_number: input.pull_number,
+      comment_id: input.comment_id,
+    },
+    'replied to review comment thread',
+  );
+}
+
 export interface InboundReviewComment {
   id: string;
   body: string;

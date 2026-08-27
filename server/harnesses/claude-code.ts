@@ -29,6 +29,8 @@ export const claudeCodeHarness: Harness = {
   id: 'claude-code',
   displayName: 'Claude Code',
   sessionIdMode: 'orchestrator-assigned',
+  binaryName: 'claude',
+  installHint: 'curl -fsSL https://claude.ai/install.sh | bash',
 
   newSessionId() {
     return crypto.randomUUID();

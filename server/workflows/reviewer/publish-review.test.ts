@@ -5,6 +5,9 @@ vi.mock('../../github-client.js', () => ({
     id: 9999,
     html_url: 'https://github.com/o/r/pull/1#pullrequestreview-9999',
   }),
+  listReviewComments: vi.fn().mockResolvedValue([]),
+  replyToReviewComment: vi.fn().mockResolvedValue(undefined),
+  fetchPrReviewComments: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('../../inline-comments-outdated.js', () => ({
@@ -16,7 +19,8 @@ vi.mock('../../inline-comments-outdated.js', () => ({
 const { createTestDb } = await import('../../test-helpers.js');
 const { getDb } = await import('../../db.js');
 
-const { postPullRequestReview } = await import('../../github-client.js');
+const { postPullRequestReview, listReviewComments, replyToReviewComment, fetchPrReviewComments } =
+  await import('../../github-client.js');
 const { isAnchorOutdated } = await import('../../inline-comments-outdated.js');
 const { publishReview } = await import('./publish-review.js');
 
@@ -58,6 +62,9 @@ describe('publishReview', () => {
       id: 9999,
       html_url: 'https://github.com/o/r/pull/1#pullrequestreview-9999',
     });
+    vi.mocked(listReviewComments).mockResolvedValue([]);
+    vi.mocked(replyToReviewComment).mockResolvedValue(undefined);
+    vi.mocked(fetchPrReviewComments).mockResolvedValue([]);
   });
 
   it('calls postPullRequestReview with accepted comments', async () => {
@@ -111,6 +118,87 @@ describe('publishReview', () => {
   it('throws when no accepted comments exist', async () => {
     getDb().prepare(`UPDATE inline_comments SET status = 'draft' WHERE task_id = 't1'`).run();
     await expect(publishReview('t1', 'COMMENT', '')).rejects.toThrow('No accepted comments');
+  });
+
+  it('backfills github_comment_id from the posted review comments', async () => {
+    vi.mocked(listReviewComments).mockResolvedValue([
+      { id: 111, path: 'a.ts', body: 'issue here' },
+      { id: 222, path: 'b.ts', body: 'another' },
+    ]);
+    await publishReview('t1', 'COMMENT', '');
+    const rows = getDb()
+      .prepare(`SELECT id, github_comment_id FROM inline_comments WHERE id IN ('c1','c2')`)
+      .all() as any[];
+    expect(Object.fromEntries(rows.map((r) => [r.id, r.github_comment_id]))).toEqual({
+      c1: 111,
+      c2: 222,
+    });
+  });
+
+  describe('re-review publish: addressed threads', () => {
+    /** Prior published comment marked `resolved` by the current run (r-new). */
+    function seedResolvedPrior(opts: { githubCommentId?: number | null } = {}) {
+      const db = getDb();
+      db.prepare(
+        `INSERT INTO review_runs (id, task_id, pr_head_sha, status, started_at, completed_at)
+         VALUES ('r-new', 't1', 'sha-head2', 'completed', datetime('now'), datetime('now'))`,
+      ).run();
+      db.prepare(`UPDATE tasks SET pr_head_sha = 'sha-head2' WHERE id = 't1'`).run();
+      db.prepare(
+        `INSERT INTO inline_comments
+           (id, task_id, file_path, line, side, original_commit_sha, body, status, kind,
+            github_comment_id, last_check_run_id, last_check_status)
+         VALUES ('prior1', 't1', 'old.ts', 7, 'new', 'sha-head', 'old finding', 'published',
+                 'comment', ?, 'r-new', 'resolved')`,
+      ).run(opts.githubCommentId === undefined ? 555 : opts.githubCommentId);
+    }
+
+    it('replies "Addressed in <sha>" on threads the run marked resolved and stamps resolved_at', async () => {
+      seedResolvedPrior();
+      await publishReview('t1', 'COMMENT', '');
+      expect(replyToReviewComment).toHaveBeenCalledOnce();
+      const call = vi.mocked(replyToReviewComment).mock.calls[0][0];
+      expect(call.comment_id).toBe(555);
+      expect(call.body).toBe('Addressed in sha-head2.');
+      const row = getDb()
+        .prepare(`SELECT resolved_at, last_check_status FROM inline_comments WHERE id = 'prior1'`)
+        .get() as any;
+      expect(row.resolved_at).not.toBeNull();
+      // check-previous stays the single status vocabulary.
+      expect(row.last_check_status).toBe('resolved');
+    });
+
+    it('does not reply for still_applies or unchecked prior comments', async () => {
+      seedResolvedPrior();
+      getDb()
+        .prepare(
+          `UPDATE inline_comments SET last_check_status = 'still_applies' WHERE id = 'prior1'`,
+        )
+        .run();
+      await publishReview('t1', 'COMMENT', '');
+      expect(replyToReviewComment).not.toHaveBeenCalled();
+    });
+
+    it('falls back to matching PR comments by path+body when github_comment_id is null', async () => {
+      seedResolvedPrior({ githubCommentId: null });
+      vi.mocked(fetchPrReviewComments).mockResolvedValue([
+        { id: '777', body: 'old finding', path: 'old.ts' },
+      ]);
+      await publishReview('t1', 'COMMENT', '');
+      expect(vi.mocked(replyToReviewComment).mock.calls[0][0].comment_id).toBe(777);
+    });
+
+    it('a thread-reply failure never fails the publish', async () => {
+      seedResolvedPrior();
+      vi.mocked(replyToReviewComment).mockRejectedValue(new Error('gh exploded'));
+      const result = await publishReview('t1', 'COMMENT', '');
+      expect(result.comment_count).toBe(2);
+      // Not stamped resolved — the next publish retries the reply.
+      const row = getDb()
+        .prepare(`SELECT resolved_at FROM inline_comments WHERE id = 'prior1'`)
+        .get() as any;
+      expect(row.resolved_at).toBeNull();
+    });
   });
 
   it('builds suggestion block for kind=suggestion', async () => {

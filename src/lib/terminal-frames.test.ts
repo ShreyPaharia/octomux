@@ -1,6 +1,12 @@
 import { describe, it, expect } from '../bun-test.js';
 import { createDeflateRaw, constants as zlibConstants } from 'zlib';
-import { makeStreamFrameWriter, supportsDeflate } from './terminal-frames';
+import {
+  makeStreamFrameWriter,
+  makeFlowControlledWrite,
+  supportsDeflate,
+  FLOW_CALLBACK_BYTES,
+  FLOW_HIGH_WATER,
+} from './terminal-frames';
 
 /**
  * Produce the exact wire format the server's mode-2 sender emits: one shared
@@ -93,6 +99,42 @@ describe('terminal-frames', () => {
     w.dispose();
     await new Promise((r) => setTimeout(r, 20));
     expect(errored).toBe(0);
+  });
+
+  it('sends pause when a flood passes the high watermark and resume once xterm drains', () => {
+    const callbacks: (() => void)[] = [];
+    const term = {
+      write: (_d: string | Uint8Array, cb?: () => void) => {
+        if (cb) callbacks.push(cb);
+      },
+    };
+    const flow: string[] = [];
+    const write = makeFlowControlledWrite(term, (s) => flow.push(s));
+
+    // Flood: enough 100KB chunks to exceed the high watermark → one pause.
+    const chunk = 'x'.repeat(FLOW_CALLBACK_BYTES);
+    const n = Math.ceil(FLOW_HIGH_WATER / FLOW_CALLBACK_BYTES) + 1;
+    for (let i = 0; i < n; i++) write(chunk);
+    expect(flow).toEqual(['pause']);
+
+    // xterm processes the backlog (completion callbacks fire) → one resume.
+    for (const cb of callbacks) cb();
+    expect(flow).toEqual(['pause', 'resume']);
+  });
+
+  it('attaches a write callback only every FLOW_CALLBACK_BYTES, not per chunk', () => {
+    let withCallback = 0;
+    const term = {
+      write: (_d: string | Uint8Array, cb?: () => void) => {
+        if (cb) withCallback++;
+      },
+    };
+    const write = makeFlowControlledWrite(term, () => {});
+
+    // 10 chunks summing to exactly FLOW_CALLBACK_BYTES → a single callback.
+    const chunk = 'y'.repeat(FLOW_CALLBACK_BYTES / 10);
+    for (let i = 0; i < 10; i++) write(chunk);
+    expect(withCallback).toBe(1);
   });
 
   it('stops writing after dispose', async () => {

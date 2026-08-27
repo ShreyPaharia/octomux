@@ -43,6 +43,12 @@ vi.mock('fs', (importOriginal) => {
       mocked.writeFileSync(p, content, opts);
     }),
     chmod: vi.fn(async () => {}),
+    // Default to "no runtime dir" so editorIpcEnv's socket discovery is a
+    // no-op unless a test opts in.
+    readdir: vi.fn(async (p: string) => {
+      throw enoent(String(p));
+    }),
+    stat: vi.fn(async () => ({ mtimeMs: 0 })),
     cp: vi.fn(async (src: string, dst: string) => {
       mocked.copyFileSync(src, dst);
     }),
@@ -2124,6 +2130,103 @@ describe('createUserTerminal', () => {
     expect(
       findExecCall(vi.mocked(execFile), { cmd: 'cursor', argsInclude: ['/repo/.worktrees/test'] }),
     ).toBeTruthy();
+  });
+
+  it('discovers the newest live IPC socket for the remote CLI shim', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'cursor',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+    });
+    const prevIpc = process.env.VSCODE_IPC_HOOK_CLI;
+    delete process.env.VSCODE_IPC_HOOK_CLI;
+    const fsMod = await import('fs');
+    vi.mocked(fsMod.promises.readdir).mockResolvedValueOnce([
+      'vscode-ipc-old.sock',
+      'vscode-ipc-new.sock',
+      'unrelated.txt',
+    ] as never);
+    vi.mocked(fsMod.promises.stat).mockImplementation(
+      async (p) => ({ mtimeMs: String(p).includes('new') ? 2 : 1 }) as never,
+    );
+    try {
+      insertTask(db, { ...DEFAULTS.runningTask });
+      const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
+      await createUserTerminal(task);
+      const openCall = vi
+        .mocked(execFile)
+        .mock.calls.find((c) => (c[1] as string[]).includes('/repo/.worktrees/test'));
+      const opts = openCall![2] as { env: Record<string, string> };
+      expect(opts.env.VSCODE_IPC_HOOK_CLI).toContain('vscode-ipc-new.sock');
+    } finally {
+      if (prevIpc !== undefined) process.env.VSCODE_IPC_HOOK_CLI = prevIpc;
+    }
+  });
+
+  it('errors clearly when nvim is missing', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'nvim',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+    });
+    // First exec in the nvim path is the `command -v nvim` probe — fail it.
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: string,
+      _args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      cb(new Error('command not found'), null);
+    }) as never);
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
+    await expect(createUserTerminal(task)).rejects.toThrow(/nvim is not installed/);
+  });
+
+  it('throws when the remote CLI shim has no connected editor window', async () => {
+    vi.mocked(getSettings).mockResolvedValue({
+      editor: 'cursor',
+      defaultHarnessId: 'claude-code',
+      harnesses: {},
+    });
+    vi.mocked(execFile).mockImplementationOnce(((
+      _cmd: string,
+      _args: string[],
+      optsOrCb: Function | object,
+      maybeCb?: Function,
+    ) => {
+      const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb!;
+      cb(null, {
+        stdout: 'Command is only available in WSL or inside a Visual Studio Code terminal.',
+        stderr: '',
+      });
+    }) as never);
+    insertTask(db, { ...DEFAULTS.runningTask });
+    const task = { ...runningTask, worktree: '/repo/.worktrees/test' } as Task;
+    await expect(createUserTerminal(task)).rejects.toThrow(/no Cursor window is connected/);
+  });
+
+  it('errors clearly when the harness CLI is missing at launch', async () => {
+    const { ensureHarnessBinary, _resetHarnessBinaryProbes } = await import(
+      './task-engine/launch.js'
+    );
+    _resetHarnessBinaryProbes();
+    const exec = vi.fn().mockRejectedValue(new Error('exit 1'));
+    const c = { kind: 'local', exec } as never;
+    const harness = {
+      displayName: 'Claude Code',
+      binaryName: 'claude',
+      installHint: 'curl -fsSL https://claude.ai/install.sh | bash',
+    } as never;
+    await expect(ensureHarnessBinary(c, harness)).rejects.toThrow(
+      /Claude Code CLI \('claude'\) is not installed on this machine/,
+    );
+    // Success is cached; failure is not.
+    exec.mockResolvedValue({ stdout: '/usr/bin/claude', stderr: '', exitCode: 0 });
+    await ensureHarnessBinary(c, harness);
+    await ensureHarnessBinary(c, harness);
+    expect(exec).toHaveBeenCalledTimes(2);
   });
 
   it('creates tmux window with nvim when editor setting is nvim', async () => {

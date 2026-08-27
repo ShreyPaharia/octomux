@@ -122,26 +122,30 @@ async function runStart(startArgs) {
     }
   }
 
-  // Preflight: warn about missing tools (install from dashboard Setup — no blocking exit)
+  // Preflight: offer to install missing REQUIRED deps right here (TTY only),
+  // then warn about whatever is still missing (install from dashboard Setup).
   const { warnBinary, checkNeovimVersion } = await import('../server/startup.ts');
 
   const resolvedTmux = resolveTmuxBin();
-  const preflight = [
+  const required = [
     {
+      id: 'tmux',
       cmd: resolvedTmux,
       checkArgs: ['-V'],
       name: 'tmux',
-      // No brewPkg — tmux is bundled via @octomux/tmux-<platform>-<arch>.
-      // If the bundled package isn't available and PATH tmux is also missing,
-      // the bundled binary isn't available for this platform/arch and PATH tmux is also missing.
+      // Usually satisfied by the bundled @octomux/tmux-<platform>-<arch>;
+      // this only fires when that's unavailable AND PATH tmux is missing.
     },
-    { cmd: 'git', checkArgs: ['--version'], brewPkg: 'git' },
+    { id: 'git', cmd: 'git', checkArgs: ['--version'], name: 'git', brewPkg: 'git' },
     {
+      id: 'claude',
       cmd: 'claude',
       checkArgs: ['--version'],
       name: 'Claude Code CLI',
       installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
     },
+  ];
+  const optional = [
     {
       cmd: 'cursor-agent',
       checkArgs: ['--version'],
@@ -152,7 +156,8 @@ async function runStart(startArgs) {
     { cmd: 'lazygit', checkArgs: ['--version'], brewPkg: 'lazygit' },
   ];
 
-  for (const dep of preflight) {
+  await installMissingRequiredDeps(required);
+  for (const dep of [...required, ...optional]) {
     warnBinary(dep);
   }
 
@@ -181,6 +186,43 @@ async function runStart(startArgs) {
     if (autoOpen && process.platform === 'darwin') {
       execCb(`open ${url}`);
     }
+  }
+}
+
+// ─── first-start dependency installer ────────────────────────────────────────
+
+/**
+ * For each missing required dep, ask permission (Y/n) and run the same
+ * installer the dashboard Setup page uses. TTY only — headless starts keep
+ * the warn-only behavior. Never throws: a failed/declined install falls
+ * through to warnBinary + the Setup page.
+ */
+async function installMissingRequiredDeps(required) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return;
+  const { probeBinary } = await import('../server/binary-check.ts');
+  const missing = required.filter((dep) => !probeBinary(dep).ok);
+  if (missing.length === 0) return;
+
+  const { runSetupInstall } = await import('../server/setup-status.ts');
+  const readline = await import('node:readline/promises');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (const dep of missing) {
+      const answer = (
+        await rl.question(`${dep.name} is required but not installed. Install it now? [Y/n] `)
+      )
+        .trim()
+        .toLowerCase();
+      if (answer === 'n' || answer === 'no') continue;
+      try {
+        const res = await runSetupInstall(dep.id);
+        console.log(res.ok ? `✓ ${res.message}` : `✗ ${res.message}`);
+      } catch (err) {
+        console.log(`✗ Could not install ${dep.name}: ${err.message}`);
+      }
+    }
+  } finally {
+    rl.close();
   }
 }
 

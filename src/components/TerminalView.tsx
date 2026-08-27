@@ -7,9 +7,21 @@ import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalWheelCoalesce } from '@/lib/terminal-wheel-coalesce';
-import { supportsDeflate, makeStreamFrameWriter } from '@/lib/terminal-frames';
+import {
+  supportsDeflate,
+  makeStreamFrameWriter,
+  makeFlowControlledWrite,
+} from '@/lib/terminal-frames';
+import { createTerminalTypeahead, getLocalEchoEnabled } from '@/lib/terminal-typeahead';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
+import {
+  takeEntry,
+  parkEntry,
+  destroyEntry,
+  type TerminalPoolEntry,
+  type TerminalPoolListener,
+} from '@/lib/terminal-pool';
 import { CloudOffIcon } from './icons';
 
 interface TerminalViewProps {
@@ -41,21 +53,17 @@ export function TerminalView({
   scrollback = 5000,
 }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  // The live ensemble (xterm + host div + ws + inflate stream). On unmount it
+  // is parked in the terminal pool rather than destroyed, so switching back
+  // paints instantly from the existing buffer.
+  const entryRef = useRef<TerminalPoolEntry | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectDelay = useRef(INITIAL_RECONNECT_DELAY);
   const unmounted = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const viewportCleanup = useRef<(() => void) | null>(null);
-  const mobileTouchCleanup = useRef<(() => void) | null>(null);
-  const wheelCoalesceCleanup = useRef<(() => void) | null>(null);
-  const androidImeCleanup = useRef<(() => void) | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const visibleRef = useRef(visible);
-  const lastMessageAt = useRef(Date.now());
-  const frameWriter = useRef<{ dispose(): void } | null>(null);
   const [disconnected, setDisconnected] = useState(false);
   const [retrySecs, setRetrySecs] = useState<number>(0);
   // True while the WebSocket is opening (initial connect or a reconnect) and no
@@ -64,8 +72,7 @@ export function TerminalView({
 
   // Belt-and-suspenders: never show the overlay while the ws is actually OPEN,
   // even if some stale state flipped `disconnected` to true.
-  const showOverlay =
-    disconnected && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN);
+  const showOverlay = disconnected && entryRef.current?.ws?.readyState !== WebSocket.OPEN;
 
   const getWsUrl = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -76,7 +83,7 @@ export function TerminalView({
   }, [taskId, windowIndex, wsUrlProp]);
 
   const scrollCursorIntoView = useCallback(() => {
-    const term = termRef.current;
+    const term = entryRef.current?.term;
     if (!term) return;
     const textarea = containerRef.current?.querySelector(
       '.xterm-helper-textarea',
@@ -86,35 +93,34 @@ export function TerminalView({
     }
   }, []);
 
-  // Helper to fit terminal and send resize dimensions over WebSocket
-  const fitAndSendResize = useCallback(
-    (ws: WebSocket) => {
-      if (!fitRef.current || !termRef.current || !containerRef.current) return;
-      // Skip when container is hidden (0 dimensions) — fitting a hidden terminal
-      // sends a 0×0 resize to the PTY, which garbles apps like nvim.
-      const { clientWidth, clientHeight } = containerRef.current;
-      if (clientWidth === 0 || clientHeight === 0) return;
-      fitRef.current.fit();
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({
-            type: 'resize',
-            cols: termRef.current.cols,
-            rows: termRef.current.rows,
-          }),
-        );
-      }
-      scrollCursorIntoView();
-    },
-    [scrollCursorIntoView],
-  );
+  // Fit the terminal and send the dimensions — but only when they actually
+  // changed. A redundant resize still SIGWINCHes the pty and makes tmux redraw
+  // the whole pane, which is the visible reflow flash on every tab switch.
+  const fitAndSendResize = useCallback(() => {
+    const entry = entryRef.current;
+    if (!entry || !containerRef.current) return;
+    // Skip when container is hidden (0 dimensions) — fitting a hidden terminal
+    // sends a 0×0 resize to the PTY, which garbles apps like nvim.
+    const { clientWidth, clientHeight } = containerRef.current;
+    if (clientWidth === 0 || clientHeight === 0) return;
+    entry.fit.fit();
+    const { cols, rows } = entry.term;
+    if (
+      entry.ws?.readyState === WebSocket.OPEN &&
+      (entry.lastSize?.cols !== cols || entry.lastSize?.rows !== rows)
+    ) {
+      entry.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      entry.lastSize = { cols, rows };
+    }
+    scrollCursorIntoView();
+  }, [scrollCursorIntoView]);
 
   const connectWs = useCallback(
-    (term: Terminal) => {
-      if (unmounted.current) return;
+    (entry: TerminalPoolEntry) => {
+      if (unmounted.current || entry.disposed) return;
 
       // Show the connecting placeholder for every connect attempt, including
-      // reconnects — cleared on open or as soon as the first chunk arrives.
+      // reconnects — cleared as soon as the first chunk arrives.
       setConnecting(true);
       const ws = new WebSocket(getWsUrl());
       ws.binaryType = 'arraybuffer';
@@ -122,20 +128,44 @@ export function TerminalView({
       // context takeover, so frames only decode against this socket's stream.
       // A stream decode error is invisible to the watchdog (raw frames keep
       // arriving, only decoding stopped), so it forces its own reconnect.
-      frameWriter.current?.dispose();
+      entry.frames.dispose();
+      // Watermark flow control: during output floods, ask the server to stop
+      // forwarding pty output while xterm's write buffer is past the high
+      // watermark — otherwise unprocessed bytes pile up and starve input
+      // handling. Counters live in this per-socket closure (fresh per connect,
+      // matching the server's fresh flow state) and travel with the entry
+      // through park/adopt via entry.frames.
+      const write = makeFlowControlledWrite(entry.term, (state) => {
+        if (!entry.disposed && entry.ws === ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'flow', state }));
+        }
+      });
       const frames = makeStreamFrameWriter(
-        (data) => term.write(data),
+        (data) => {
+          // The typeahead's rewind/undo prefix must land before the data it
+          // reconciles against; a handful of control bytes, so it skips flow
+          // accounting.
+          const prefix = entry.typeahead?.reconcile(data);
+          if (prefix) entry.term.write(prefix);
+          write(data);
+        },
         () => {
-          if (unmounted.current || wsRef.current !== ws) return;
+          if (entry.disposed || entry.ws !== ws) return;
           ws.close();
-          connectWs(term);
+          if (entry.listener) connectWs(entry);
+          else destroyEntry(entry);
         },
       );
-      frameWriter.current = frames;
+      entry.frames = frames;
+      entry.ws = ws;
+      // Fresh socket = fresh server-side pty spawned at its default size, so
+      // the first fit must send even if cols/rows match the previous socket's.
+      entry.lastSize = null;
 
       ws.onopen = () => {
+        if (entry.disposed || entry.ws !== ws) return;
         reconnectDelay.current = INITIAL_RECONNECT_DELAY;
-        lastMessageAt.current = Date.now();
+        entry.lastMessageAt = Date.now();
         setDisconnected(false);
         // Deliberately NOT clearing `connecting` here: the socket opens in ~5ms
         // but the server's first frame lands later, so clearing on open left the
@@ -147,7 +177,7 @@ export function TerminalView({
         }
         // Re-fit now that we know layout is settled (WS connect takes a few ms,
         // guaranteeing the browser has completed layout), then send correct dimensions.
-        fitAndSendResize(ws);
+        fitAndSendResize();
         // Hidden LRU tabs shouldn't stream output nobody can see — pause until
         // the tab becomes active (server discards + repaints on resume).
         if (!visibleRef.current) {
@@ -155,25 +185,96 @@ export function TerminalView({
         }
         // Belt-and-suspenders: fit again after a frame to catch any late layout shifts
         requestAnimationFrame(() => {
-          if (!unmounted.current) fitAndSendResize(ws);
+          if (!unmounted.current) fitAndSendResize();
         });
       };
 
       ws.onmessage = (event) => {
-        // First chunk means the terminal has real content — drop the placeholder.
-        setConnecting(false);
-        lastMessageAt.current = Date.now();
+        // A queued frame from a just-replaced socket must not count as this
+        // socket's liveness pong (or paint into the new stream).
+        if (entry.disposed || entry.ws !== ws) return;
+        // Empty frames are watchdog pongs — they prove liveness, not content.
+        // The server sends the pong as ws.send(''), which the browser delivers
+        // as an empty STRING; the ArrayBuffer shape is kept for binary-mode
+        // servers. Both must skip hasData and close the latency sample.
+        const isEmptyPong =
+          event.data === '' || (event.data instanceof ArrayBuffer && event.data.byteLength === 0);
+        if (!isEmptyPong) entry.hasData = true;
+        entry.lastMessageAt = Date.now();
+        // Latency sampling for the typeahead gate. Only an empty pong closes
+        // a sample — data frames aren't request/response. Seed one ping on the
+        // first data frame (not on open: messages sent before the server's
+        // attach completes are queued behind tmux setup, which would measure
+        // setup time instead of RTT); the idle watchdog refreshes it after.
+        if (isEmptyPong && entry.pingSentAt !== null) {
+          entry.latencyMs = Date.now() - entry.pingSentAt;
+          entry.pingSentAt = null;
+        } else if (
+          entry.typeahead &&
+          entry.latencyMs === null &&
+          entry.pingSentAt === null &&
+          getLocalEchoEnabled()
+        ) {
+          entry.pingSentAt = Date.now();
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
         frames.onFrame(event.data);
+        // First chunk means the terminal has real content — the mounted owner
+        // drops its placeholder. A parked entry just keeps its buffer warm.
+        entry.listener?.onData();
       };
 
       ws.onclose = (event) => {
-        // Skip reconnect if we unmounted OR if this ws has already been replaced.
-        // A replaced ws (via prop change or explicit reconnect) must not trigger
-        // a reconnect via its now-stale closure — that closure captures the old
-        // taskId/windowIndex and would route input to the wrong agent.
-        if (unmounted.current || wsRef.current !== ws) return;
+        // Skip if this ws has already been replaced. A replaced ws (via prop
+        // change or explicit reconnect) must not trigger a reconnect via its
+        // now-stale closure — that would route input to the wrong agent.
+        if (entry.disposed || entry.ws !== ws) return;
+        if (entry.listener) entry.listener.onClose(event);
+        // A parked entry whose socket died has nothing left worth adopting.
+        else destroyEntry(entry);
+      };
+
+      ws.onerror = () => {
+        // onclose will handle reconnection
+      };
+    },
+    [getWsUrl, fitAndSendResize],
+  );
+
+  // Park (or destroy) the current entry — on unmount and on prop-driven
+  // endpoint changes. Unbinding the listener first stops the entry's ws
+  // callbacks from touching this component's state.
+  const release = useCallback(() => {
+    const entry = entryRef.current;
+    entryRef.current = null;
+    if (!entry) return;
+    entry.listener = null;
+    parkEntry(entry);
+  }, []);
+
+  const connect = useCallback(() => {
+    if (!containerRef.current) return;
+
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    release();
+
+    const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
+    // Entries are only interchangeable when everything baked into the xterm
+    // instance matches too, so the config is part of the identity (a readOnly
+    // grid cell must never adopt the interactive tab's terminal or vice versa).
+    const key = `${getWsUrl()}|ro:${readOnly ? 1 : 0}|fs:${resolvedFontSize}|sb:${scrollback}`;
+
+    const listener: TerminalPoolListener = {
+      onData: () => setConnecting(false),
+      onUserInput: scrollCursorIntoView,
+      onClose: (event) => {
+        const entry = entryRef.current;
+        if (!entry) return;
         if (event.code !== 1000 && event.code !== 1001) {
-          term.write('\r\n\x1b[31m[Terminal disconnected — reconnecting...]\x1b[0m\r\n');
+          entry.term.write('\r\n\x1b[31m[Terminal disconnected — reconnecting...]\x1b[0m\r\n');
           setDisconnected(true);
           const delay = reconnectDelay.current;
           setRetrySecs(Math.ceil(delay / 1000));
@@ -184,46 +285,41 @@ export function TerminalView({
           // Exponential backoff reconnection
           reconnectTimer.current = setTimeout(() => {
             reconnectDelay.current = Math.min(reconnectDelay.current * 2, MAX_RECONNECT_DELAY);
-            connectWs(term);
+            connectWs(entry);
           }, delay);
         }
-      };
+      },
+    };
 
-      ws.onerror = () => {
-        // onclose will handle reconnection
-      };
-
-      wsRef.current = ws;
-    },
-    [getWsUrl, fitAndSendResize],
-  );
-
-  const connect = useCallback(() => {
-    if (!containerRef.current) return;
-
-    // Clean up previous
-    if (reconnectTimer.current) {
-      clearTimeout(reconnectTimer.current);
-      reconnectTimer.current = null;
+    // Warm reattach: a parked entry for this exact endpoint+config still has
+    // its buffer, its socket, and its inflate stream — adopt it and the pane
+    // paints instantly with no reconnect and no placeholder.
+    const pooled = takeEntry(key);
+    if (pooled) {
+      pooled.listener = listener;
+      entryRef.current = pooled;
+      containerRef.current.appendChild(pooled.hostEl);
+      reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+      setDisconnected(false);
+      setConnecting(!pooled.hasData);
+      // Un-pause the parked stream. The visible-effect also resumes on mount,
+      // but connect() can re-run on a prop change without a remount — send
+      // here too; the server's resume handler is idempotent.
+      if (visibleRef.current) {
+        pooled.ws?.send(JSON.stringify({ type: 'resume' }));
+      }
+      // Only an actual size change reaches the server (no SIGWINCH, no reflow
+      // flash when the layout is unchanged).
+      requestAnimationFrame(() => {
+        if (!unmounted.current) fitAndSendResize();
+      });
+      return;
     }
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (termRef.current) {
-      termRef.current.dispose();
-      termRef.current = null;
-    }
-    viewportCleanup.current?.();
-    viewportCleanup.current = null;
-    mobileTouchCleanup.current?.();
-    mobileTouchCleanup.current = null;
-    wheelCoalesceCleanup.current?.();
-    wheelCoalesceCleanup.current = null;
-    androidImeCleanup.current?.();
-    androidImeCleanup.current = null;
 
-    const resolvedFontSize = isMobile ? Math.max(fontSize, 14) : fontSize;
+    const hostEl = document.createElement('div');
+    hostEl.style.width = '100%';
+    hostEl.style.height = '100%';
+    containerRef.current.appendChild(hostEl);
 
     const term = new Terminal({
       cursorBlink: !readOnly,
@@ -242,7 +338,7 @@ export function TerminalView({
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.loadAddon(new WebLinksAddon());
-    term.open(containerRef.current);
+    term.open(hostEl);
 
     // WebGL renderer paints full-screen TUI repaints far faster than the DOM
     // renderer. Load after open(); on failure or GPU context loss, dispose and
@@ -259,8 +355,7 @@ export function TerminalView({
     // don't draw autofill / suggestion / accessory UI above the soft
     // keyboard. Harmless on desktop (there's no textarea chrome to suppress
     // there), so this runs unconditionally rather than gating on isMobile.
-    const helperTextarea =
-      containerRef.current.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+    const helperTextarea = hostEl.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
     if (helperTextarea) {
       helperTextarea.setAttribute('autocapitalize', 'off');
       helperTextarea.setAttribute('autocorrect', 'off');
@@ -273,33 +368,59 @@ export function TerminalView({
     // correctly subtracts scrollbar width when calculating columns.
     // Without this, macOS overlay scrollbars report 0 width and the last
     // column gets clipped when the scrollbar appears.
-    const viewport = containerRef.current.querySelector('.xterm-viewport');
+    const viewport = hostEl.querySelector('.xterm-viewport');
     if (viewport) {
       (viewport as HTMLElement).style.overflowY = 'scroll';
     }
 
-    if (isMobile && containerRef.current) {
-      mobileTouchCleanup.current = installTerminalMobileTouch(containerRef.current);
+    // hostEl-scoped installs ride along with the parked entry, so they are
+    // registered once per terminal lifetime and disposed with it.
+    const disposers: (() => void)[] = [];
+    if (isMobile) {
+      disposers.push(installTerminalMobileTouch(hostEl));
     }
-
     // Coalesce alt-buffer wheel events so a trackpad flick reaches the remote
     // TUI as a few scroll bursts instead of dozens of repaint-triggering ones.
     if (!readOnly) {
-      wheelCoalesceCleanup.current = installTerminalWheelCoalesce(containerRef.current, term);
+      disposers.push(installTerminalWheelCoalesce(hostEl, term));
     }
 
-    termRef.current = term;
-    fitRef.current = fitAddon;
-    reconnectDelay.current = INITIAL_RECONNECT_DELAY;
+    const entry: TerminalPoolEntry = {
+      key,
+      hostEl,
+      term,
+      fit: fitAddon,
+      ws: null,
+      frames: { onFrame() {}, dispose() {} },
+      lastSize: null,
+      lastMessageAt: Date.now(),
+      latencyMs: null,
+      pingSentAt: null,
+      typeahead: null,
+      hasData: false,
+      listener,
+      parkTimer: null,
+      disposed: false,
+      disposers,
+    };
 
-    const androidIme = !readOnly && isAndroid();
-    if (androidIme) {
-      androidImeCleanup.current = attachAndroidImeBridge(term, (bytes) => {
-        const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(bytes);
-        }
-      });
+    // Local-echo typeahead rides the entry (one per terminal lifetime, like
+    // the input handler below). Inert unless the setting is on, measured
+    // latency exceeds the gate, and the normal screen buffer is active.
+    if (!readOnly) {
+      const typeahead = createTerminalTypeahead(term, () => entry.latencyMs);
+      entry.typeahead = typeahead;
+      disposers.push(() => typeahead.dispose());
+    }
+
+    if (!readOnly && isAndroid()) {
+      disposers.push(
+        attachAndroidImeBridge(term, (bytes) => {
+          if (entry.ws?.readyState === WebSocket.OPEN) {
+            entry.ws.send(bytes);
+          }
+        }),
+      );
       // Short-circuit xterm's broken composition path: returning false for
       // keydown keyCode 229 (IME composition) stops CompositionHelper from
       // scheduling its own naive textarea diff before the bridge above can
@@ -309,9 +430,18 @@ export function TerminalView({
     }
 
     // Register input handler once per terminal lifetime — always forwards to
-    // the latest WebSocket via wsRef, so reconnects don't accumulate listeners.
+    // the entry's latest WebSocket, so reconnects and pool adoptions don't
+    // accumulate listeners or capture a stale socket. No batching anywhere on
+    // this path: keystroke → ws.send in the same tick.
     // Skipped in readOnly mode so panes can't receive keystrokes.
     if (!readOnly) {
+      const forward = (data: string) => {
+        if (entry.ws?.readyState === WebSocket.OPEN) {
+          entry.ws.send(data);
+          entry.typeahead?.onInput(data);
+        }
+        entry.listener?.onUserInput();
+      };
       // PHANTOM-ENTER GUARD. `term.onData` fires both for real user input
       // (keystroke / paste / IME) AND for xterm-synthesized control-sequence
       // responses (focus-report escapes, DSR/CPR cursor reports, etc.) that
@@ -336,22 +466,15 @@ export function TerminalView({
         term.onData((data) => {
           if (!wasUserInput) return;
           wasUserInput = false;
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
-          }
-          scrollCursorIntoView();
+          forward(data);
         });
       } else {
-        term.onData((data) => {
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(data);
-          }
-          scrollCursorIntoView();
-        });
+        term.onData(forward);
       }
     }
+
+    entryRef.current = entry;
+    reconnectDelay.current = INITIAL_RECONNECT_DELAY;
 
     // Defer initial fit to next frame so the browser has completed flex layout.
     // Without this, fit() can measure a not-yet-expanded container and set xterm
@@ -360,8 +483,18 @@ export function TerminalView({
       if (!unmounted.current) fitAddon.fit();
     });
 
-    connectWs(term);
-  }, [connectWs, readOnly, fontSize, scrollback, isMobile, scrollCursorIntoView]);
+    connectWs(entry);
+  }, [
+    connectWs,
+    release,
+    getWsUrl,
+    fitAndSendResize,
+    readOnly,
+    fontSize,
+    scrollback,
+    isMobile,
+    scrollCursorIntoView,
+  ]);
 
   const handleRetryNow = useCallback(() => {
     if (reconnectTimer.current) {
@@ -374,8 +507,9 @@ export function TerminalView({
     }
     reconnectDelay.current = INITIAL_RECONNECT_DELAY;
     setRetrySecs(0);
-    if (termRef.current) {
-      connectWs(termRef.current);
+    const entry = entryRef.current;
+    if (entry) {
+      connectWs(entry);
     }
   }, [connectWs]);
 
@@ -383,17 +517,19 @@ export function TerminalView({
   // a ping that goes unanswered means the socket is half-open — replace it.
   // Silent recovery: no overlay, the reconnect repaints from the tmux snapshot.
   const probeLiveness = useCallback(() => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (Date.now() - lastMessageAt.current < WATCHDOG_IDLE_MS) return;
+    const entry = entryRef.current;
+    const ws = entry?.ws;
+    if (!entry || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - entry.lastMessageAt < WATCHDOG_IDLE_MS) return;
     const sentAt = Date.now();
+    entry.pingSentAt = sentAt; // also feeds the typeahead latency estimate
     ws.send(JSON.stringify({ type: 'ping' }));
     setTimeout(() => {
-      if (unmounted.current || wsRef.current !== ws) return;
-      if (lastMessageAt.current >= sentAt) return; // pong (or any output) arrived
+      if (unmounted.current || entryRef.current !== entry || entry.ws !== ws) return;
+      if (entry.lastMessageAt >= sentAt) return; // pong (or any output) arrived
       // close() on a half-open socket can wait out a long TCP timeout before
       // onclose fires — reconnect immediately; the stale socket's onclose is
-      // ignored via the wsRef identity guard.
+      // ignored via the entry.ws identity guard.
       ws.close();
       handleRetryNow();
     }, PONG_TIMEOUT_MS);
@@ -413,7 +549,7 @@ export function TerminalView({
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
-      const ws = wsRef.current;
+      const ws = entryRef.current?.ws;
       if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
         probeLiveness();
         return;
@@ -424,7 +560,9 @@ export function TerminalView({
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [handleRetryNow, probeLiveness]);
 
-  // Connect on mount and reconnect when taskId/windowIndex changes
+  // Connect on mount and reconnect when taskId/windowIndex changes.
+  // Unmount parks the entry (buffer + socket kept warm) instead of tearing it
+  // down — the pool owns TTL and LRU eviction from here.
   useEffect(() => {
     unmounted.current = false;
     connect();
@@ -437,20 +575,11 @@ export function TerminalView({
       if (countdownTimer.current) {
         clearInterval(countdownTimer.current);
       }
-      wsRef.current?.close();
-      frameWriter.current?.dispose();
-      frameWriter.current = null;
-      termRef.current?.dispose();
+      release();
       viewportCleanup.current?.();
       viewportCleanup.current = null;
-      mobileTouchCleanup.current?.();
-      mobileTouchCleanup.current = null;
-      wheelCoalesceCleanup.current?.();
-      wheelCoalesceCleanup.current = null;
-      androidImeCleanup.current?.();
-      androidImeCleanup.current = null;
     };
-  }, [connect]);
+  }, [connect, release]);
 
   // Handle resize (window + container size changes)
   // Debounce with rAF to avoid excessive fit+resize during animated resizes.
@@ -460,8 +589,7 @@ export function TerminalView({
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const ws = wsRef.current;
-        if (ws) fitAndSendResize(ws);
+        fitAndSendResize();
       });
     };
 
@@ -490,8 +618,7 @@ export function TerminalView({
     if (!isMobile || !visible || !containerRef.current) return;
     viewportCleanup.current?.();
     viewportCleanup.current = installTerminalVisualViewport(containerRef.current, () => {
-      const ws = wsRef.current;
-      if (ws) fitAndSendResize(ws);
+      fitAndSendResize();
     });
     return () => {
       viewportCleanup.current?.();
@@ -502,9 +629,10 @@ export function TerminalView({
   // Pause the server-side stream while this terminal is a hidden LRU tab —
   // no point paying bandwidth for output nobody can see. Resume triggers a
   // server-side full repaint so the screen is current when the tab returns.
+  // Runs on mount too, which is what resumes a just-adopted parked entry.
   useEffect(() => {
     visibleRef.current = visible;
-    const ws = wsRef.current;
+    const ws = entryRef.current?.ws;
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: visible ? 'resume' : 'pause' }));
     }
@@ -512,12 +640,12 @@ export function TerminalView({
 
   // Fit terminal when it becomes visible (e.g. toggling between agent/editor views).
   // Use double-rAF to ensure the browser has fully reflowed after CSS hidden→flex toggle.
+  // fitAndSendResize dedupes, so an unchanged layout sends nothing to the server.
   useEffect(() => {
-    if (visible && fitRef.current && termRef.current) {
+    if (visible && entryRef.current) {
       const rafId = requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const ws = wsRef.current;
-          if (ws) fitAndSendResize(ws);
+          fitAndSendResize();
         });
       });
       return () => cancelAnimationFrame(rafId);
@@ -536,7 +664,7 @@ export function TerminalView({
           // tap racing an unmount), so this is best-effort.
           if (!readOnly) {
             try {
-              termRef.current?.focus();
+              entryRef.current?.term.focus();
             } catch {
               /* terminal disposed mid-tap — nothing to focus */
             }

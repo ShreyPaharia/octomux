@@ -27,6 +27,7 @@ Run `octomux review start --task <task_id>` first. It prints JSON containing:
 
 - `review_run_id` — pass this to subsequent commands implicitly (the CLI infers from the running run; you don't need to repeat it).
 - `pr_head_sha`, `base_sha`, `base_branch`, `pr_url`, `worktree`.
+- `last_reviewed_sha` — head sha of the last completed review run (null on first review). The delta base for a re-review; never guess it from git.
 - `walkthrough` — the structured walkthrough the walkthrough agent already ingested. Do NOT re-derive it; use it directly as orientation.
 - `playbook` — `{ index: <INDEX.md body>, files: [{ slug, body }] }`. Project-level review orientation. Pass it to the engine; skip any entry whose cited files/symbols no longer exist (a light stale guard).
 - `learnings` — array of `{ id, why }` the human has told you in the past. Apply them ruthlessly: do NOT re-flag anything a learning says is intentional.
@@ -54,14 +55,14 @@ For `still_applies`, ALWAYS pass `--reflag-body` with a fresh restatement — th
 
 The findings engine is a **deterministic workflow** that fans out the review lenses in parallel, runs an adversarial skeptic on every candidate, and enforces the confidence threshold, caps, and composition guard **in code** (so the rules can't be skipped or forgotten). Run it via the **Workflow tool** — do NOT orchestrate the lenses by hand. Running it from inside this session is what makes its lens agents inherit **this worktree** as their cwd, so they review the right PR.
 
-Invoke it with the values from `start` and the walkthrough:
+Invoke it with the values from `start` and the walkthrough. **Re-reviews** (`last_reviewed_sha` non-null): pass `baseSha: <start.last_reviewed_sha>` so the engine reviews only the commits since the last reviewed head — the previously reviewed code is covered by Phase 2, not a second full pass.
 
 ```
 Workflow({
   scriptPath: "<your $HOME>/.claude/workflows/review-deep.js",
   args: {
     worktree:        <start.worktree>,
-    baseSha:         <start.base_sha>,
+    baseSha:         <start.last_reviewed_sha ?? start.base_sha>,
     baseBranch:      <start.base_branch>,           // lets the engine diff the true PR scope
     headSha:         <start.pr_head_sha>,
     risk:            <walkthrough.global.risk>,      // "low" | "medium" | "high"

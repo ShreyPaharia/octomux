@@ -63,6 +63,15 @@ export interface Harness {
   readonly id: string;
   readonly displayName: string;
   readonly sessionIdMode: 'orchestrator-assigned' | 'harness-issued';
+  /**
+   * PATH binary the launch command invokes, probed before launch so a missing
+   * CLI surfaces as a clear task error instead of "command not found" dying
+   * silently inside the tmux window. Optional: a plugin harness without it is
+   * simply not probed.
+   */
+  readonly binaryName?: string;
+  /** One-line install command/URL shown when binaryName is missing. */
+  readonly installHint?: string;
 
   newSessionId(): string;
   buildLaunchCommand(opts: HarnessLaunchOpts): string;

@@ -112,7 +112,7 @@ router.get('/api/runs/:id', (req: Request, res: Response) => {
 
 // ─── POST /api/runs ─────────────────────────────────────────────────────────
 
-interface CreateLoopRunBody {
+export interface CreateLoopRunBody {
   workflowKind: 'loop';
   taskId?: unknown;
   spec?: unknown;
@@ -144,7 +144,7 @@ function validateLoopSpec(spec: unknown): LoopSpec {
   return s as LoopSpec;
 }
 
-async function createLoopRun(body: CreateLoopRunBody): Promise<string> {
+export async function createLoopRun(body: CreateLoopRunBody): Promise<string> {
   if (typeof body.taskId !== 'string' || !body.taskId) {
     throw badRequest('taskId is required');
   }
