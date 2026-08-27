@@ -167,7 +167,12 @@ export function TerminalView({
       };
 
       ws.onmessage = (event) => {
-        entry.hasData = true;
+        // A queued frame from a just-replaced socket must not count as this
+        // socket's liveness pong (or paint into the new stream).
+        if (entry.disposed || entry.ws !== ws) return;
+        // Empty frames are watchdog pongs — they prove liveness, not content.
+        const isEmptyPong = event.data instanceof ArrayBuffer && event.data.byteLength === 0;
+        if (!isEmptyPong) entry.hasData = true;
         entry.lastMessageAt = Date.now();
         frames.onFrame(event.data);
         // First chunk means the terminal has real content — the mounted owner
