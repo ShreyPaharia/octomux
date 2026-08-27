@@ -25,6 +25,7 @@ import {
   stopConversation,
   isConversationSessionAlive,
 } from '../orchestrator/runner.js';
+import { ensureAdvisorAgent } from '../orchestrator/advisor.js';
 import { badRequest, notFound } from '../services/errors.js';
 import { childLogger } from '../logger.js';
 
@@ -177,20 +178,30 @@ router.delete('/api/agents/:id', async (req: Request, res: Response) => {
   res.status(204).end();
 });
 
+/** Ensure the agent's persistent conductor conversation exists (launching it if needed). */
+async function ensureAgentSession(agent: AgentConfig) {
+  let conv = getPrimaryAgentConversation(agent.id);
+  if (!conv) {
+    const convId = createConversation({ title: agent.name, agent_id: agent.id });
+    const cwd = process.env.OCTOMUX_GATEWAY_CWD || process.cwd();
+    await startConversation(convId, cwd, { systemPrompt: agent.system_prompt });
+    conv = getPrimaryAgentConversation(agent.id);
+    logger.info({ agent_id: agent.id, conversation_id: convId }, 'agents: session started');
+  }
+  return conv;
+}
+
 // POST /api/agents/:id/session — ensure + return the agent's persistent conversation
 router.post('/api/agents/:id/session', async (req: Request, res: Response) => {
   const { id } = req.params as Record<string, string>;
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');
 
-  let conv = getPrimaryAgentConversation(id);
-  if (!conv) {
-    const convId = createConversation({ title: agent.name, agent_id: id });
-    const cwd = process.env.OCTOMUX_GATEWAY_CWD || process.cwd();
-    await startConversation(convId, cwd, { systemPrompt: agent.system_prompt });
-    conv = getPrimaryAgentConversation(id);
-    logger.info({ agent_id: id, conversation_id: convId }, 'agents: session started');
-  }
+  res.status(200).json(await ensureAgentSession(agent));
+});
 
-  res.status(200).json(conv);
+// POST /api/advisor/session — find-or-create the Advisor agent, ensure its session
+router.post('/api/advisor/session', async (_req: Request, res: Response) => {
+  const agent = ensureAdvisorAgent();
+  res.status(200).json(await ensureAgentSession(agent));
 });

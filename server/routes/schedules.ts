@@ -68,7 +68,7 @@ function validateTimeoutMs(timeoutMs: unknown): void {
   }
 }
 
-interface CreateScheduleBody {
+export interface CreateScheduleBody {
   kind?: unknown;
   repoPath?: unknown;
   cron?: unknown;
@@ -91,7 +91,7 @@ interface CreateScheduleBody {
  * prompt is copied from the kind's preset when the caller doesn't supply one
  * (§1: the row is a self-contained snapshot, not a live reference).
  */
-function handleCreateSchedule(body: CreateScheduleBody): ScheduleRow {
+export function handleCreateSchedule(body: CreateScheduleBody): ScheduleRow {
   if (typeof body.kind !== 'string') {
     throw badRequest('kind is required');
   }

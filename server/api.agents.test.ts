@@ -225,4 +225,36 @@ describe('agents CRUD routes', () => {
       expect(runner.startConversation).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('POST /api/advisor/session', () => {
+    it('creates the Advisor agent on first call and starts its session', async () => {
+      const res = await request(app).post('/api/advisor/session');
+      expect(res.status).toBe(200);
+      expect(res.body.title).toBe('Advisor');
+      expect(res.body.agent_id).toBeTruthy();
+
+      const agents = await request(app).get('/api/agents');
+      const advisor = agents.body.find((a: { name: string }) => a.name === 'Advisor');
+      expect(advisor).toBeDefined();
+      expect(advisor.system_prompt).toContain('octomux ADVISOR');
+
+      const runner = await import('./orchestrator/runner.js');
+      const [, , opts] = (runner.startConversation as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect((opts as { systemPrompt: string }).systemPrompt).toContain('octomux ADVISOR');
+    });
+
+    it('reuses both the agent row and the session across calls', async () => {
+      const first = await request(app).post('/api/advisor/session');
+      const second = await request(app).post('/api/advisor/session');
+
+      expect(second.body.id).toBe(first.body.id);
+      expect(second.body.agent_id).toBe(first.body.agent_id);
+
+      const agents = await request(app).get('/api/agents');
+      expect(agents.body.filter((a: { name: string }) => a.name === 'Advisor')).toHaveLength(1);
+
+      const runner = await import('./orchestrator/runner.js');
+      expect(runner.startConversation).toHaveBeenCalledTimes(1);
+    });
+  });
 });

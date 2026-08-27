@@ -37,6 +37,9 @@ import {
   listRecentRepoPaths,
 } from '../../repositories/index.js';
 import { recallLearnings } from '../../routes/learnings.js';
+import { listSchedules } from '../../repositories/schedules.js';
+import { listPresets } from '../../workflows/presets.js';
+import { getSettings } from '../../settings.js';
 import {
   getManagedTask,
   countManagedTasksByPhase,
@@ -354,6 +357,97 @@ export async function handleDefaultBranch(input: DefaultBranchInput): Promise<De
     logger.debug({ operation: 'default_branch', repo_path }, 'default_branch fallback to main');
     return { branch: 'main' };
   }
+}
+
+// ─── list_schedules ───────────────────────────────────────────────────────────
+
+/** Lean schedule row — omits config_json and the (potentially long) prompt body. */
+export interface ScheduleSummary {
+  id: string;
+  kind: string;
+  name: string | null;
+  repo_path: string;
+  cron: string;
+  timezone: string | null;
+  enabled: boolean;
+  model: string | null;
+  last_run_at: string | null;
+}
+
+/** List all cron schedules as lean summaries (advisor read tool). */
+export function handleListSchedules(): ScheduleSummary[] {
+  logger.debug({ operation: 'list_schedules' }, 'list_schedules called');
+  return listSchedules().map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    name: r.name ?? null,
+    repo_path: r.repo_path,
+    cron: r.cron,
+    timezone: r.timezone ?? null,
+    enabled: !!r.enabled,
+    model: r.model ?? null,
+    last_run_at: r.last_run_at ?? null,
+  }));
+}
+
+// ─── list_schedule_kinds ──────────────────────────────────────────────────────
+
+export interface ScheduleKindSummary {
+  kind: string;
+  displayName: string;
+  execution: string;
+  defaultCron: string | null;
+  /** true = the kind ships no preset prompt; create_schedule must supply one. */
+  promptRequired: boolean;
+}
+
+/** List the schedule kinds (presets) available for create_schedule. */
+export function handleListScheduleKinds(): ScheduleKindSummary[] {
+  logger.debug({ operation: 'list_schedule_kinds' }, 'list_schedule_kinds called');
+  return listPresets().map((p) => ({
+    kind: p.kind,
+    displayName: p.displayName,
+    execution: p.execution,
+    defaultCron: p.defaultCron ?? null,
+    promptRequired: !p.prompt,
+  }));
+}
+
+// ─── get_settings ─────────────────────────────────────────────────────────────
+
+/**
+ * Curated settings summary. Deliberately EXCLUDES the `compute` blobs (their
+ * `secrets` sub-objects must never reach an agent) and harness/plugin config
+ * values — only the ids are listed.
+ */
+export interface SettingsSummary {
+  editor: string;
+  defaultHarnessId: string;
+  defaultComputeKind: string;
+  configuredHarnessIds: string[];
+  configuredComputeKinds: string[];
+  configuredPluginIds: string[];
+  defaultTracker: string | null;
+  defaultBaseBranch: string | null;
+  aiTaskNaming: boolean;
+  fanoutMaxConcurrency: number | null;
+}
+
+export async function handleGetSettings(): Promise<SettingsSummary> {
+  logger.debug({ operation: 'get_settings' }, 'get_settings called');
+  const s = await getSettings();
+  return {
+    editor: s.editor,
+    defaultHarnessId: s.defaultHarnessId,
+    defaultComputeKind: s.defaultComputeKind,
+    configuredHarnessIds: Object.keys(s.harnesses),
+    configuredComputeKinds: Object.keys(s.compute),
+    configuredPluginIds: Object.keys(s.plugins),
+    defaultTracker: s.defaultTracker ?? null,
+    defaultBaseBranch: s.defaultBaseBranch ?? null,
+    aiTaskNaming: s.aiTaskNaming ?? false,
+    fanoutMaxConcurrency: s.fanout?.maxConcurrency ?? null,
+  };
 }
 
 // ─── search_learnings ─────────────────────────────────────────────────────────

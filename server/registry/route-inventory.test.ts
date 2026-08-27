@@ -119,6 +119,7 @@ const PENDING_MIGRATION: string[] = [
   'PATCH /api/tasks/:id/comments/:cid',
   'PATCH /api/tasks/:id/viewed',
   'PATCH /api/workers/:id/task',
+  'POST /api/advisor/session',
   'POST /api/agents',
   'POST /api/agents/:id/session',
   'POST /api/chats',

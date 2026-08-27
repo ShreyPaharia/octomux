@@ -41,6 +41,9 @@ import {
   handleRecentRepos,
   handleDefaultBranch,
   handleSearchLearnings,
+  handleListSchedules,
+  handleListScheduleKinds,
+  handleGetSettings,
 } from './read.js';
 import { handlePullLinearIssue } from './seed.js';
 import {
@@ -277,6 +280,60 @@ export function createOctomuxMcpServer(): McpServer {
           },
         ],
       };
+    },
+  );
+
+  // ── list_schedules ──────────────────────────────────────────────────────────
+  server.registerTool(
+    'list_schedules',
+    {
+      description:
+        'List all cron schedules as lean rows [{id, kind, name, repo_path, cron, timezone, ' +
+        'enabled, model, last_run_at}]. Never returns config or prompt bodies.',
+      inputSchema: {},
+    },
+    (_args) => {
+      logger.debug({ operation: 'list_schedules' }, 'MCP list_schedules invoked');
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(handleListSchedules(), null, 2) }],
+      };
+    },
+  );
+
+  // ── list_schedule_kinds ─────────────────────────────────────────────────────
+  server.registerTool(
+    'list_schedule_kinds',
+    {
+      description:
+        'List the schedule kinds (presets) available for create_schedule: ' +
+        '[{kind, displayName, execution, defaultCron, promptRequired}]. ' +
+        'promptRequired:true means create_schedule must be given an explicit prompt + name.',
+      inputSchema: {},
+    },
+    (_args) => {
+      logger.debug({ operation: 'list_schedule_kinds' }, 'MCP list_schedule_kinds invoked');
+      return {
+        content: [
+          { type: 'text' as const, text: JSON.stringify(handleListScheduleKinds(), null, 2) },
+        ],
+      };
+    },
+  );
+
+  // ── get_settings ────────────────────────────────────────────────────────────
+  server.registerTool(
+    'get_settings',
+    {
+      description:
+        'Get a curated octomux settings summary: editor, default harness/compute kind, ' +
+        'configured harness/compute/plugin ids (ids only — never config values or secrets), ' +
+        'default tracker/base branch, aiTaskNaming, fanout concurrency.',
+      inputSchema: {},
+    },
+    async (_args) => {
+      logger.debug({ operation: 'get_settings' }, 'MCP get_settings invoked');
+      const result = await handleGetSettings();
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
     },
   );
 

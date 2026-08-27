@@ -40,14 +40,17 @@ interface WsIncomingEvent {
 
 export interface AgentSessionChatProps {
   convId: string;
+  /** Optional first user turn, sent once when the socket first opens. */
+  initialMessage?: string;
 }
 
-export function AgentSessionChat({ convId }: AgentSessionChatProps) {
+export function AgentSessionChat({ convId, initialMessage }: AgentSessionChatProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [input, setInput] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const initialSentRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,7 +73,15 @@ export function AgentSessionChat({ convId }: AgentSessionChatProps) {
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/orchestrator/${convId}`);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnection('open');
+    ws.onopen = () => {
+      setConnection('open');
+      if (initialMessage?.trim() && !initialSentRef.current) {
+        initialSentRef.current = true;
+        const text = initialMessage.trim();
+        ws.send(JSON.stringify({ type: 'user_turn', text }));
+        setMessages((prev) => [...prev, { id: `local-initial-${convId}`, role: 'user', text }]);
+      }
+    };
     ws.onclose = () => setConnection('closed');
     ws.onerror = () => setConnection('closed');
     ws.onmessage = (ev) => {
@@ -108,7 +119,7 @@ export function AgentSessionChat({ convId }: AgentSessionChatProps) {
       ws.close();
       wsRef.current = null;
     };
-  }, [convId]);
+  }, [convId, initialMessage]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });

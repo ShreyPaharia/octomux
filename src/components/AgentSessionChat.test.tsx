@@ -104,6 +104,18 @@ describe('AgentSessionChat', () => {
     });
   });
 
+  it('sends initialMessage as a user_turn once the socket opens', async () => {
+    renderWithRouter(<AgentSessionChat convId="conv-1" initialMessage="Review my setup" />);
+    await waitFor(() => expect(lastWs).not.toBeNull());
+
+    act(() => lastWs!.simulateOpen());
+
+    expect(lastWs!.sentMessages).toEqual([
+      JSON.stringify({ type: 'user_turn', text: 'Review my setup' }),
+    ]);
+    expect(screen.getByText('Review my setup')).toBeInTheDocument();
+  });
+
   it('opens a websocket to /ws/orchestrator/:convId', async () => {
     renderWithRouter(<AgentSessionChat convId="conv-1" />);
     await waitFor(() => expect(lastWs).not.toBeNull());

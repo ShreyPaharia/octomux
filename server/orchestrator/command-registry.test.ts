@@ -19,6 +19,9 @@ import { COMMANDS, getCommandByAction, buildPolicySets } from './command-registr
 import type { OrchestratorAction } from './command-registry.js';
 import { ORCHESTRATOR_ACTIONS } from './actions.js';
 import { classify } from './policy.js';
+// Side-effect import: registers the built-in workflow kinds + loads presets,
+// which the create_schedule handler validates against (boot does this).
+import '../workflows/index.js';
 
 // ─── All OrchestratorActions have a CommandDef ────────────────────────────────
 
@@ -32,6 +35,8 @@ describe('COMMANDS coverage', () => {
       'close-task',
       'resume-task',
       'delete-task',
+      'create-schedule',
+      'start-loop',
     ];
 
     for (const action of allActions) {
@@ -98,7 +103,7 @@ describe('MCP-exposed commands (mcp:true)', () => {
     expect(unique.size).toBe(names.length);
   });
 
-  it('exposes exactly the 6 expected tool names (same as the pre-SHR-145 hand-written list)', () => {
+  it('exposes exactly the expected tool names', () => {
     const expectedNames = new Set([
       'create_task',
       'send_message',
@@ -106,6 +111,8 @@ describe('MCP-exposed commands (mcp:true)', () => {
       'add_agent',
       'close_task',
       'delete_task',
+      'create_schedule',
+      'start_loop',
     ]);
     const actualNames = new Set(mcpCommands.map((c) => c.name));
     expect(actualNames).toEqual(expectedNames);
@@ -172,8 +179,11 @@ describe('buildPolicySets', () => {
     expect([...AUTO_TOOLS].sort()).toEqual(
       [
         'get_agent_output',
+        'get_settings',
         'get_task',
         'get_task_output',
+        'list_schedule_kinds',
+        'list_schedules',
         'list_tasks',
         'monitor_status',
         'pull_linear_issue',
@@ -198,11 +208,13 @@ describe('buildPolicySets', () => {
     expect([...ASK_SUBCOMMANDS].sort()).toEqual(
       [
         'add-agent',
+        'create-schedule',
         'create-task',
         'request-review',
         'resume-task',
         'send-message',
         'set-status',
+        'start-loop',
       ].sort(),
     );
 
@@ -233,5 +245,69 @@ describe('buildPolicySets', () => {
     for (const [command, args, expected] of cases) {
       expect(classify(command, [...args]), `${command} ${JSON.stringify(args)}`).toBe(expected);
     }
+  });
+});
+
+// ─── Advisor write commands (create_schedule / start_loop) ────────────────────
+
+describe('create_schedule command', () => {
+  beforeEach(() => {
+    createTestDb();
+  });
+
+  it('is an ask-tier MCP tool', () => {
+    const cmd = getCommandByAction('create-schedule');
+    expect(cmd).toBeDefined();
+    expect(cmd!.name).toBe('create_schedule');
+    expect(cmd!.mcp).toBe(true);
+    expect(cmd!.tier).toBe('ask');
+  });
+
+  it('creates a schedule via the REST validation path (same as POST /api/schedules)', async () => {
+    const cmd = getCommandByAction('create-schedule')!;
+    const parsed = cmd.input.parse({
+      kind: 'custom',
+      repo_path: '/tmp/repo-a',
+      cron: '0 9 * * 1',
+      name: 'Morning triage',
+      prompt: 'Triage the failing builds.',
+    });
+    const { result, activity } = await cmd.handler(parsed, {});
+    const row = result as { id: string; kind: string; cron: string; repo_path: string };
+    expect(row.kind).toBe('custom');
+    expect(row.cron).toBe('0 9 * * 1');
+    expect(row.repo_path).toBe('/tmp/repo-a');
+    expect(activity).toContain(row.id);
+  });
+
+  it('rejects an invalid cron via the shared validator', async () => {
+    const cmd = getCommandByAction('create-schedule')!;
+    const parsed = cmd.input.parse({
+      kind: 'custom',
+      repo_path: '/tmp/repo-a',
+      cron: 'not a cron',
+      name: 'n',
+      prompt: 'p',
+    });
+    await expect(cmd.handler(parsed, {})).rejects.toThrow();
+  });
+});
+
+describe('start_loop command', () => {
+  it('is an ask-tier MCP tool with the loop input shape', () => {
+    const cmd = getCommandByAction('start-loop');
+    expect(cmd).toBeDefined();
+    expect(cmd!.name).toBe('start_loop');
+    expect(cmd!.mcp).toBe(true);
+    expect(cmd!.tier).toBe('ask');
+
+    const parsed = cmd!.input.parse({
+      task_id: 't1',
+      prompt: 'fix it',
+      verify: 'bun test',
+      max_iterations: 5,
+    });
+    expect(parsed).toMatchObject({ task_id: 't1', max_iterations: 5 });
+    expect(() => cmd!.input.parse({ task_id: 't1' })).toThrow();
   });
 });

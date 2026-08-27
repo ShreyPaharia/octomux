@@ -1,3 +1,4 @@
+import { AdvisorCard } from '@/components/AdvisorCard';
 import { Composer } from '@/components/Composer';
 import { CommandPalette } from '@/components/CommandPalette';
 import { SessionsInbox } from '@/components/SessionsInbox';
@@ -87,6 +88,7 @@ export default function HomePage() {
           <div id="sessions-inbox-slot" data-testid="sessions-inbox-slot">
             {isFirstRun ? <FirstRunEmptyState /> : <SessionsInbox />}
           </div>
+          <AdvisorCard />
         </div>
       </div>
       <div
