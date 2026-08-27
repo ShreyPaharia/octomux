@@ -18,6 +18,49 @@ export interface FrameWriter {
   dispose(): void;
 }
 
+// ─── xterm write flow control ────────────────────────────────────────────────
+// Per the xterm.js flow-control guide: unbounded term.write() during an output
+// flood overruns xterm's parse buffer and starves input handling. Count bytes
+// written vs processed — attaching a write-completion callback only every
+// FLOW_CALLBACK_BYTES, not per chunk — and tell the server to stop forwarding
+// pty output past the high watermark, resuming once xterm drains below the
+// low one. FLOW_HIGH_WATER > FLOW_CALLBACK_BYTES guarantees a callback is
+// always outstanding while paused, so the resume can never be missed.
+export const FLOW_CALLBACK_BYTES = 100_000;
+export const FLOW_HIGH_WATER = 400_000;
+export const FLOW_LOW_WATER = 100_000;
+
+export function makeFlowControlledWrite(
+  term: { write(data: string | Uint8Array, callback?: () => void): void },
+  sendFlow: (state: 'pause' | 'resume') => void,
+): (data: string | Uint8Array) => void {
+  let written = 0;
+  let processed = 0;
+  let sinceCallback = 0;
+  let pausedByFlow = false;
+  return (data) => {
+    written += data.length;
+    sinceCallback += data.length;
+    if (sinceCallback >= FLOW_CALLBACK_BYTES) {
+      sinceCallback = 0;
+      const mark = written;
+      term.write(data, () => {
+        processed = mark;
+        if (pausedByFlow && written - processed <= FLOW_LOW_WATER) {
+          pausedByFlow = false;
+          sendFlow('resume');
+        }
+      });
+    } else {
+      term.write(data);
+    }
+    if (!pausedByFlow && written - processed > FLOW_HIGH_WATER) {
+      pausedByFlow = true;
+      sendFlow('pause');
+    }
+  };
+}
+
 export function makeStreamFrameWriter(
   write: (data: string | Uint8Array) => void,
   onStreamError?: () => void,

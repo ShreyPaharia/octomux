@@ -7,7 +7,11 @@ import '@xterm/xterm/css/xterm.css';
 import { useMediaQuery } from '@/lib/use-media-query';
 import { installTerminalMobileTouch } from '@/lib/terminal-mobile-touch';
 import { installTerminalWheelCoalesce } from '@/lib/terminal-wheel-coalesce';
-import { supportsDeflate, makeStreamFrameWriter } from '@/lib/terminal-frames';
+import {
+  supportsDeflate,
+  makeStreamFrameWriter,
+  makeFlowControlledWrite,
+} from '@/lib/terminal-frames';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import {
@@ -124,15 +128,23 @@ export function TerminalView({
       // A stream decode error is invisible to the watchdog (raw frames keep
       // arriving, only decoding stopped), so it forces its own reconnect.
       entry.frames.dispose();
-      const frames = makeStreamFrameWriter(
-        (data) => entry.term.write(data),
-        () => {
-          if (entry.disposed || entry.ws !== ws) return;
-          ws.close();
-          if (entry.listener) connectWs(entry);
-          else destroyEntry(entry);
-        },
-      );
+      // Watermark flow control: during output floods, ask the server to stop
+      // forwarding pty output while xterm's write buffer is past the high
+      // watermark — otherwise unprocessed bytes pile up and starve input
+      // handling. Counters live in this per-socket closure (fresh per connect,
+      // matching the server's fresh flow state) and travel with the entry
+      // through park/adopt via entry.frames.
+      const write = makeFlowControlledWrite(entry.term, (state) => {
+        if (!entry.disposed && entry.ws === ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'flow', state }));
+        }
+      });
+      const frames = makeStreamFrameWriter(write, () => {
+        if (entry.disposed || entry.ws !== ws) return;
+        ws.close();
+        if (entry.listener) connectWs(entry);
+        else destroyEntry(entry);
+      });
       entry.frames = frames;
       entry.ws = ws;
       // Fresh socket = fresh server-side pty spawned at its default size, so

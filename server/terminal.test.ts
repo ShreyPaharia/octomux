@@ -374,6 +374,74 @@ describe('terminal WebSocket', () => {
     ws.close();
   });
 
+  it('stops forwarding frames on flow-pause and repaints on flow-resume', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+
+    // The client's xterm write buffer crossed its high watermark.
+    ws.send(JSON.stringify({ type: 'flow', state: 'pause' }));
+    await new Promise((r) => setTimeout(r, 50));
+    onDataCb('flood the client cannot keep up with');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(messages).toEqual([]);
+    // Flow control messages are not forwarded to the PTY as input
+    expect(mockPty.write).not.toHaveBeenCalled();
+
+    ws.send(JSON.stringify({ type: 'flow', state: 'resume' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Resume resyncs via a full repaint, exactly like tab-resume does.
+    expect(mockExecFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.arrayContaining(['refresh-client', '-t', '/dev/ttys001']),
+      expect.any(Function),
+    );
+
+    onDataCb('current screen');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messages).toEqual(['current screen']);
+
+    ws.close();
+  });
+
+  it('does not repaint on flow-resume while the tab is still hidden (paused)', async () => {
+    insertTask(db, { ...DEFAULTS.runningTask });
+    insertAgent(db);
+
+    const ws = await connectWs(`/ws/terminal/${DEFAULTS.task.id}/0`);
+    await waitForSetup();
+    const onDataCb = mockPty.onData.mock.calls[0][0];
+    const messages: string[] = [];
+    ws.on('message', (data) => messages.push(data.toString()));
+
+    ws.send(JSON.stringify({ type: 'pause' }));
+    ws.send(JSON.stringify({ type: 'flow', state: 'pause' }));
+    await new Promise((r) => setTimeout(r, 50));
+    mockExecFile.mockClear();
+
+    ws.send(JSON.stringify({ type: 'flow', state: 'resume' }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Still hidden — no repaint, and output stays discarded.
+    const repaint = mockExecFile.mock.calls.find((c: any[]) =>
+      (c[1] as string[])?.includes('refresh-client'),
+    );
+    expect(repaint).toBeUndefined();
+    onDataCb('still hidden');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(messages).toEqual([]);
+
+    ws.close();
+  });
+
   // ─── App-level deflate (Bun's ws shim can't negotiate permessage-deflate) ──
 
   it('deflates large frames as binary when the client opts in via ?deflate=1', async () => {

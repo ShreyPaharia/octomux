@@ -177,6 +177,14 @@ async function attachToTmuxSession(
   // Discarding (vs pty.pause()) means a stalled viewer can never backpressure
   // tmux and stall the agent's pane.
   let paused = false;
+  // Client xterm flow control ({type:'flow'}): the viewer's write buffer is
+  // past its high watermark, so stop forwarding until it drains. Same
+  // discard-and-repaint choice as the visibility pause above, and deliberately
+  // NOT buffering: buffering would replay the very flood that overwhelmed the
+  // client (and pendingOutput is unbounded) — the repaint on resume jumps the
+  // viewer straight to the current screen instead. Independent of `paused` so
+  // a flow resume can't unhide a hidden tab's stream (and vice versa).
+  let flowPaused = false;
 
   const forceRepaint = () => {
     compute
@@ -205,7 +213,7 @@ async function attachToTmuxSession(
   };
 
   pty.onData((data: string) => {
-    if (paused || ws.readyState !== WebSocket.OPEN) return;
+    if (paused || flowPaused || ws.readyState !== WebSocket.OPEN) return;
     pendingOutput += data;
     if (!outputScheduled) {
       outputScheduled = true;
@@ -235,7 +243,17 @@ async function attachToTmuxSession(
         if (parsed.type === 'resume') {
           if (paused) {
             paused = false;
-            forceRepaint();
+            if (!flowPaused) forceRepaint();
+          }
+          return;
+        }
+        if (parsed.type === 'flow') {
+          if (parsed.state === 'pause' && !flowPaused) {
+            flowPaused = true;
+            pendingOutput = '';
+          } else if (parsed.state === 'resume' && flowPaused) {
+            flowPaused = false;
+            if (!paused) forceRepaint();
           }
           return;
         }
