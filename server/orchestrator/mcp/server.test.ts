@@ -251,6 +251,55 @@ describe('createOctomuxMcpServer — onGatedInvoke wiring', () => {
     expect(result.content[0].text).toMatch(/could not create an approval card/);
   });
 
+  it.each(['create_schedule', 'start_loop'])(
+    '%s (gated COMMANDS write tool) hits onGatedInvoke before the action RPC',
+    async (toolName) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
+      );
+
+      const { createOctomuxMcpServer } = await import('./server.js');
+      const server = createOctomuxMcpServer();
+      const priv = server as unknown as {
+        _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
+      };
+      const tool = priv._registeredTools[toolName];
+      expect(tool).toBeDefined();
+
+      const result = (await tool.handler({}, {})) as {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+
+      // The distinctive gate message proves the approval card was attempted
+      // BEFORE callOrchestratorAction — an ungated tool would instead surface
+      // the action RPC's own failure text ("orchestrator action ... failed").
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/could not create an approval card/);
+    },
+  );
+
+  it('send_message (ungated COMMANDS write tool) skips the gate and goes straight to the RPC', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('ECONNREFUSED (no server listening in this test)')),
+    );
+
+    const { createOctomuxMcpServer } = await import('./server.js');
+    const server = createOctomuxMcpServer();
+    const priv = server as unknown as {
+      _registeredTools: Record<string, { handler: (input: unknown, extra: unknown) => unknown }>;
+    };
+    const result = (await priv._registeredTools['send_message'].handler(
+      { task_id: 't1', message: 'hi' },
+      {},
+    )) as { content: Array<{ type: string; text: string }>; isError?: boolean };
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).not.toMatch(/could not create an approval card/);
+  });
+
   it('close_task (auto) runs immediately — no approval card, no gate', async () => {
     // The counterpart to the test above, and the reason close was moved off
     // always-ask: an auto capability must reach its handler with no human in

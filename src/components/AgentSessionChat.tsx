@@ -57,7 +57,15 @@ export function AgentSessionChat({ convId, initialMessage }: AgentSessionChatPro
     orchestratorApi
       .listMessages(convId)
       .then((history) => {
-        if (!cancelled) setMessages(history.map(parseMessage));
+        if (cancelled) return;
+        // MERGE, don't replace: the WS may have already delivered messages
+        // (incl. the local echo of initialMessage) before this GET resolved —
+        // a replace would wipe them from view.
+        setMessages((prev) => {
+          const hist = history.map(parseMessage);
+          const seen = new Set(hist.map((m) => m.id));
+          return [...hist, ...prev.filter((m) => !seen.has(m.id))];
+        });
       })
       .catch(() => {
         // history is best-effort; the live socket carries new messages regardless

@@ -201,9 +201,15 @@ function waitForCardDecision(cardId: string): Promise<CardOutcome> {
  * server/orchestrator/mcp/server.ts. See the module doc for the fail-closed
  * contract and `projections/mcp.ts`'s doc on `onGatedInvoke` for the
  * undefined-vs-value return-value protocol.
+ *
+ * Accepts only the two Capability fields it reads (`id`, `mcp`) so the
+ * COMMANDS write loop (registerWriteTools in server.ts) can route a gated
+ * command through this SAME gate with a synthetic id — the card endpoint,
+ * decision path, and rule promotion are all keyed on the id string, not on a
+ * registry row.
  */
 export async function onGatedInvoke(
-  cap: Capability,
+  cap: Pick<Capability, 'id' | 'mcp'>,
   tier: PolicyTier,
   input: unknown,
 ): Promise<unknown> {

@@ -134,6 +134,15 @@ export interface CommandDef<S extends z.ZodTypeAny = z.ZodTypeAny> {
   /** PreToolUse gate tier for this command (octomux CLI subcommand + MCP write tool). */
   tier: PolicyTier;
   /**
+   * When set, the MCP write tool blocks on a human approval card FIRST — via
+   * the same `onGatedInvoke` gate the capability-registry tools use (this
+   * string is the card's capability id) — and only RPCs the action after
+   * approval. The legacy conductor writes (send_message, add_agent) are
+   * deliberately ungated (pre-gate behaviour); anything that can reach a
+   * shell or create standing automation must set this.
+   */
+  gateCapabilityId?: string;
+  /**
    * Execute the action. Receives the parsed input and the server-injected context.
    * Returns the result and optionally the activity receipt text.
    */
@@ -310,13 +319,14 @@ export const COMMANDS: CommandDef[] = [
     name: 'create_schedule',
     action: 'create-schedule',
     summary:
-      'Create a cron schedule (kind + cron + repo). Runs immediately (no approval card), so ' +
-      'ALWAYS get explicit user confirmation in chat first. Use list_schedule_kinds to pick a ' +
+      'Create a cron schedule (kind + cron + repo). Calling this raises an approval card the ' +
+      'user must confirm before the schedule is created. Use list_schedule_kinds to pick a ' +
       'kind; kinds with promptRequired:true need an explicit prompt + name. Validated exactly ' +
       'like POST /api/schedules. Returns the created schedule row.',
     input: createScheduleInputSchema,
     mcp: true,
     tier: 'ask',
+    gateCapabilityId: 'schedule.create',
     async handler(parsed, _ctx) {
       const row = handleCreateSchedule({
         kind: parsed.kind,
@@ -341,11 +351,12 @@ export const COMMANDS: CommandDef[] = [
     summary:
       'Start a fresh-context Ralph loop against an EXISTING running task: the agent is respawned ' +
       'each iteration until the verify command exits 0 (or max_iterations / budget / stall). ' +
-      'Runs immediately (no approval card), so ALWAYS get explicit user confirmation in chat ' +
-      'first. Returns the run id.',
+      'verify runs as a shell command on the host, so calling this raises an approval card the ' +
+      'user must confirm before the loop starts. Returns the run id.',
     input: startLoopInputSchema,
     mcp: true,
     tier: 'ask',
+    gateCapabilityId: 'loop.start',
     async handler(parsed, _ctx) {
       const runId = await createLoopRun({
         workflowKind: 'loop',
