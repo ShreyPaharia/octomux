@@ -10,6 +10,7 @@ import {
   getTerminalCacheSize,
   setTerminalCacheSize,
 } from '@/lib/terminal-cache-settings';
+import { getLocalEchoEnabled, setLocalEchoEnabled } from '@/lib/terminal-typeahead';
 import { ReviewsSection } from '@/components/settings/LearningsPanel';
 import { KindsSection } from '@/components/kinds/KindsSection';
 import { showToast } from '@/components/CustomToast';
@@ -789,6 +790,7 @@ function GeneralSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => 
 function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) => void }) {
   const [cacheSize, setCacheSize] = useState<number>(() => getTerminalCacheSize());
   const [buffer, setBuffer] = useState<string>(() => String(getTerminalCacheSize()));
+  const [localEcho, setLocalEcho] = useState(getLocalEchoEnabled);
 
   const handleCommit = useCallback(() => {
     const parsed = Number.parseInt(buffer, 10);
@@ -807,7 +809,6 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
       <SettingRow
         label="Terminal cache size"
         description={`Number of agent terminals kept mounted (LRU). Switching to a cached tab avoids xterm + WebSocket rebuild. Min ${TERMINAL_CACHE_MIN}, max ${TERMINAL_CACHE_MAX}, default ${TERMINAL_CACHE_DEFAULT}.`}
-        lastRow
       >
         <div className="flex items-center gap-2">
           <GlassInput
@@ -827,6 +828,19 @@ function AdvancedSection({ scrollRef }: { scrollRef: (el: HTMLElement | null) =>
             data-testid="terminal-cache-size-input"
           />
         </div>
+      </SettingRow>
+      <SettingRow
+        label="Terminal local echo"
+        description="Render keystrokes locally (dimmed) before the server round-trip confirms them — cuts perceived typing latency on remote links. Shell prompts only: full-screen TUIs like vim or the Claude Code UI use the alternate screen and are excluded automatically. Kicks in only when measured latency exceeds 30ms."
+        lastRow
+      >
+        <Switch
+          checked={localEcho}
+          onChange={(v) => {
+            setLocalEcho(v);
+            setLocalEchoEnabled(v);
+          }}
+        />
       </SettingRow>
     </SectionCard>
   );

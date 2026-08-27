@@ -12,6 +12,7 @@ import {
   makeStreamFrameWriter,
   makeFlowControlledWrite,
 } from '@/lib/terminal-frames';
+import { createTerminalTypeahead, getLocalEchoEnabled } from '@/lib/terminal-typeahead';
 import { installTerminalVisualViewport } from '@/lib/terminal-visual-viewport';
 import { isAndroid, attachAndroidImeBridge } from '@/lib/terminal-android-ime';
 import {
@@ -139,12 +140,22 @@ export function TerminalView({
           ws.send(JSON.stringify({ type: 'flow', state }));
         }
       });
-      const frames = makeStreamFrameWriter(write, () => {
-        if (entry.disposed || entry.ws !== ws) return;
-        ws.close();
-        if (entry.listener) connectWs(entry);
-        else destroyEntry(entry);
-      });
+      const frames = makeStreamFrameWriter(
+        (data) => {
+          // The typeahead's rewind/undo prefix must land before the data it
+          // reconciles against; a handful of control bytes, so it skips flow
+          // accounting.
+          const prefix = entry.typeahead?.reconcile(data);
+          if (prefix) entry.term.write(prefix);
+          write(data);
+        },
+        () => {
+          if (entry.disposed || entry.ws !== ws) return;
+          ws.close();
+          if (entry.listener) connectWs(entry);
+          else destroyEntry(entry);
+        },
+      );
       entry.frames = frames;
       entry.ws = ws;
       // Fresh socket = fresh server-side pty spawned at its default size, so
@@ -186,6 +197,23 @@ export function TerminalView({
         const isEmptyPong = event.data instanceof ArrayBuffer && event.data.byteLength === 0;
         if (!isEmptyPong) entry.hasData = true;
         entry.lastMessageAt = Date.now();
+        // Latency sampling for the typeahead gate. Only an empty pong closes
+        // a sample — data frames aren't request/response. Seed one ping on the
+        // first data frame (not on open: messages sent before the server's
+        // attach completes are queued behind tmux setup, which would measure
+        // setup time instead of RTT); the idle watchdog refreshes it after.
+        if (isEmptyPong && entry.pingSentAt !== null) {
+          entry.latencyMs = Date.now() - entry.pingSentAt;
+          entry.pingSentAt = null;
+        } else if (
+          entry.typeahead &&
+          entry.latencyMs === null &&
+          entry.pingSentAt === null &&
+          getLocalEchoEnabled()
+        ) {
+          entry.pingSentAt = Date.now();
+          ws.send(JSON.stringify({ type: 'ping' }));
+        }
         frames.onFrame(event.data);
         // First chunk means the terminal has real content — the mounted owner
         // drops its placeholder. A parked entry just keeps its buffer warm.
@@ -362,12 +390,24 @@ export function TerminalView({
       frames: { onFrame() {}, dispose() {} },
       lastSize: null,
       lastMessageAt: Date.now(),
+      latencyMs: null,
+      pingSentAt: null,
+      typeahead: null,
       hasData: false,
       listener,
       parkTimer: null,
       disposed: false,
       disposers,
     };
+
+    // Local-echo typeahead rides the entry (one per terminal lifetime, like
+    // the input handler below). Inert unless the setting is on, measured
+    // latency exceeds the gate, and the normal screen buffer is active.
+    if (!readOnly) {
+      const typeahead = createTerminalTypeahead(term, () => entry.latencyMs);
+      entry.typeahead = typeahead;
+      disposers.push(() => typeahead.dispose());
+    }
 
     if (!readOnly && isAndroid()) {
       disposers.push(
@@ -394,6 +434,7 @@ export function TerminalView({
       const forward = (data: string) => {
         if (entry.ws?.readyState === WebSocket.OPEN) {
           entry.ws.send(data);
+          entry.typeahead?.onInput(data);
         }
         entry.listener?.onUserInput();
       };
@@ -477,6 +518,7 @@ export function TerminalView({
     if (!entry || !ws || ws.readyState !== WebSocket.OPEN) return;
     if (Date.now() - entry.lastMessageAt < WATCHDOG_IDLE_MS) return;
     const sentAt = Date.now();
+    entry.pingSentAt = sentAt; // also feeds the typeahead latency estimate
     ws.send(JSON.stringify({ type: 'ping' }));
     setTimeout(() => {
       if (unmounted.current || entryRef.current !== entry || entry.ws !== ws) return;

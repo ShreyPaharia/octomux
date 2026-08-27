@@ -13,6 +13,7 @@
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import type { FrameWriter } from './terminal-frames';
+import type { TerminalTypeahead } from './terminal-typeahead';
 
 export interface TerminalPoolListener {
   /** A ws frame arrived (clears the connecting placeholder). */
@@ -34,6 +35,12 @@ export interface TerminalPoolEntry {
   /** Last cols/rows actually sent to the server — resize dedupe. */
   lastSize: { cols: number; rows: number } | null;
   lastMessageAt: number;
+  /** Latest measured ws round-trip (ping → empty pong); gates typeahead. */
+  latencyMs: number | null;
+  /** In-flight ping send time — the next empty pong closes the sample. */
+  pingSentAt: number | null;
+  /** Local-echo predictor (null for readOnly panes); inert until enabled. */
+  typeahead: TerminalTypeahead | null;
   /** First frame arrived — the buffer has content worth keeping. */
   hasData: boolean;
   /** The mounted TerminalView currently owning this entry; null while parked. */
