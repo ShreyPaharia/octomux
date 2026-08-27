@@ -75,14 +75,19 @@ describe('terminal typeahead', () => {
     expect(ta.reconcile('anything')).toBe('');
   });
 
-  it('keeps an unconfirmed tail pending on partial confirmation', () => {
-    const term = makeTerm();
+  it('undoes everything on partial confirmation (echo arriving one char per frame)', () => {
+    // Regression: a partial-confirm rewind desyncs the cursor — after the
+    // echo writes 'a' the cursor sits BETWEEN the confirmed cell and the
+    // remaining dim 'b', so a later rewind-by-pending would paint "bb" and
+    // leave the client cursor one column off the server's, permanently.
+    // Partial confirm therefore takes the mismatch path: full undo, real
+    // output stands, the follow-up echoed char passes through untouched.
+    const term = makeTerm({ cellChar: '' });
     const ta = createTerminalTypeahead(term, slowLink, enabled);
     ta.onInput('a');
     ta.onInput('b');
-    expect(ta.reconcile('a')).toBe('\x1b[2D');
-    expect(ta.reconcile('b')).toBe('\x1b[1D');
-    expect(ta.reconcile('x')).toBe('');
+    expect(ta.reconcile('a')).toBe('\x1b[2D  \x1b[2D');
+    expect(ta.reconcile('b')).toBe('');
   });
 
   it('drops all predictions and restores the screen on mismatch', () => {

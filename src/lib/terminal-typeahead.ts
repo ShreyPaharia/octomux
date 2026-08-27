@@ -136,16 +136,19 @@ export function createTerminalTypeahead(
       while (k < pending.length && k < data.length && byteAt(k) === pending[k].ch.charCodeAt(0)) {
         k++;
       }
-      // Confirmed prefix (output is a prefix of the predictions, or covers
-      // them all): rewind over every predicted cell so the echo repaints them
-      // with real attributes; an unconfirmed tail stays dimmed and pending.
-      if (k === pending.length || k === data.length) {
-        const rewind = `\x1b[${pending.length}D`;
-        pending = pending.slice(k);
-        if (pending.length > 0) armTimer();
-        return rewind;
+      // FULL confirmation only: rewind over every predicted cell so the echo
+      // repaints them with real attributes. A partial match gets no fast path:
+      // once the echo wrote its k chars the cursor would sit between the
+      // confirmed cells and the remaining dim predictions — a state neither
+      // the plain cursor-left rewind nor anchorX can represent, and at real
+      // latencies echoes arriving one char per frame make that the common
+      // case. Anything short of a full confirm is treated as a mismatch:
+      // restore the screen, let real output stand, and the next echoed char
+      // passes through untouched.
+      if (k === pending.length) {
+        pending = [];
+        return `\x1b[${k}D`;
       }
-      // Mismatch — restore the screen and let real output stand.
       return undoAll();
     },
 

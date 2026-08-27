@@ -194,7 +194,11 @@ export function TerminalView({
         // socket's liveness pong (or paint into the new stream).
         if (entry.disposed || entry.ws !== ws) return;
         // Empty frames are watchdog pongs — they prove liveness, not content.
-        const isEmptyPong = event.data instanceof ArrayBuffer && event.data.byteLength === 0;
+        // The server sends the pong as ws.send(''), which the browser delivers
+        // as an empty STRING; the ArrayBuffer shape is kept for binary-mode
+        // servers. Both must skip hasData and close the latency sample.
+        const isEmptyPong =
+          event.data === '' || (event.data instanceof ArrayBuffer && event.data.byteLength === 0);
         if (!isEmptyPong) entry.hasData = true;
         entry.lastMessageAt = Date.now();
         // Latency sampling for the typeahead gate. Only an empty pong closes

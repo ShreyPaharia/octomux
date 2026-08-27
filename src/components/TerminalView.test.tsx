@@ -20,6 +20,16 @@ class MockTerminal {
   cols = 80;
   rows = 24;
   disposed = false;
+  // Minimal buffer surface for the typeahead (normal screen, cursor at 0,0).
+  buffer = {
+    active: {
+      type: 'normal',
+      cursorX: 0,
+      cursorY: 0,
+      baseY: 0,
+      getLine: () => undefined,
+    },
+  };
   writes: string[] = [];
   scrollLineCalls: number[] = [];
   scrollToBottomCalls = 0;
@@ -125,6 +135,7 @@ let OriginalResizeObserver: typeof ResizeObserver;
 
 beforeEach(() => {
   resetTerminalPool();
+  localStorage.removeItem('octomux-terminal-local-echo');
   useMediaQueryMock.mockReturnValue(false);
   terminalInstances.length = 0;
   MockWebSocket.instances = [];
@@ -515,6 +526,46 @@ describe('TerminalView', () => {
     // TTL fired: socket closed, xterm disposed — nothing left to adopt.
     expect(ws.readyState).toBe(MockWebSocket.CLOSING);
     expect(terminalInstances[0].disposed).toBe(true);
+  });
+
+  it('treats an empty-string frame as a pong: not data worth parking', async () => {
+    // The server's watchdog pong is ws.send('') — an empty TEXT frame, not an
+    // empty ArrayBuffer. It proves liveness, not content.
+    const TerminalView = await importTerminalView();
+    const { unmount } = render(<TerminalView taskId="task-A" windowIndex={0} />);
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+    act(() => ws.onmessage?.({ data: '' } as MessageEvent));
+    unmount();
+
+    // No real content arrived, so the entry is destroyed, not parked.
+    expect(ws.readyState).toBe(MockWebSocket.CLOSING);
+    expect(terminalInstances[0].disposed).toBe(true);
+  });
+
+  it('measures latency from an empty-string pong and activates the typeahead', async () => {
+    vi.useFakeTimers();
+    localStorage.setItem('octomux-terminal-local-echo', 'true');
+    const TerminalView = await importTerminalView();
+    render(<TerminalView taskId="task-A" windowIndex={0} />);
+    const ws = MockWebSocket.instances[0];
+    act(() => ws._open());
+
+    // First data frame seeds one latency ping.
+    act(() => ws.onmessage?.({ data: 'hello' } as MessageEvent));
+    expect(ws.sent).toContain('{"type":"ping"}');
+
+    // The pong comes back 100ms later as an empty TEXT frame — that must
+    // close the sample (it used to require an empty ArrayBuffer, leaving
+    // latencyMs null forever and the typeahead permanently inert).
+    await act(async () => {
+      vi.setSystemTime(Date.now() + 100);
+    });
+    act(() => ws.onmessage?.({ data: '' } as MessageEvent));
+
+    // 100ms is past the 30ms gate → a keystroke now renders a dim prediction.
+    act(() => lastOnDataCb.current?.('a'));
+    expect(terminalInstances[0].writes).toContain('\x1b[2ma\x1b[22m');
   });
 
   it('does not park a terminal that never received data', async () => {
