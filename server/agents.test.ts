@@ -8,9 +8,13 @@ describe('agents', () => {
       const agents = await listAgents();
       const names = agents.map((a) => a.name);
 
-      expect(names).toEqual(expect.arrayContaining(['orchestrator', 'planner', 'reviewer']));
+      expect(names).toEqual(
+        expect.arrayContaining(['orchestrator', 'planner', 'reviewer', 'advisor']),
+      );
       const orchestrator = agents.find((a) => a.name === 'orchestrator');
       expect(orchestrator?.description.length).toBeGreaterThan(0);
+      const advisor = agents.find((a) => a.name === 'advisor');
+      expect(advisor?.description.length).toBeGreaterThan(0);
     });
   });
 

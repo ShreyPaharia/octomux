@@ -25,7 +25,6 @@ import {
   stopConversation,
   isConversationSessionAlive,
 } from '../orchestrator/runner.js';
-import { ensureAdvisorAgent } from '../orchestrator/advisor.js';
 import { badRequest, notFound } from '../services/errors.js';
 import { childLogger } from '../logger.js';
 
@@ -197,11 +196,5 @@ router.post('/api/agents/:id/session', async (req: Request, res: Response) => {
   const agent = getAgent(id);
   if (!agent) throw notFound('Agent not found');
 
-  res.status(200).json(await ensureAgentSession(agent));
-});
-
-// POST /api/advisor/session — find-or-create the Advisor agent, ensure its session
-router.post('/api/advisor/session', async (_req: Request, res: Response) => {
-  const agent = ensureAdvisorAgent();
   res.status(200).json(await ensureAgentSession(agent));
 });

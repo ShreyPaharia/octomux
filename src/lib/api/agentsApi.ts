@@ -62,6 +62,4 @@ export const agentsApi = {
     }),
   remove: (id: string) => request<void>(`/agents/${id}`, { method: 'DELETE' }),
   ensureSession: (id: string) => request<AgentSession>(`/agents/${id}/session`, { method: 'POST' }),
-  /** Find-or-create the Advisor agent and ensure its persistent session. */
-  advisorSession: () => request<AgentSession>('/advisor/session', { method: 'POST' }),
 };
