@@ -86,6 +86,17 @@ export function registerRouteExemptions(): void {
   });
 
   exemptRoute({
+    method: 'post',
+    path: '/api/tasks/:id/pastes',
+    reason: 'binary',
+    justification:
+      'Request body is the raw bytes of an image pasted into the web terminal (Content-Type ' +
+      'image/png|jpeg|gif|webp), written into the task worktree so the TUI can read it from ' +
+      'disk. A binary blob has no JSON capability-input shape, and the flow only exists for ' +
+      'the browser terminal — there is no CLI/MCP analogue.',
+  });
+
+  exemptRoute({
     method: 'get',
     path: '/login',
     reason: 'binary',

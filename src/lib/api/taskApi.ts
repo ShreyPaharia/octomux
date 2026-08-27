@@ -218,6 +218,13 @@ export const taskApi = {
   updateTask: (id: string, data: UpdateTaskRequest) =>
     request<Task>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   startTask: (id: string) => request<Task>(`/tasks/${id}/start`, { method: 'POST' }),
+  /** Upload an image pasted into the terminal; returns its compute-side path. */
+  uploadTerminalPaste: (id: string, blob: Blob) =>
+    request<{ path: string }>(`/tasks/${id}/pastes`, {
+      method: 'POST',
+      body: blob,
+      headers: { 'Content-Type': blob.type },
+    }),
   deleteTask: (id: string, opts?: { purge?: boolean }) =>
     request<void>(opts?.purge ? `/tasks/${id}?purge=true` : `/tasks/${id}`, { method: 'DELETE' }),
   getTaskDiffSummary: (id: string, range?: DiffRange) => {

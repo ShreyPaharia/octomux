@@ -23,6 +23,8 @@ import {
   type TerminalPoolListener,
 } from '@/lib/terminal-pool';
 import { CloudOffIcon } from './icons';
+import { taskApi } from '@/lib/api';
+import { toast } from 'sonner';
 
 interface TerminalViewProps {
   taskId?: string;
@@ -384,7 +386,6 @@ export function TerminalView({
     if (!readOnly) {
       disposers.push(installTerminalWheelCoalesce(hostEl, term));
     }
-
     const entry: TerminalPoolEntry = {
       key,
       hostEl,
@@ -411,6 +412,42 @@ export function TerminalView({
       const typeahead = createTerminalTypeahead(term, () => entry.latencyMs);
       entry.typeahead = typeahead;
       disposers.push(() => typeahead.dispose());
+    }
+
+    // Image paste: the TUI (Claude Code) reads the clipboard of the machine it
+    // runs on, which against a remote server is not the browser's — so upload
+    // the blob and type the returned worktree path into the pty instead.
+    // Text-only pastes fall through untouched to xterm's own paste path.
+    // Rides `disposers` (one listener per terminal lifetime, like the input
+    // handler), and captures taskId safely: it is baked into the pool key via
+    // the ws URL, so an adopted entry always belongs to the same task.
+    if (!readOnly && taskId) {
+      const pasteTaskId = taskId;
+      const onPaste = (e: Event) => {
+        const items = (e as ClipboardEvent).clipboardData?.items;
+        const image = items && Array.from(items).find((i) => i.type.startsWith('image/'));
+        if (!image) return;
+        // Capture phase + stopPropagation: keep the event from reaching
+        // xterm's textarea handler, which would paste the (empty) text flavor.
+        e.preventDefault();
+        e.stopPropagation();
+        const file = image.getAsFile();
+        if (!file) return;
+        taskApi
+          .uploadTerminalPaste(pasteTaskId, file)
+          .then(({ path }) => {
+            if (entry.disposed || entry.ws?.readyState !== WebSocket.OPEN) return;
+            // Space-wrapped (and quoted if the worktree path has spaces) so
+            // the TUI receives a clean standalone path token.
+            entry.ws.send(/\s/.test(path) ? ` "${path}" ` : ` ${path} `);
+            entry.listener?.onUserInput();
+          })
+          .catch((err) => {
+            toast.error(`Image paste failed: ${(err as Error).message}`);
+          });
+      };
+      hostEl.addEventListener('paste', onPaste, true);
+      disposers.push(() => hostEl.removeEventListener('paste', onPaste, true));
     }
 
     if (!readOnly && isAndroid()) {
@@ -494,6 +531,7 @@ export function TerminalView({
     scrollback,
     isMobile,
     scrollCursorIntoView,
+    taskId,
   ]);
 
   const handleRetryNow = useCallback(() => {

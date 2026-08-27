@@ -15,7 +15,8 @@ import {
   isDependencyUnmet,
 } from '../repositories/index.js';
 
-import { badRequest, conflict } from '../services/errors.js';
+import { badRequest, conflict, ServiceError } from '../services/errors.js';
+import { sessionFor } from '../compute/index.js';
 import {
   loadTaskOrFail,
   fetchTaskBundle,
@@ -140,6 +141,62 @@ router.patch('/api/tasks/:id', async (req: Request, res: Response) => {
   broadcast({ type: 'task:updated', payload: { taskId: task.id } });
   res.json(updated);
 });
+
+// Image pasted into the web terminal. The browser's clipboard is unreachable
+// from a remote server, so the SPA uploads the bytes here; we drop them in the
+// task's worktree (via its compute session, so remote compute works too) and
+// return the compute-side path for the client to type into the pty.
+const PASTE_MIME_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+const parsePasteBody = express.raw({ type: Object.keys(PASTE_MIME_EXT), limit: 10 * 1024 * 1024 });
+
+router.post(
+  '/api/tasks/:id/pastes',
+  (req: Request, res: Response, next) => {
+    parsePasteBody(req, res, (err?: unknown) => {
+      // Surface body-parser's PayloadTooLargeError as a clean 413 instead of
+      // letting it fall through to the generic-500 branch of errorMiddleware.
+      if (err) {
+        // body-parser stops reading at the limit; drain the rest or the
+        // client blocks on backpressure and never sees the 413.
+        req.resume();
+        return next(new ServiceError('Paste too large (max 10MB)', 413));
+      }
+      next();
+    });
+  },
+  async (req: Request, res: Response) => {
+    const task = loadTaskOrFail(req);
+    const mime = (req.headers['content-type'] ?? '').split(';')[0].trim();
+    const ext = PASTE_MIME_EXT[mime];
+    // A non-image Content-Type also skips express.raw above, so req.body is
+    // not a Buffer in that case — both checks reject together here.
+    if (!ext || !Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw badRequest(`Pastes must be a non-empty ${Object.keys(PASTE_MIME_EXT).join('/')} body`);
+    }
+    if (!task.worktree) {
+      throw badRequest('Task has no worktree to paste into');
+    }
+    const compute = await sessionFor(task);
+    const dir = `${task.worktree}/.octomux/pastes`;
+    const dest = `${dir}/${Date.now()}.${ext}`;
+    await compute.files.mkdirp(dir);
+    // ComputeFiles.write is string-only; decode base64 on the compute side so
+    // the bytes survive an exec-backed remote provider unmangled.
+    await compute.exec(['sh', '-c', 'base64 -d > "$0"', dest], {
+      input: req.body.toString('base64'),
+    });
+    apiLogger.info(
+      { task_id: task.id, operation: 'terminal_paste', mime, bytes: req.body.length, path: dest },
+      'stored pasted image in worktree',
+    );
+    res.status(201).json({ path: dest });
+  },
+);
 
 // Start a draft task
 router.post('/api/tasks/:id/restore', (req: Request, res: Response) => {

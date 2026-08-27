@@ -11,6 +11,19 @@ vi.mock('@/lib/terminal-visual-viewport', () => ({
   installTerminalVisualViewport: () => () => {},
 }));
 
+// TerminalView only touches taskApi.uploadTerminalPaste; mocking the module
+// keeps the real request core (and its fetch) out of the isolate.
+const uploadPasteMock = vi.fn(async (_id: string, _blob: Blob) => ({
+  path: '/wt/.octomux/pastes/1.png',
+}));
+vi.mock('@/lib/api', () => ({
+  taskApi: { uploadTerminalPaste: (id: string, blob: Blob) => uploadPasteMock(id, blob) },
+}));
+const toastErrorMock = vi.fn();
+vi.mock('sonner', () => ({
+  toast: { error: (...args: unknown[]) => toastErrorMock(...args) },
+}));
+
 // ─── Mock xterm & its addons ─────────────────────────────────────────────────
 // Captures the last onData callback so tests can simulate keystrokes.
 const lastOnDataCb = { current: null as ((data: string) => void) | null };
@@ -581,5 +594,119 @@ describe('TerminalView', () => {
 
     render(<TerminalView taskId="task-A" windowIndex={0} />);
     expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  describe('image paste', () => {
+    // The listener is attached to the entry's hostEl (the div TerminalView
+    // appends into its container), capture phase.
+    const hostEl = () =>
+      document.querySelector('.octomux-terminal-host')!.firstElementChild as HTMLElement;
+
+    function pasteEvent(items: Array<{ type: string; file?: File | null }>) {
+      const e = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'clipboardData', {
+        value: {
+          items: items.map((i) => ({ type: i.type, getAsFile: () => i.file ?? null })),
+        },
+      });
+      return e;
+    }
+
+    const pngFile = () => new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' });
+
+    beforeEach(() => {
+      uploadPasteMock.mockClear();
+      uploadPasteMock.mockImplementation(async () => ({ path: '/wt/.octomux/pastes/1.png' }));
+      toastErrorMock.mockClear();
+    });
+
+    it('uploads the image and types the returned path into the pty', async () => {
+      const TerminalView = await importTerminalView();
+      render(<TerminalView taskId="task-A" windowIndex={0} />);
+      const ws = MockWebSocket.instances[0];
+      act(() => ws._open());
+
+      const file = pngFile();
+      const evt = pasteEvent([{ type: 'image/png', file }]);
+      await act(async () => {
+        hostEl().dispatchEvent(evt);
+      });
+
+      expect(uploadPasteMock).toHaveBeenCalledWith('task-A', file);
+      // Space-wrapped so the TUI receives a clean standalone path token.
+      expect(ws.sent).toContain(' /wt/.octomux/pastes/1.png ');
+      // xterm's own paste path must not also run.
+      expect(evt.defaultPrevented).toBe(true);
+    });
+
+    it('quotes a returned path containing spaces', async () => {
+      uploadPasteMock.mockImplementation(async () => ({ path: '/w t/.octomux/pastes/1.png' }));
+      const TerminalView = await importTerminalView();
+      render(<TerminalView taskId="task-A" windowIndex={0} />);
+      const ws = MockWebSocket.instances[0];
+      act(() => ws._open());
+
+      await act(async () => {
+        hostEl().dispatchEvent(pasteEvent([{ type: 'image/png', file: pngFile() }]));
+      });
+
+      expect(ws.sent).toContain(' "/w t/.octomux/pastes/1.png" ');
+    });
+
+    it('leaves text-only pastes to xterm', async () => {
+      const TerminalView = await importTerminalView();
+      render(<TerminalView taskId="task-A" windowIndex={0} />);
+      act(() => MockWebSocket.instances[0]._open());
+
+      const evt = pasteEvent([{ type: 'text/plain' }]);
+      await act(async () => {
+        hostEl().dispatchEvent(evt);
+      });
+
+      expect(uploadPasteMock).not.toHaveBeenCalled();
+      expect(evt.defaultPrevented).toBe(false);
+    });
+
+    it('is a no-op on readOnly terminals', async () => {
+      const TerminalView = await importTerminalView();
+      render(<TerminalView taskId="task-A" windowIndex={0} readOnly />);
+      act(() => MockWebSocket.instances[0]._open());
+
+      await act(async () => {
+        hostEl().dispatchEvent(pasteEvent([{ type: 'image/png', file: pngFile() }]));
+      });
+
+      expect(uploadPasteMock).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op without a taskId (chat/orchestrator terminals)', async () => {
+      const TerminalView = await importTerminalView();
+      render(<TerminalView wsUrl="/ws/terminal/chat/c1" />);
+      act(() => MockWebSocket.instances[0]._open());
+
+      await act(async () => {
+        hostEl().dispatchEvent(pasteEvent([{ type: 'image/png', file: pngFile() }]));
+      });
+
+      expect(uploadPasteMock).not.toHaveBeenCalled();
+    });
+
+    it('shows a toast when the upload fails and sends nothing', async () => {
+      uploadPasteMock.mockImplementation(async () => {
+        throw new Error('boom');
+      });
+      const TerminalView = await importTerminalView();
+      render(<TerminalView taskId="task-A" windowIndex={0} />);
+      const ws = MockWebSocket.instances[0];
+      act(() => ws._open());
+      const sentBefore = ws.sent.length;
+
+      await act(async () => {
+        hostEl().dispatchEvent(pasteEvent([{ type: 'image/png', file: pngFile() }]));
+      });
+
+      expect(toastErrorMock).toHaveBeenCalledWith('Image paste failed: boom');
+      expect(ws.sent.length).toBe(sentBefore);
+    });
   });
 });
