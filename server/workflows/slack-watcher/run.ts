@@ -24,6 +24,10 @@ export interface RunSlackWatcherInput {
   digestUserId: string;
   lookbackMinutes: number;
   digestChannel: string;
+  /** Comma-separated absolute repo paths the watcher may create draft tasks in. */
+  workRepos?: string;
+  /** Channel announcing work the watcher triggered. Empty (or no workRepos) = feature off. */
+  workChannel?: string;
   trigger?: 'cron' | 'manual';
   model?: string | null;
   timeoutMs?: number | null;
@@ -38,6 +42,7 @@ export interface SlackWatcherItem {
   permalink?: string;
   replyChannel?: string;
   replyTs?: string;
+  taskId?: string;
 }
 
 export interface SlackWatcherResult {
@@ -85,6 +90,8 @@ export async function runSlackWatcher(
     digestUserId: input.digestUserId,
     lookbackMinutes: input.lookbackMinutes,
     digestChannel: input.digestChannel,
+    workRepos: input.workRepos ?? '',
+    workChannel: input.workChannel ?? '',
     // previousItems is pre-stringified JSON — passed as a string scalar so it
     // lands verbatim (interpolatePrompt calls String() on scalars).
     previousItems: previousItemsJson(input.scheduleId),
