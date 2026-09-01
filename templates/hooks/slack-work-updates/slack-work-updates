@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Posts a board move to a Slack channel for any task carrying a `slack` external ref —
+# i.e. one linked back to the thread that asked for it (slack-watcher step 3c, or
+# `octomux task-ref-add <id> slack …` by hand). Tasks with no slack ref exit 0 before
+# any config or token is required, so this is safe to install globally.
+#
+# Needs: the channel id in slack-work-updates.config.json next to this script, and
+# OCTOMUX_GATEWAY_SLACK_BOT_TOKEN in the server's env (the bot must be in the channel).
+set -uo pipefail
+
+ENVELOPE="$(cat)"
+[ -n "${OCTOMUX_TASK_ID:-}" ] || exit 0
+
+# Both OCTOMUX_PORT and PORT are honoured by the server (server/index.ts) and only one
+# of them is set depending on how it was launched; guessing wrong here would read a
+# different instance's task data.
+API="http://127.0.0.1:${OCTOMUX_PORT:-${PORT:-7777}}"
+
+# The ref is the gate: no slack ref means this task did not come from a thread. It is
+# not on the envelope (shell hooks get the raw one; refs are hydrated only for
+# integration providers), so read it back over the API. Gate on the ref's existence,
+# not its url — `task-ref-add --url` is optional.
+REF_JSON="$(curl -sf --max-time 5 "$API/api/tasks/$OCTOMUX_TASK_ID/refs" \
+  | jq -c 'map(select(.integration == "slack")) | .[0] // empty')"
+[ -n "$REF_JSON" ] || exit 0
+
+CFG="$OCTOMUX_HOOK_DIR/slack-work-updates.config.json"
+[ -f "$CFG" ] || { echo "missing $CFG" >&2; exit 1; }
+CHANNEL="$(jq -r '.channel // empty' "$CFG")"
+[ -n "$CHANNEL" ] && [ "$CHANNEL" != "REPLACE_ME" ] || { echo "no channel configured" >&2; exit 1; }
+[ -n "${OCTOMUX_GATEWAY_SLACK_BOT_TOKEN:-}" ] || { echo "no bot token in env" >&2; exit 1; }
+
+TITLE="$(curl -sf --max-time 5 "$API/api/tasks/$OCTOMUX_TASK_ID" | jq -r '.title // empty')"
+[ -n "$TITLE" ] || TITLE="(untitled)"
+FROM="$(jq -r '.data.from // "?"' <<<"$ENVELOPE")"
+TO="$(jq -r '.data.to // .task.workflow_status // "?"' <<<"$ENVELOPE")"
+
+# Task titles come from someone else's Slack message. Unescaped, `<!channel>` in a title
+# pings the workspace from a bot nobody suspects, and `<url|text>` renders as a link.
+esc() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' | tr '\n' ' '; }
+
+LINK="$(jq -r '.url // empty' <<<"$REF_JSON")"
+WHERE="$([ -n "$LINK" ] && printf '<%s|the thread that asked>' "$LINK" || printf 'from Slack')"
+TEXT="$(printf '*%s* — %s → *%s*\n%s · task `%s`' \
+  "$(esc "$TITLE")" "$(esc "$FROM")" "$(esc "$TO")" "$WHERE" "$OCTOMUX_TASK_ID")"
+
+# Slack answers a bad channel or a missing scope with HTTP 200 and {"ok":false},
+# so `curl -f` never trips — check the body or a misconfigured channel is silent forever.
+RESP="$(curl -sS --max-time 10 -X POST https://slack.com/api/chat.postMessage \
+  -H "Authorization: Bearer $OCTOMUX_GATEWAY_SLACK_BOT_TOKEN" \
+  -d "channel=$CHANNEL" --data-urlencode "text=$TEXT")"
+jq -e '.ok' <<<"$RESP" >/dev/null || { echo "slack rejected: $(jq -r '.error // .' <<<"$RESP")" >&2; exit 1; }

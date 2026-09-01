@@ -26,6 +26,8 @@ export const slackWatcherWorkflow: WorkflowType = {
       digestUserId: string;
       lookbackMinutes: number;
       digestChannel: string;
+      workRepos?: string;
+      workChannel?: string;
     };
 
     // Fire-and-forget: runSlackWatcher blocks for the full headless agent run.
@@ -38,6 +40,8 @@ export const slackWatcherWorkflow: WorkflowType = {
       digestUserId: cfg.digestUserId,
       lookbackMinutes: cfg.lookbackMinutes,
       digestChannel: cfg.digestChannel,
+      workRepos: cfg.workRepos,
+      workChannel: cfg.workChannel,
       trigger: ctx.trigger,
       model: ctx.model,
       timeoutMs: ctx.timeoutMs,

@@ -2208,9 +2208,8 @@ describe('createUserTerminal', () => {
   });
 
   it('errors clearly when the harness CLI is missing at launch', async () => {
-    const { ensureHarnessBinary, _resetHarnessBinaryProbes } = await import(
-      './task-engine/launch.js'
-    );
+    const { ensureHarnessBinary, _resetHarnessBinaryProbes } =
+      await import('./task-engine/launch.js');
     _resetHarnessBinaryProbes();
     const exec = vi.fn().mockRejectedValue(new Error('exit 1'));
     const c = { kind: 'local', exec } as never;

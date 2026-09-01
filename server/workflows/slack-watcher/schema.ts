@@ -52,6 +52,24 @@ export const SLACK_WATCHER_CONFIG_SCHEMA = {
       description: 'Channel for the digest. Empty = the bot opens a DM with the owner.',
       default: '',
     },
+    // Prompt-enforced, not host-enforced: `POST /api/tasks` accepts any repo_path
+    // from any caller, so this bounds what the watcher is *told* to do, not what
+    // it *can* do. Treat it as scoping, never as a sandbox.
+    workRepos: {
+      type: 'string',
+      title: 'Work repo allowlist (prompt-enforced)',
+      description:
+        'Comma-separated absolute repo paths the watcher is told it may create draft tasks in. ' +
+        'Empty = never trigger work.',
+      default: '',
+    },
+    workChannel: {
+      type: 'string',
+      title: 'Work channel id',
+      description:
+        'Channel (bot workspace) announcing work the watcher triggered. Empty = never trigger work.',
+      default: '',
+    },
   },
   additionalProperties: false,
 };
@@ -76,6 +94,14 @@ export const SLACK_WATCHER_SCHEMA = {
           permalink: { type: 'string' },
           replyChannel: { type: 'string' },
           replyTs: { type: 'string' },
+          // Prompt step 3b has always asked for these two; without them here
+          // `additionalProperties: false` rejects the submit and the model retries,
+          // dropping fields of its own choosing — including taskId.
+          reviewRequested: { type: 'boolean' },
+          prUrl: { type: 'string' },
+          // Set once work was triggered for this thread; carried forward through
+          // `previousItems` so a later run reuses it instead of creating a second task.
+          taskId: { type: 'string' },
         },
         required: ['channel', 'from', 'about', 'urgency'],
         additionalProperties: false,

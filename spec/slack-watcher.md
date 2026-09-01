@@ -235,6 +235,67 @@ What v2 ships instead:
   caller. It becomes the send path if one-click ever returns — ideally re-pointed at an
   Ostium user-token app (badge-free) when app installs are approved there.
 
+## v3: trigger work from a thread
+
+The watcher stops at "here is what needs you". v3 lets it also _start_ the work for the
+narrow subset of items that are self-contained engineering asks, and reports on that work
+in a channel separate from the digest.
+
+Two new config fields, both defaulting to `''`; **work triggering is off unless both are
+set**, so every existing schedule row is unchanged behaviour:
+
+```
+workRepos    string — comma-separated absolute repo paths the watcher may create tasks in
+workChannel  string — channel id (bot workspace) for work-triggered announcements
+```
+
+New prompt step 3c, between the GitHub review escalation and composing the digest:
+
+1. Classify each kept item as agent-actionable or not — concrete, self-contained, inside
+   an allowlisted repo, startable from the thread alone. Bias hard toward not.
+2. `octomux create-task --draft --repo-path <allowlisted> …`. `--draft` means the task is
+   created and linked but idle until the owner presses start.
+3. `octomux task-ref-add <taskId> slack "<replyChannel>:<replyTs>" --url <permalink>` —
+   this is the link back to the triggering message, as a `task_external_refs` row.
+4. One `chat.postMessage` to `workChannel` per created task.
+5. `taskId` on the item in `submit_result`.
+
+Cap: 3 tasks per run.
+
+**`--draft`, the repo allowlist and the cap are all prompt-enforced — none of them is a
+host-side guard, and none of them is containment.** `POST /api/tasks` takes any
+`repo_path` from any caller and auto-starts unless `draft: true` is passed;
+`server/remote-auth.ts` exempts loopback, which is where the CLI calls from. The task's
+`initial_prompt` is somebody else's Slack message quoted verbatim, so the real control is
+the owner reading the draft before starting it — the config field bounds what the watcher
+is _told_ to do, not what it _can_ do. Both the schema title and this section say so on
+purpose; if that ever needs to be real, the check belongs in `createTaskHandler` behind a
+server-side setting, not in the prompt.
+
+**Dedup is two-layer, because the carry-forward half is lossy.** `taskId` rides on the
+item through `{{previousItems}}`, but `previousItemsJson` reads the newest run with
+`status = 'done'` — a run that dies before `submit_result` (currently the common case on
+this box: 22 consecutive `failed` runs as of 2026-09-01) records no `taskId` at all and
+the next fire would recreate the same tasks. So step 3c also checks
+`octomux task list --ref "slack:<channel>:<ts>"` before creating: a non-empty result means
+a task already claimed that thread. That flag is new — `taskListInputSchema.ref` →
+`findTaskIdsByExternalRef()`. The table's PK is `(task_id, integration)`, so the DB itself
+still permits N tasks per ref; the query is the guard, not a constraint.
+
+**Progress updates are a hook, not the watcher.** The watcher announces the trigger and
+then forgets. Subsequent board moves are posted by a global
+`workflow_status_changed` hook script that fires for every task, checks for a `slack`
+external ref, and posts to the work channel — so any task linked to a Slack thread gets
+lifecycle updates, whether the watcher created it or the owner did. Zero server code:
+`octomux hooks-install slack-work-updates`, then set `channel` in the config JSON beside
+the script.
+
+Shell hooks get the **raw** envelope — `external_refs` is hydrated only for integration
+providers (`fireHook` vs `fireIntegrationProviders` in `server/hook-dispatcher.ts`) — so
+the script reads the ref back over the loopback API. `templates/hooks/jira-status` gets
+this wrong (`.external_refs[]` and `.to_status` at the envelope's top level, neither of
+which exists) and has therefore never fired; unrelated to this work, but the same trap.
+
 Verified during preflight: headless sessions CAN send via the connector (test message
 landed cross-workspace from a headless run), and Block Kit buttons render fine — the
 drop was a product choice, not a technical one. The gateway interactive listener and

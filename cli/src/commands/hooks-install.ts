@@ -37,7 +37,7 @@ export function registerHooksInstall(program: Command): void {
     .command('hooks-install <template>')
     .description(
       'Install a hook template into ~/.octomux/hooks/<event>.d/. ' +
-        'Available templates: jira-status',
+        'Available templates: jira-status, slack-work-updates',
     )
     .option('-d, --hooks-dir <dir>', 'override hooks base directory (default: ~/.octomux/hooks)')
     .action(async (template: string, opts: { hooksDir?: string }) => {
