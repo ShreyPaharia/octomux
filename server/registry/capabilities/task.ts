@@ -143,6 +143,7 @@ import {
   hardDeleteTask,
   countAgentsForTask,
   updateTaskFields,
+  findTaskIdsByExternalRef,
 } from '../../repositories/index.js';
 import { getManagedTask } from '../../repositories/orchestrator.js';
 import { getArtifactSummary, getArtifactActivity } from '../../artifact.js';
@@ -205,12 +206,23 @@ function leanTaskSummary(t: Task) {
 }
 
 function listTasksHandler(input: z.infer<typeof taskListInputSchema>) {
-  const tasks = listTasks({
+  let tasks = listTasks({
     trash: input.trash === 'true',
     repoPath: input.repo_path,
     includeAutoReview: false,
     includeAutomated: input.includeAutomated === 'true',
   });
+
+  if (input.ref !== undefined) {
+    const sep = input.ref.indexOf(':');
+    if (sep <= 0 || sep === input.ref.length - 1) {
+      throw badRequest("ref must be '<integration>:<ref>'");
+    }
+    const ids = new Set(
+      findTaskIdsByExternalRef(input.ref.slice(0, sep), input.ref.slice(sep + 1)),
+    );
+    tasks = tasks.filter((t) => ids.has(t.id));
+  }
 
   if (tasks.length === 0) return [];
 

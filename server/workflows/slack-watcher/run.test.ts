@@ -15,7 +15,7 @@ const { SLACK_WATCHER_SCHEMA } = await import('./schema.js');
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
 const SKILL_BODY =
-  'Watch {{slackUserId}} back {{lookbackMinutes}}m, via {{digestTarget}} tg:{{telegramChatId}} DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}.';
+  'Watch {{slackUserId}} back {{lookbackMinutes}}m, via {{digestTarget}} tg:{{telegramChatId}} DM {{digestUserId}} at "{{digestChannel}}", skip {{previousItems}}, work in [{{workRepos}}] -> "{{workChannel}}".';
 
 /** Insert a schedule row with a prompt — schedule.prompt is the self-contained
  * source `runSlackWatcher` now reads (spec/schedule-kinds-as-presets.md §1),
@@ -47,6 +47,8 @@ describe('runSlackWatcher', () => {
       digestUserId: 'U0PERSONAL',
       lookbackMinutes: 40,
       digestChannel: '',
+      workRepos: '/repos/bedrock',
+      workChannel: 'C0WORK',
     });
 
     expect(result).toEqual({ summary: 'ok' });
@@ -55,9 +57,29 @@ describe('runSlackWatcher', () => {
     expect(call.scheduleId).toBe('sched-1');
     expect(call.workspaceDir).toBe('/repos/octomux');
     expect(call.input).toBe(
-      'Watch U01ABCDEF back 40m, via slack tg: DM U0PERSONAL at "", skip [].',
+      'Watch U01ABCDEF back 40m, via slack tg: DM U0PERSONAL at "", skip [], work in [/repos/bedrock] -> "C0WORK".',
     );
     expect(call.outputSchema).toBe(SLACK_WATCHER_SCHEMA);
+  });
+
+  // The live schedule row predates these fields, so its config_json has neither.
+  // `applyConfigDefaults` only runs on write — the `?? ''` in run.ts is the only
+  // thing stopping the prompt from reading "ON when undefined is non-empty".
+  it('renders work triggering off when a legacy config omits the fields', async () => {
+    insertScheduleWithPrompt('sched-legacy', SKILL_BODY);
+
+    await runSlackWatcher({
+      repoPath: '/repos/octomux',
+      scheduleId: 'sched-legacy',
+      slackUserId: 'U01ABCDEF',
+      digestTarget: 'slack',
+      telegramChatId: '',
+      digestUserId: 'U0PERSONAL',
+      lookbackMinutes: 40,
+      digestChannel: '',
+    });
+
+    expect(mockRunSessionVertical.mock.calls[0][0].input).toContain('work in [] -> "".');
   });
 
   it('throws when the schedule has no prompt', async () => {

@@ -1,6 +1,17 @@
 import { describe, it, expect } from '../../bun-test.js';
 import Ajv from 'ajv';
 import { SLACK_WATCHER_CONFIG_SCHEMA, SLACK_WATCHER_SCHEMA } from './schema.js';
+import kindPreset from '../../../kinds/slack-watcher.json';
+
+// The preset JSON is the copy that actually runs — presets.ts reads it to build the
+// /schedules create form, and the row it writes is what executeScheduleRun replays.
+// Everything below asserts the TS copy, so without this the two can drift silently.
+describe('kinds/slack-watcher.json', () => {
+  it('carries the same config and output schemas as schema.ts', () => {
+    expect(kindPreset.config).toEqual(SLACK_WATCHER_CONFIG_SCHEMA);
+    expect(kindPreset.output).toEqual(SLACK_WATCHER_SCHEMA);
+  });
+});
 
 describe('SLACK_WATCHER_SCHEMA', () => {
   it('requires the run-result envelope alongside kind-specific fields', () => {
@@ -29,6 +40,9 @@ describe('SLACK_WATCHER_SCHEMA', () => {
             permalink: 'https://slack.com/archives/C1/p1',
             replyChannel: 'D0ASZE1MVJS',
             replyTs: '1784893312.104219',
+            reviewRequested: true,
+            prUrl: 'https://github.com/o/r/pull/1',
+            taskId: 'kQ2f7bXn91aZ',
           },
         ],
       }),
@@ -64,6 +78,11 @@ describe('SLACK_WATCHER_SCHEMA', () => {
     expect(cfg.digestUserId).toBe('');
     expect(cfg.lookbackMinutes).toBe(40);
     expect(cfg.digestChannel).toBe('');
+    // Both empty = work triggering off. Note this only covers rows written since
+    // these fields existed — `applyConfigDefaults` runs on write, never on read, so
+    // the live row still has neither key and run.ts's `?? ''` is what saves it.
+    expect(cfg.workRepos).toBe('');
+    expect(cfg.workChannel).toBe('');
   });
 
   it('rejects an unknown digestTarget and accepts self-dm', () => {

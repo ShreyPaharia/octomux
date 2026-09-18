@@ -1,0 +1,4 @@
+{
+  "event": "workflow_status_changed",
+  "files": ["slack-work-updates", "slack-work-updates.config.json"]
+}

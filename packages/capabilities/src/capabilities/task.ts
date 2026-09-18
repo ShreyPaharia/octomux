@@ -43,6 +43,14 @@ export const taskListInputSchema = z.object({
   // z.boolean() (which a querystring can never satisfy — see mergeInput).
   trash: z.string().optional().describe("'true' to list trashed tasks"),
   includeAutomated: z.string().optional().describe("'true' to include automated review tasks"),
+  ref: z
+    .string()
+    .optional()
+    .describe(
+      "Only tasks carrying this external ref, as '<integration>:<ref>' — split on the first " +
+        "colon, so the ref itself may contain colons (e.g. 'slack:C123:1784893312.104219'). " +
+        'An empty result means nothing has claimed that ref yet.',
+    ),
   include: z
     .string()
     .optional()

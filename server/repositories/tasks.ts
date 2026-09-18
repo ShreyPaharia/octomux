@@ -1183,6 +1183,20 @@ export function getTaskExternalRefs(taskId: string): TaskExternalRef[] {
   return rows.map(parseRefRow);
 }
 
+/**
+ * Task ids carrying a given external ref. The table's PK is (task_id, integration),
+ * so nothing stops N tasks sharing one ref — this is the lookup that lets a caller
+ * check "did I already make a task for this thing" before making another.
+ */
+export function findTaskIdsByExternalRef(integration: string, ref: string): string[] {
+  const rows = getDb()
+    .prepare(
+      'SELECT task_id FROM task_external_refs WHERE integration = ? AND ref = ? ORDER BY created_at ASC',
+    )
+    .all(integration, ref) as Array<{ task_id: string }>;
+  return rows.map((r) => r.task_id);
+}
+
 /** Get a single external ref by task_id + integration. */
 export function getTaskExternalRef(
   taskId: string,

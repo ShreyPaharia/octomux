@@ -35,6 +35,36 @@ async function createTestTask(): Promise<string> {
   return 'ref-task-01';
 }
 
+describe('GET /api/tasks?ref=', () => {
+  beforeEach(() => {
+    createTestDb();
+  });
+
+  it('filters to the tasks carrying that ref, splitting on the FIRST colon', async () => {
+    const app = createApp();
+    const db = getDb();
+    insertTask(db, { id: 'linked-01', title: 'Linked', description: 'd', worktree: null });
+    insertTask(db, { id: 'other-01', title: 'Other', description: 'd', worktree: null });
+
+    // A Slack ref is `<channel>:<ts>` — it contains a colon of its own, so a naive
+    // split would look up integration 'slack' / ref 'C123' and find nothing.
+    await request(app)
+      .post('/api/tasks/linked-01/refs')
+      .send({ integration: 'slack', ref: 'C123:1784893312.104219' })
+      .expect(201);
+
+    const hit = await request(app).get('/api/tasks?ref=slack:C123:1784893312.104219').expect(200);
+    expect(hit.body.map((t: { id: string }) => t.id)).toEqual(['linked-01']);
+
+    const miss = await request(app).get('/api/tasks?ref=slack:C123:0000000000.000000').expect(200);
+    expect(miss.body).toEqual([]);
+  });
+
+  it('rejects a ref with no integration prefix', async () => {
+    await request(createApp()).get('/api/tasks?ref=no-colon').expect(400);
+  });
+});
+
 describe('POST /api/tasks/:id/refs metadata', () => {
   beforeEach(() => {
     createTestDb();
